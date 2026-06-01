@@ -3,28 +3,68 @@ set -euo pipefail
 
 REPO="${VAULT_BUILDER_REPO:-cutehackers/vault-builder}"
 REF="${VAULT_BUILDER_REF:-main}"
-TARGET_DIR="${1:-${VAULT_NAME:-llm-wiki}}"
 VERIFY_MODE="${VAULT_BOOTSTRAP_VERIFY:-quick}"
+TARGET_DIR=""
+WITH_STENC="${VAULT_BOOTSTRAP_WITH_STENC:-0}"
 
 usage() {
   cat <<'EOF'
 Usage:
   curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash -s -- ~/my-llm-wiki
+  curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash -s -- ~/my-vault
+  curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash -s -- --with-stenc ~/my-vault
 
 Environment:
-  VAULT_NAME=llm-wiki              Default target directory when no argument is passed.
+  VAULT_NAME=vault                 Default target directory when no argument is passed.
   VAULT_BUILDER_REPO=owner/repo    Bootstrap repository. Defaults to cutehackers/vault-builder.
   VAULT_BUILDER_REF=main           Git ref to download. Defaults to main.
   VAULT_BUILDER_ARCHIVE_URL=url    Override the downloaded tarball URL.
+  VAULT_BOOTSTRAP_WITH_STENC=1     Include optional Stenc docs and helper tools.
   VAULT_BOOTSTRAP_VERIFY=quick     quick runs lint and health. full also runs scripts/release_gate.sh.
 EOF
 }
 
-if [[ "${TARGET_DIR}" == "-h" || "${TARGET_DIR}" == "--help" ]]; then
-  usage
-  exit 0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-stenc)
+      WITH_STENC=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "${TARGET_DIR}" ]]; then
+        echo "Only one target directory may be provided." >&2
+        usage >&2
+        exit 1
+      fi
+      TARGET_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ $# -gt 0 ]]; then
+  if [[ -n "${TARGET_DIR}" || $# -gt 1 ]]; then
+    echo "Only one target directory may be provided." >&2
+    usage >&2
+    exit 1
+  fi
+  TARGET_DIR="$1"
 fi
+
+TARGET_DIR="${TARGET_DIR:-${VAULT_NAME:-vault}}"
 
 need_command() {
   local command_name="$1"
@@ -73,10 +113,27 @@ if [[ -z "${template_dir}" || ! -f "${template_dir}/init-vault.sh" ]]; then
   exit 1
 fi
 
-bash "${template_dir}/init-vault.sh" "${TARGET_DIR}"
+init_args=()
+case "${WITH_STENC}" in
+  1|true|TRUE|yes|YES)
+    WITH_STENC=1
+    init_args+=(--with-stenc)
+    ;;
+  0|false|FALSE|no|NO)
+    WITH_STENC=0
+    ;;
+  *)
+    echo "Unknown VAULT_BOOTSTRAP_WITH_STENC value: ${WITH_STENC}" >&2
+    echo "Use 1/true/yes or 0/false/no." >&2
+    exit 1
+    ;;
+esac
+init_args+=("${TARGET_DIR}")
+
+bash "${template_dir}/init-vault.sh" "${init_args[@]}"
 
 (
-  cd "${TARGET_DIR}"
+  cd -- "${TARGET_DIR}"
   echo
   echo "Running quick validation..."
   "${PYTHON_BIN}" tools/wiki/cli.py lint --report
@@ -85,7 +142,21 @@ bash "${template_dir}/init-vault.sh" "${TARGET_DIR}"
   if [[ "${VERIFY_MODE}" == "full" ]]; then
     echo
     echo "Running full release gate..."
-    PYTHON="${PYTHON_BIN}" scripts/release_gate.sh
+    release_gate_env=(
+      env
+      -u VAULT_BOOTSTRAP_VERIFY
+      -u VAULT_BOOTSTRAP_WITH_STENC
+      -u VAULT_BUILDER_ARCHIVE_URL
+      -u VAULT_BUILDER_REPO
+      -u VAULT_BUILDER_REF
+      -u VAULT_NAME
+      "PYTHON=${PYTHON_BIN}"
+    )
+    if [[ "${WITH_STENC}" -eq 1 ]]; then
+      release_gate_env+=("WIKI_ENABLE_STENC=1")
+    fi
+    release_gate_env+=(scripts/release_gate.sh)
+    "${release_gate_env[@]}"
   elif [[ "${VERIFY_MODE}" != "quick" ]]; then
     echo "Unknown VAULT_BOOTSTRAP_VERIFY value: ${VERIFY_MODE}" >&2
     echo "Use quick or full." >&2

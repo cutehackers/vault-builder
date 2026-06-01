@@ -694,7 +694,7 @@
             "title": "Validate and render Stenc docs",
             "status": "done",
             "instruction": "Validate both Stenc docs, regenerate pages, and verify rendered pages exist.",
-            "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json && node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json && node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc && node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+            "command": "node tools/stenc/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json && node tools/stenc/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json && node tools/stenc/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc && node tools/stenc/check-rendered-pages.js docs/stenc",
             "expected": "Both JSON files are valid and rendered pages are present.",
             "codeBlocks": []
           },
@@ -756,19 +756,19 @@
         "purpose": "Verify human-friendly health facade."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+        "command": "node tools/stenc/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
         "purpose": "Validate the Stenc spec JSON."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
+        "command": "node tools/stenc/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
         "purpose": "Validate the Stenc plan JSON."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc",
+        "command": "node tools/stenc/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc",
         "purpose": "Regenerate rendered Stenc pages."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "command": "node tools/stenc/check-rendered-pages.js docs/stenc",
         "purpose": "Confirm rendered pages exist for all Stenc JSON docs."
       }
     ],

@@ -363,11 +363,11 @@
     ],
     "validation": [
       {
-        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
+        "command": "node tools/stenc/validate-stenc-doc.js docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
         "purpose": "Validate the Stenc spec JSON source."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "command": "node tools/stenc/check-rendered-pages.js docs/stenc",
         "purpose": "Confirm rendered pages exist for all Stenc JSON documents."
       },
       {

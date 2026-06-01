@@ -94,6 +94,17 @@ if issues:
 PY
 }
 
+stenc_checks_enabled() {
+  case "${WIKI_ENABLE_STENC:-0}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 git_worktree=0
 tracked_diff_before=""
 if is_vault_git_worktree; then
@@ -118,7 +129,12 @@ run "$PYTHON_BIN tools/wiki/cli.py maps build --check --report" \
 run "$PYTHON_BIN tools/wiki/cli.py metrics --check --report" \
   "$PYTHON_BIN" tools/wiki/cli.py metrics --check --report
 
-if [ -d "docs/stenc/content" ]; then
+if stenc_checks_enabled; then
+  if [ ! -d "docs/stenc/content" ]; then
+    printf '[release-gate] Stenc checks enabled, but docs/stenc/content does not exist.\n' >&2
+    exit 1
+  fi
+
   stenc_validate="${STENC_VALIDATE:-tools/stenc/validate-stenc-doc.js}"
   stenc_setup="${STENC_SETUP:-tools/stenc/setup-project.js}"
   stenc_check="${STENC_CHECK_RENDERED:-tools/stenc/check-rendered-pages.js}"
@@ -139,6 +155,8 @@ if [ -d "docs/stenc/content" ]; then
     node "$stenc_setup" --project-root "$gate_root" --docs-dir docs/stenc
   run "node check-rendered-pages.js docs/stenc" \
     node "$stenc_check" docs/stenc
+else
+  printf '\n[release-gate] Stenc checks skipped. Set WIKI_ENABLE_STENC=1 to validate optional Stenc docs.\n'
 fi
 
 cd "$ROOT"

@@ -1130,7 +1130,7 @@ Check for:
 - Generated navigation maps that are stale relative to current wiki state.
 - Report paths or generated query-capture draft paths that escape `scratch/reports/` or `scratch/drafts/`.
 
-The full release gate also runs tests, health, `maps build --check`, `metrics --check`, Stenc validation/render checks, and `git diff --check` in a temporary repo copy.
+The full release gate also runs tests, health, `maps build --check`, `metrics --check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` in a temporary repo copy.
 
 ### 9.2 Lint Report
 

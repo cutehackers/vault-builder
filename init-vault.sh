@@ -3,23 +3,64 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="${1:-.}"
+TARGET_DIR="."
+WITH_STENC=0
 
 usage() {
   cat <<'EOF'
-Usage: ./init-vault.sh [target-dir]
+Usage: ./init-vault.sh [--with-stenc] [target-dir]
 
 Create a ready-to-use LLM Wiki vault.
 
+Options:
+  --with-stenc  Include optional Stenc fixed-format spec/plan docs and tools.
+  -h, --help    Show this help.
+
 Examples:
   ./init-vault.sh
-  ./init-vault.sh ~/wiki/my-llm-wiki
+  ./init-vault.sh --with-stenc
+  ./init-vault.sh ~/wiki/my-vault
 EOF
 }
 
-if [[ "${TARGET_DIR}" == "-h" || "${TARGET_DIR}" == "--help" ]]; then
-  usage
-  exit 0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-stenc)
+      WITH_STENC=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [[ "${TARGET_DIR}" != "." ]]; then
+        echo "Only one target directory may be provided." >&2
+        usage >&2
+        exit 1
+      fi
+      TARGET_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ $# -gt 0 ]]; then
+  if [[ "${TARGET_DIR}" != "." || $# -gt 1 ]]; then
+    echo "Only one target directory may be provided." >&2
+    usage >&2
+    exit 1
+  fi
+  TARGET_DIR="$1"
 fi
 
 if [[ "${TARGET_DIR}" != /* ]]; then
@@ -65,6 +106,25 @@ copy_tree() {
   )
 }
 
+require_stenc_bundle() {
+  local missing=0
+  for required_path in \
+    "docs/stenc/content" \
+    "tools/stenc/validate-stenc-doc.js" \
+    "tools/stenc/setup-project.js" \
+    "tools/stenc/check-rendered-pages.js"
+  do
+    if [[ ! -e "${SCRIPT_DIR}/${required_path}" ]]; then
+      echo "Optional Stenc assets are not available in this vault template: ${required_path}" >&2
+      missing=1
+    fi
+  done
+  if [[ "${missing}" -ne 0 ]]; then
+    echo "Create the vault without --with-stenc, or run --with-stenc from a template that includes Stenc." >&2
+    exit 1
+  fi
+}
+
 mkdir -p "${TARGET_DIR}/raw/sources" "${TARGET_DIR}/raw/assets" "${TARGET_DIR}/raw/imports"
 mkdir -p "${TARGET_DIR}/scratch/drafts" "${TARGET_DIR}/scratch/reports" "${TARGET_DIR}/scratch/review"
 mkdir -p "${TARGET_DIR}/docs"
@@ -73,21 +133,26 @@ copy_file ".gitignore"
 copy_file "init-vault.sh"
 copy_file "AGENTS.md"
 copy_file "README.md"
+copy_file "README-kr.md"
 copy_file "docs/LLM-WIKI.md"
 copy_file "docs/usage.md"
 copy_file "docs/architecture.md"
 copy_tree ".github"
 copy_tree "agents"
 copy_tree "docs/agent"
-copy_file "docs/stenc/.gitignore"
-copy_tree "docs/stenc/content"
 copy_tree "scripts"
-copy_tree "tools/stenc"
 copy_tree "tools/wiki"
 copy_tree "tests"
 copy_tree "wiki"
 copy_tree "scratch/drafts"
 copy_tree "scratch/review"
+
+if [[ "${WITH_STENC}" -eq 1 ]]; then
+  require_stenc_bundle
+  copy_file "docs/stenc/.gitignore"
+  copy_tree "docs/stenc/content"
+  copy_tree "tools/stenc"
+fi
 
 touch "${TARGET_DIR}/raw/sources/.gitkeep"
 touch "${TARGET_DIR}/raw/assets/.gitkeep"
@@ -99,6 +164,11 @@ chmod +x "${TARGET_DIR}/scripts/bootstrap.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/scripts/release_gate.sh" 2>/dev/null || true
 
 echo "LLM Wiki Vault initialized: ${TARGET_DIR}"
+if [[ "${WITH_STENC}" -eq 1 ]]; then
+  echo "Optional Stenc docs and tools included."
+else
+  echo "Optional Stenc docs and tools skipped. Re-run with --with-stenc to include them."
+fi
 echo "Next:"
 echo "  cd ${TARGET_DIR}"
 echo "  python3 tools/wiki/cli.py lint --report"

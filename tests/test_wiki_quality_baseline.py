@@ -171,12 +171,11 @@ class WikiQualityBaselineTest(unittest.TestCase):
             "$PYTHON_BIN tools/wiki/cli.py health",
             "$PYTHON_BIN tools/wiki/cli.py maps build --check --report",
             "$PYTHON_BIN tools/wiki/cli.py metrics --check --report",
+            "WIKI_ENABLE_STENC",
+            "Stenc checks skipped",
             "validate-stenc-doc.js",
             "setup-project.js",
             "check-rendered-pages.js",
-            "tools/stenc/validate-stenc-doc.js",
-            "tools/stenc/setup-project.js",
-            "tools/stenc/check-rendered-pages.js",
             "mktemp -d",
             "rsync -a",
             'git -C "$ROOT" rev-parse --show-toplevel',
@@ -189,12 +188,6 @@ class WikiQualityBaselineTest(unittest.TestCase):
             self.assertIn(token, text)
 
         self.assertNotIn("$HOME/.codex/skills/stenc", text)
-        for script in [
-            ROOT / "tools" / "stenc" / "validate-stenc-doc.js",
-            ROOT / "tools" / "stenc" / "setup-project.js",
-            ROOT / "tools" / "stenc" / "check-rendered-pages.js",
-        ]:
-            self.assertTrue(script.exists(), f"{script.relative_to(ROOT)} must exist")
         self.assertIn("scripts/release_gate.sh", (ROOT / ".github" / "workflows" / "release-gate.yml").read_text())
 
         for doc in [
@@ -202,7 +195,6 @@ class WikiQualityBaselineTest(unittest.TestCase):
             "AGENTS.md",
             "docs/LLM-WIKI.md",
             "docs/usage.md",
-            "tools/wiki/README.md",
         ]:
             self.assertIn("scripts/release_gate.sh", (ROOT / doc).read_text())
 

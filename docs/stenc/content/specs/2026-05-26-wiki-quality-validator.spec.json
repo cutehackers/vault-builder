@@ -314,11 +314,11 @@
     ],
     "validation": [
       {
-        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-26-wiki-quality-validator.spec.json",
+        "command": "node tools/stenc/validate-stenc-doc.js docs/stenc/content/specs/2026-05-26-wiki-quality-validator.spec.json",
         "purpose": "Validate this Stenc spec source."
       },
       {
-        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "command": "node tools/stenc/check-rendered-pages.js docs/stenc",
         "purpose": "Confirm rendered Stenc pages exist for JSON sources."
       }
     ],

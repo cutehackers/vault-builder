@@ -73,6 +73,18 @@ def _minimal_vault(root: Path) -> None:
     )
 
 
+def _has_stenc_bundle(root: Path) -> bool:
+    return all(
+        path.exists()
+        for path in [
+            root / "docs" / "stenc" / "content",
+            root / "tools" / "stenc" / "validate-stenc-doc.js",
+            root / "tools" / "stenc" / "setup-project.js",
+            root / "tools" / "stenc" / "check-rendered-pages.js",
+        ]
+    )
+
+
 def _frontmatter(title: str, page_type: str = "concept") -> dict:
     return {
         "title": title,
@@ -1619,8 +1631,21 @@ class WikiToolCliTest(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
+            stenc_optional_test_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "tests.test_wiki_tools.WikiToolCliTest.test_repo_local_stenc_setup_renders_pages_from_content_only",
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
             expected_files = [
                 target / "AGENTS.md",
+                target / "README-kr.md",
                 target / ".github" / "workflows" / "release-gate.yml",
                 target / "scripts" / "bootstrap.sh",
                 target / "scripts" / "release_gate.sh",
@@ -1630,9 +1655,6 @@ class WikiToolCliTest(unittest.TestCase):
                 target / "agents" / "skills" / "wiki-ingest" / "SKILL.md",
                 target / "agents" / "skills" / "wiki-update" / "SKILL.md",
                 target / "agents" / "skills" / "wiki-query" / "SKILL.md",
-                target / "tools" / "stenc" / "validate-stenc-doc.js",
-                target / "tools" / "stenc" / "setup-project.js",
-                target / "tools" / "stenc" / "check-rendered-pages.js",
                 target / "tools" / "wiki" / "templates" / "draft-upsert-page.json",
                 target / "tools" / "wiki" / "templates" / "draft-batch-upsert-pages.json",
                 target / "tools" / "wiki" / "mcp_server.py",
@@ -1642,6 +1664,8 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("LLM Wiki Vault initialized", init_result.stdout)
             for path in expected_files:
                 self.assertTrue(path.exists(), str(path))
+            self.assertFalse((target / "docs" / "stenc").exists())
+            self.assertFalse((target / "tools" / "stenc").exists())
             self.assertTrue((target / "scripts" / "bootstrap.sh").stat().st_mode & 0o111)
             self.assertTrue((target / "scripts" / "release_gate.sh").stat().st_mode & 0o111)
             self.assertEqual(0, lint_result.returncode, lint_result.stdout + lint_result.stderr)
@@ -1649,6 +1673,53 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, mcp_result.returncode, mcp_result.stdout + mcp_result.stderr)
             self.assertIn("wiki_publish_draft", mcp_result.stdout)
             self.assertIn("wiki_publish_batch", mcp_result.stdout)
+            self.assertEqual(0, stenc_optional_test_result.returncode, stenc_optional_test_result.stdout + stenc_optional_test_result.stderr)
+
+    def test_init_vault_can_include_stenc_when_requested(self):
+        root = Path(__file__).resolve().parents[1]
+        if not _has_stenc_bundle(root):
+            self.skipTest("Optional Stenc bundle is not installed in this vault template")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", "--with-stenc", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+            self.assertTrue((target / "docs" / "stenc" / "content").exists())
+            self.assertTrue((target / "tools" / "stenc" / "validate-stenc-doc.js").exists())
+            self.assertTrue((target / "tools" / "stenc" / "setup-project.js").exists())
+            self.assertTrue((target / "tools" / "stenc" / "check-rendered-pages.js").exists())
+
+    def test_init_vault_with_stenc_fails_when_bundle_is_unavailable(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            template = tmp / "template-without-stenc"
+            target = tmp / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(template)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+
+            opt_in_result = subprocess.run(
+                ["./init-vault.sh", "--with-stenc", str(target)],
+                cwd=template,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(0, opt_in_result.returncode, opt_in_result.stdout + opt_in_result.stderr)
+            self.assertIn("Optional Stenc assets are not available", opt_in_result.stderr)
 
     def test_bootstrap_script_is_valid_bash(self):
         root = Path(__file__).resolve().parents[1]
@@ -1698,7 +1769,139 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
             self.assertTrue((target / "tools" / "wiki" / "cli.py").exists())
             self.assertTrue((target / "scripts" / "bootstrap.sh").exists())
+            self.assertFalse((target / "docs" / "stenc").exists())
+            self.assertFalse((target / "tools" / "stenc").exists())
             self.assertIn("Ready:", bootstrap_result.stdout)
+
+    def test_bootstrap_script_uses_vault_as_default_target_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_template = tmp / "fake-builder"
+            fake_template.mkdir()
+            archive_path = tmp / "fake-builder.tar.gz"
+            (fake_template / "init-vault.sh").write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+target="${@: -1}"
+mkdir -p "${target}/tools/wiki"
+cat > "${target}/tools/wiki/cli.py" <<'PY'
+import sys
+raise SystemExit(0)
+PY
+"""
+            )
+            tar_result = subprocess.run(
+                ["tar", "-czf", str(archive_path), "-C", str(tmp), fake_template.name],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env = os.environ.copy()
+            env["VAULT_BUILDER_ARCHIVE_URL"] = archive_path.as_uri()
+            env.pop("VAULT_NAME", None)
+            bootstrap_result = subprocess.run(
+                ["bash", str(root / "scripts" / "bootstrap.sh")],
+                cwd=tmp,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
+            self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
+            self.assertTrue((tmp / "vault" / "tools" / "wiki" / "cli.py").exists())
+            self.assertFalse((tmp / "llm-wiki").exists())
+            self.assertIn("cd vault", bootstrap_result.stdout)
+
+    def test_bootstrap_script_can_include_stenc_from_archive_url(self):
+        root = Path(__file__).resolve().parents[1]
+        if not _has_stenc_bundle(root):
+            self.skipTest("Optional Stenc bundle is not installed in this vault template")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            archive_path = tmp / "vault-builder.tar.gz"
+            target = tmp / "llm-wiki"
+            tar_result = subprocess.run(
+                [
+                    "tar",
+                    "-czf",
+                    str(archive_path),
+                    "--exclude",
+                    ".git",
+                    "-C",
+                    str(root.parent),
+                    root.name,
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env = os.environ.copy()
+            env["VAULT_BUILDER_ARCHIVE_URL"] = archive_path.as_uri()
+            bootstrap_result = subprocess.run(
+                ["bash", "scripts/bootstrap.sh", "--with-stenc", str(target)],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
+            self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
+            self.assertTrue((target / "docs" / "stenc" / "content").exists())
+            self.assertTrue((target / "tools" / "stenc" / "validate-stenc-doc.js").exists())
+
+    def test_bootstrap_full_verify_does_not_leak_bootstrap_env_to_release_gate(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_template = tmp / "fake-builder"
+            fake_template.mkdir()
+            target = tmp / "llm-wiki"
+            archive_path = tmp / "fake-builder.tar.gz"
+            (fake_template / "init-vault.sh").write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+target="${@: -1}"
+mkdir -p "${target}/scripts" "${target}/tools/wiki"
+cat > "${target}/tools/wiki/cli.py" <<'PY'
+import sys
+raise SystemExit(0)
+PY
+cat > "${target}/scripts/release_gate.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+env | grep '^VAULT_BOOTSTRAP_' > ../release-gate-env.txt || true
+env | grep '^VAULT_BUILDER_' >> ../release-gate-env.txt || true
+SH
+chmod +x "${target}/scripts/release_gate.sh"
+"""
+            )
+            tar_result = subprocess.run(
+                ["tar", "-czf", str(archive_path), "-C", str(tmp), fake_template.name],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env = os.environ.copy()
+            env["VAULT_BUILDER_ARCHIVE_URL"] = archive_path.as_uri()
+            env["VAULT_BOOTSTRAP_VERIFY"] = "full"
+            env["VAULT_BOOTSTRAP_WITH_STENC"] = "0"
+            bootstrap_result = subprocess.run(
+                ["bash", "scripts/bootstrap.sh", str(target)],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
+            self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
+            self.assertEqual("", (tmp / "release-gate-env.txt").read_text())
 
     def test_generated_release_gate_ignores_parent_git_worktree(self):
         root = Path(__file__).resolve().parents[1]
@@ -1724,9 +1927,12 @@ class WikiToolCliTest(unittest.TestCase):
             )
             (target / "tests" / "test_wiki_quality_baseline.py").write_text(minimal_test)
             (target / "tests" / "test_wiki_tools.py").write_text(minimal_test)
+            default_gate_env = os.environ.copy()
+            default_gate_env.pop("WIKI_ENABLE_STENC", None)
             gate_result = subprocess.run(
                 ["scripts/release_gate.sh"],
                 cwd=target,
+                env=default_gate_env,
                 text=True,
                 capture_output=True,
                 check=False,
@@ -1736,6 +1942,41 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, gate_result.returncode, gate_result.stdout + gate_result.stderr)
             self.assertIn("No Git worktree detected", gate_result.stdout)
             self.assertNotIn("outside.txt", gate_result.stderr)
+
+    def test_release_gate_does_not_require_stenc_by_default(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+
+            minimal_test = (
+                "import unittest\n\n"
+                "class MinimalReleaseGateTest(unittest.TestCase):\n"
+                "    def test_minimal(self):\n"
+                "        self.assertTrue(True)\n"
+            )
+            (target / "tests" / "test_wiki_quality_baseline.py").write_text(minimal_test)
+            (target / "tests" / "test_wiki_tools.py").write_text(minimal_test)
+            default_gate_env = os.environ.copy()
+            default_gate_env.pop("WIKI_ENABLE_STENC", None)
+            gate_result = subprocess.run(
+                ["scripts/release_gate.sh"],
+                cwd=target,
+                env=default_gate_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, gate_result.returncode, gate_result.stdout + gate_result.stderr)
+            self.assertIn("Stenc checks skipped", gate_result.stdout)
 
     def test_ingest_source_cli_registers_raw_source(self):
         root = Path(__file__).resolve().parents[1]
@@ -2851,6 +3092,15 @@ class WikiToolCliTest(unittest.TestCase):
 
     def test_repo_local_stenc_setup_renders_pages_from_content_only(self):
         root = Path(__file__).resolve().parents[1]
+        stenc_paths = [
+            root / "docs" / "stenc" / "content",
+            root / "tools" / "stenc" / "setup-project.js",
+            root / "tools" / "stenc" / "check-rendered-pages.js",
+        ]
+        missing = [str(path.relative_to(root)) for path in stenc_paths if not path.exists()]
+        if missing:
+            self.skipTest(f"Optional Stenc docs/tools not installed: {', '.join(missing)}")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_root = Path(tmpdir)
             docs_root = temp_root / "docs" / "stenc"

@@ -126,3 +126,21 @@ quality:
 
 - Updated [[overview]] with scratch-confined artifacts and CI release gate status.
 - Recorded final hardening after subagent review of MCP, metrics policy, release packaging, and path boundaries.
+
+## [2026-06-01] schema-change | Make Stenc Optional In Builder
+
+- Changed default vault-builder bootstrap and `init-vault.sh` paths so Stenc docs and tools are excluded unless `--with-stenc` or `VAULT_BOOTSTRAP_WITH_STENC=1` is requested.
+- Changed no-argument bootstrap default target from `llm-wiki` to `vault` and aligned quick-start examples with the generated folder name.
+- Changed release gate behavior so Stenc validation/render checks run only when `WIKI_ENABLE_STENC=1`.
+- Rewrote `tools/wiki/README.md` as a concise skill-first user guide and added `tools/wiki/README-kr.md`.
+- Replaced root `README.md` with the concise skill-first guide and added root `README-kr.md`.
+- Restored the one-line GitHub raw bootstrap install command in root README files, targeting `cutehackers/vault-builder`.
+- Added copy-ready example prompts for `wiki-ingest`, `wiki-update`, and `wiki-query` to root README files.
+- Removed now-redundant `tools/wiki/README.md` and `tools/wiki/README-kr.md`; root README files are the entry documentation.
+- Updated docs and tests to preserve the core vault-builder install workflow without requiring a user-installed Stenc skill.
+- Hardened generated no-Stenc vault tests so Stenc opt-in checks skip when the optional bundle is absent.
+- Changed `--with-stenc` initialization to fail clearly when the template does not include Stenc assets.
+- Sanitized builder full-bootstrap release-gate execution so bootstrap-only env does not trigger recursive full verification.
+- Added an explicit `tests` package marker so generated vault release gates do not import a shadowing site-package.
+- Contradictions found: prior builder output treated Stenc as part of the default install path, while current human instruction defines Stenc as optional.
+- Follow-ups: use `--with-stenc` only for vaults that intentionally keep fixed-format Stenc spec/plan docs.

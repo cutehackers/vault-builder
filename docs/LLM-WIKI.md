@@ -47,8 +47,7 @@ raw source
 .
 ├── AGENTS.md
 ├── docs/
-│   ├── LLM-WIKI.md
-│   └── stenc/
+│   └── LLM-WIKI.md
 ├── raw/
 │   ├── sources/
 │   ├── assets/
@@ -83,7 +82,7 @@ raw source
 | `scratch/review/` | Pending human-judgment items | No |
 | `wiki/` | Compiled, linked, provenance-backed knowledge | Yes |
 | `tools/wiki/` | Deterministic validation, mutation gates, workflow checkpoints, MCP wrappers, maps, and metrics tooling | Yes |
-| `docs/stenc/` | Fixed-format specs and plans for implementation work | Yes |
+| `docs/stenc/` | Optional fixed-format specs and plans for implementation work when Stenc is enabled | Yes |
 
 ## Non-Negotiable Boundaries
 
@@ -305,7 +304,7 @@ Current checks:
 - maintenance metrics dashboard for pending reviews, contested claims, stale sources, orphan pages, provenance coverage, deprecated links, and last health report
 - configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`
 - report and generated query-capture draft path confinement under `scratch/reports/` and `scratch/drafts/`
-- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, Stenc validation/render checks, and `git diff --check` in a temporary repo copy
+- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks, and `git diff --check` in a temporary repo copy
 
 Intentional limits:
 
@@ -422,7 +421,7 @@ For operating behavior, use this hierarchy:
 1. Explicit human instruction in the current task.
 2. `AGENTS.md` operating contract.
 3. `docs/LLM-WIKI.md` architecture definition.
-4. Stenc specs and plans under `docs/stenc/content/`.
+4. Optional Stenc specs and plans under `docs/stenc/content/`, when the vault opted into Stenc.
 5. Durable wiki pages with provenance.
 
 For factual evidence, use this hierarchy:
@@ -439,8 +438,7 @@ Contradictions must be recorded before replacing an older view.
 
 - `AGENTS.md` defines the agent operating contract.
 - `docs/LLM-WIKI.md` defines the final architecture.
-- `docs/stenc/content/specs/2026-05-26-wiki-quality-validator.spec.json` defines validator behavior.
-- `docs/stenc/content/plans/2026-05-26-wiki-quality-validator-implementation.plan.json` defines validator implementation order.
+- Optional Stenc documents under `docs/stenc/content/` record fixed-format specs and plans for work that opted into Stenc.
 - `wiki/overview.md` is the human-readable wiki briefing.
 - `wiki/index.md` is the page catalog.
 - `wiki/log.md` is the chronological operation log.
@@ -453,7 +451,7 @@ For architecture or wiki-maintenance work, done means:
 scripts/release_gate.sh
 ```
 
-The release gate runs unit tests, lint, health, map freshness, metrics, and Stenc validation/render checks in a temporary repo copy, then checks the working tree diff for whitespace issues:
+The release gate runs unit tests, lint, health, map freshness, and metrics in a temporary repo copy, then checks the working tree diff for whitespace issues:
 
 ```bash
 python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
@@ -461,10 +459,13 @@ python3 tools/wiki/cli.py lint --report
 python3 tools/wiki/cli.py health
 python3 tools/wiki/cli.py maps build --check --report
 python3 tools/wiki/cli.py metrics --check --report
-node tools/stenc/validate-stenc-doc.js <doc.json>
-node tools/stenc/setup-project.js --project-root "$(pwd)" --docs-dir docs/stenc
-node tools/stenc/check-rendered-pages.js docs/stenc
 git diff --check
+```
+
+Stenc validation/render checks are optional and run only when explicitly enabled:
+
+```bash
+WIKI_ENABLE_STENC=1 scripts/release_gate.sh
 ```
 
 The same gate is wired into `.github/workflows/release-gate.yml`.
