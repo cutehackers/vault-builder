@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="."
+TARGET_DIR=""
 WITH_STENC=0
 
 usage() {
@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
       exit 1
       ;;
     *)
-      if [[ "${TARGET_DIR}" != "." ]]; then
+      if [[ -n "${TARGET_DIR}" ]]; then
         echo "Only one target directory may be provided." >&2
         usage >&2
         exit 1
@@ -55,13 +55,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ $# -gt 0 ]]; then
-  if [[ "${TARGET_DIR}" != "." || $# -gt 1 ]]; then
+  if [[ -n "${TARGET_DIR}" || $# -gt 1 ]]; then
     echo "Only one target directory may be provided." >&2
     usage >&2
     exit 1
   fi
   TARGET_DIR="$1"
 fi
+
+TARGET_DIR="${TARGET_DIR:-vault}"
 
 if [[ "${TARGET_DIR}" != /* ]]; then
   TARGET_DIR="$(pwd)/${TARGET_DIR}"

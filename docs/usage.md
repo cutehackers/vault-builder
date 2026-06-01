@@ -50,7 +50,7 @@ cd ~/my-vault
 python3 tools/wiki/cli.py lint --report
 ```
 
-`init-vault.sh`는 이미 초기화된 vault를 덮어쓰지 않습니다. 대상 폴더에 `wiki/index.md` 또는 `tools/wiki/cli.py`가 있으면 중단합니다.
+`init-vault.sh`는 인자 없이 실행하면 bootstrap과 동일하게 기본 `vault/` 폴더를 생성합니다. 이미 초기화된 vault를 덮어쓰지 않으며, 대상 폴더에 `wiki/index.md` 또는 `tools/wiki/cli.py`가 있으면 중단합니다.
 
 Stenc 고정 포맷 spec/plan 문서는 선택 기능입니다. 기본 bootstrap과 기본 `init-vault.sh`는 Stenc 없이 vault를 생성합니다. Stenc 문서와 helper 도구까지 포함하려면 명시적으로 opt-in합니다.
 

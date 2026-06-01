@@ -142,5 +142,6 @@ quality:
 - Changed `--with-stenc` initialization to fail clearly when the template does not include Stenc assets.
 - Sanitized builder full-bootstrap release-gate execution so bootstrap-only env does not trigger recursive full verification.
 - Added an explicit `tests` package marker so generated vault release gates do not import a shadowing site-package.
+- Aligned direct `init-vault.sh` execution with bootstrap so no-argument installs create `vault/` by default.
 - Contradictions found: prior builder output treated Stenc as part of the default install path, while current human instruction defines Stenc as optional.
 - Follow-ups: use `--with-stenc` only for vaults that intentionally keep fixed-format Stenc spec/plan docs.

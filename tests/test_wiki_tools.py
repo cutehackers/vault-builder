@@ -1675,6 +1675,27 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("wiki_publish_batch", mcp_result.stdout)
             self.assertEqual(0, stenc_optional_test_result.returncode, stenc_optional_test_result.stdout + stenc_optional_test_result.stderr)
 
+    def test_init_vault_uses_vault_as_default_target_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            init_result = subprocess.run(
+                [str(root / "init-vault.sh")],
+                cwd=tmp,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            target = tmp / "vault"
+            resolved_target = target.resolve()
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+            self.assertTrue((target / "tools" / "wiki" / "cli.py").exists())
+            self.assertTrue((target / "scripts" / "bootstrap.sh").exists())
+            self.assertTrue((target / "README-kr.md").exists())
+            self.assertFalse((tmp / "wiki").exists())
+            self.assertIn(f"cd {resolved_target}", init_result.stdout)
+
     def test_init_vault_can_include_stenc_when_requested(self):
         root = Path(__file__).resolve().parents[1]
         if not _has_stenc_bundle(root):

@@ -94,4 +94,4 @@ The important rule: LLM output is only a proposal until validation accepts it.
 
 ---
 
-Korean: [README-kr.md](README-kr.md)
+한글: [README-kr.md](README-kr.md)
