@@ -1,0 +1,561 @@
+{
+  "schemaVersion": 2,
+  "docType": "spec",
+  "id": "spec:2026-05-30-wiki-workflow-hardening",
+  "slug": "2026-05-30-wiki-workflow-hardening",
+  "status": "approved",
+  "title": "Wiki Workflow Hardening",
+  "description": "wiki-ingest, wiki-update, wiki-query가 실제 agent 운영에서 흔들리지 않도록 품질 계약, 안전장치, workflow CLI/MCP checkpoint를 고정하는 명세.",
+  "owner": "agent",
+  "createdAt": "2026-05-30",
+  "updatedAt": "2026-05-30",
+  "links": {
+    "sourceOfTruth": [
+      "AGENTS.md",
+      "docs/agent/DRAFTS.md",
+      "docs/agent/OPERATING-SCHEMA.md",
+      "docs/LLM-WIKI.md",
+      "docs/usage.md",
+      "docs/architecture.md",
+      "agents/skills/wiki-ingest/SKILL.md",
+      "agents/skills/wiki-update/SKILL.md",
+      "agents/skills/wiki-query/SKILL.md",
+      "tools/wiki/cli.py",
+      "tools/wiki/mcp_server.py",
+      "tools/wiki/lib/ingest.py",
+      "tools/wiki/lib/draft.py",
+      "tools/wiki/lib/workflow.py",
+      "tests/test_wiki_tools.py",
+      "tests/test_wiki_quality_baseline.py"
+    ],
+    "relatedPlans": [
+      "plan:2026-05-30-wiki-workflow-hardening-implementation"
+    ],
+    "relatedDecisions": [
+      "wiki/decisions/use-markdown-for-compiled-knowledge.md"
+    ]
+  },
+  "page": {
+    "humanSummary": "다음 구현은 skill 문서와 CLI/MCP workflow를 품질 게이트 중심으로 더 단단하게 만든다.",
+    "agentSummary": "Harden wiki-ingest/wiki-update/wiki-query so agents can execute them reliably: fix draft contract drift, prevent source-page clobbering, enforce section-level human-lock preservation, standardize query reports/capture, and add deterministic workflow CLI/MCP checkpoint commands without moving semantic judgment into code.",
+    "styleTemplate": "task-first"
+  },
+  "body": {
+    "goal": "agent가 각 wiki skill을 안정적으로 이해하고 수행할 수 있게 만들고, CLI/MCP workflow가 LLM Wiki의 실제 목표인 품질 높은 durable knowledge 운영을 돕는 deterministic checkpoint로 작동하도록 고정한다.",
+    "problem": "현재 구현은 세 skill과 publish-draft/health facade를 갖추었지만, subagent 검증 결과 일부 경계가 느슨하다. docs/agent/DRAFTS.md는 여전히 apply-draft 중심 durable flow를 안내하고, source registration은 동일 slug page를 덮어쓸 수 있으며, section-level human lock은 marker 형식만 검사하고 내용 보존을 결정론적으로 보장하지 않는다. query report/capture 형식도 agent가 매번 추론해야 하고, workflow CLI/MCP는 의미 추출까지 수행하는 것처럼 오해될 위험이 있다.",
+    "scope": {
+      "in": [
+        "docs/agent/DRAFTS.md의 publish-draft 중심 계약 정정",
+        "wiki-ingest, wiki-update, wiki-query skill 문서의 실행 가능성 강화",
+        "ingest-source source page no-clobber and duplicate handling",
+        "publish-draft/apply-draft의 section-level human-lock content preservation",
+        "query report and answer-and-capture scaffold contract",
+        "workflow CLI namespace for deterministic preflight, publish, report scaffolding",
+        "MCP tools that mirror the workflow CLI checkpoint commands",
+        "usage, architecture, LLM-WIKI, AGENTS documentation alignment",
+        "unittest coverage and Stenc validation"
+      ],
+      "out": [
+        "자동 LLM semantic extraction runtime",
+        "자동 질의응답 생성 엔진",
+        "자동 contradiction truth arbitration",
+        "자동 page merge judgment",
+        "remote hosted MCP deployment",
+        "Obsidian plugin UI",
+        "Git commit automation without explicit user request"
+      ]
+    },
+    "architecture": {
+      "summary": "최종 구조는 skill이 cognition을 맡고 CLI/MCP가 deterministic checkpoint를 맡는 구조를 유지한다. 새 workflow 명령은 지식을 자동으로 작성하는 명령이 아니라, raw/source/page 상태를 검사하고, report scaffold를 만들고, 검증된 draft를 publish하는 안전한 작업 표면이다.",
+      "flow": [
+        "사용자는 새 원본 반영, 기존 page 갱신, wiki 질의 중 하나를 요청한다.",
+        "agent는 wiki-ingest, wiki-update, wiki-query skill 중 하나를 선택한다.",
+        "skill은 wiki/index.md와 관련 wiki/source/raw 자료를 읽고 semantic draft 또는 query report 필요성을 판단한다.",
+        "workflow CLI/MCP는 raw path, hash, duplicate, lock, report path, draft validation 같은 deterministic checkpoint만 수행한다.",
+        "durable 변경은 scratch/drafts/*.json을 통해 publish-draft로만 적용한다.",
+        "publish-draft는 clean pre-lint, draft dry-run, durable apply, post-lint/report, rollback을 수행한다.",
+        "agent는 변경 결과, 검증 결과, human review queue, 다음 조치를 사용자에게 보고한다."
+      ]
+    },
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "title": "Single durable publish contract",
+        "detail": "durable wiki 변경의 권장 경로는 publish-draft 하나로 고정해야 한다.",
+        "acceptanceCriteria": [
+          "docs/agent/DRAFTS.md는 durable apply flow를 publish-draft 중심으로 설명한다.",
+          "apply-draft는 낮은 수준 dry-run/debug 명령으로 남되, 일반 durable publish 경로로 안내하지 않는다.",
+          "usage.md, architecture.md, LLM-WIKI.md, AGENTS.md는 publish-draft 계약과 충돌하지 않는다."
+        ]
+      },
+      {
+        "id": "REQ-2",
+        "title": "Agent-executable skill contracts",
+        "detail": "각 skill은 agent가 별도 추론 없이 실행 순서, validation gate, report 위치, provenance 요구사항을 이해할 수 있어야 한다.",
+        "acceptanceCriteria": [
+          "wiki-ingest는 source duplicate, changed hash, slug collision, source_count, provenance quality를 명확히 다룬다.",
+          "wiki-update는 section-level human lock 보존, scratch/reports와 scratch/review 라우팅 기준을 명확히 다룬다.",
+          "wiki-query는 answer-only, answer-with-report, answer-and-capture 각각의 산출물 형식과 citation 요구사항을 명확히 다룬다.",
+          "세 skill 모두 최종 completion gate로 lint --report 또는 health 성공을 요구한다."
+        ]
+      },
+      {
+        "id": "REQ-3",
+        "title": "Source registration no-clobber",
+        "detail": "ingest-source는 기존 source page를 실수로 덮어써서는 안 된다.",
+        "acceptanceCriteria": [
+          "동일 canonical_source와 동일 raw_sha256이면 idempotent success로 처리하고 index/log 중복을 만들지 않는다.",
+          "동일 canonical_source지만 raw_sha256이 다르면 drift 상태로 보고하고, 명시 옵션 없이는 덮어쓰지 않는다.",
+          "같은 slug지만 다른 canonical_source이면 slug collision으로 실패하고 대체 slug 또는 review item을 요구한다.",
+          "target source page가 page-level human lock이면 실패한다.",
+          "ingest report는 created, unchanged, drift, collision 중 하나의 outcome을 포함한다."
+        ]
+      },
+      {
+        "id": "REQ-4",
+        "title": "Section-level human-lock preservation",
+        "detail": "page-level lock뿐 아니라 human-locked section 내용도 deterministic하게 보존해야 한다.",
+        "acceptanceCriteria": [
+          "기존 page에 human-locked section이 있으면 draft/publish는 해당 range의 exact content가 유지되는지 검사한다.",
+          "locked section 내용이 변경되면 dry-run과 publish 모두 실패한다.",
+          "marker 순서와 짝 검사는 기존 lint behavior를 유지한다.",
+          "필요한 변경 제안은 scratch/reports 또는 scratch/review로 라우팅한다."
+        ]
+      },
+      {
+        "id": "REQ-5",
+        "title": "Query report and capture format",
+        "detail": "wiki-query의 보고서와 durable capture는 agent마다 형식이 흔들리지 않아야 한다.",
+        "acceptanceCriteria": [
+          "answer-with-report는 scratch/reports/YYYY-MM-DD-query-<slug>.md 파일명을 기본으로 한다.",
+          "query report에는 question, answer summary, pages consulted, sources consulted, confidence, contradictions, reusable capture recommendation이 포함된다.",
+          "answer-and-capture는 tools/wiki/templates/draft-upsert-page.json을 기준으로 draft를 만들고 publish-draft로만 durable 반영한다.",
+          "substantive synthesized answer에는 durable page/source citation이 필수다."
+        ]
+      },
+      {
+        "id": "REQ-6",
+        "title": "Workflow CLI checkpoint namespace",
+        "detail": "CLI는 agent workflow를 돕는 deterministic checkpoint를 제공하되 semantic 작업을 수행한다고 주장하지 않는다.",
+        "acceptanceCriteria": [
+          "workflow ingest는 raw source validation, source registration/preflight, report scaffold만 수행하고 semantic extraction pending 상태를 명시한다.",
+          "workflow update --preflight는 target page, lock state, related index/log state, suggested report path를 점검한다.",
+          "workflow update --publish는 draft를 publish-draft 경로로 적용한다.",
+          "workflow query --prepare-report는 query report scaffold를 만든다.",
+          "workflow query --publish는 capture draft를 publish-draft 경로로 적용한다.",
+          "workflow command output은 LLM semantic draft or answer required 여부를 명시한다."
+        ]
+      },
+      {
+        "id": "REQ-7",
+        "title": "MCP parity for workflow checkpoints",
+        "detail": "agent가 CLI와 같은 품질 경계를 MCP tool로 호출할 수 있어야 한다.",
+        "acceptanceCriteria": [
+          "MCP tool list에 wiki_workflow_ingest, wiki_workflow_update_preflight, wiki_workflow_update_publish, wiki_workflow_query_prepare, wiki_workflow_query_publish가 포함된다.",
+          "MCP tools는 CLI/lib behavior를 호출하고 별도 business logic을 복제하지 않는다.",
+          "MCP output도 semantic work와 deterministic checkpoint를 구분한다."
+        ]
+      },
+      {
+        "id": "REQ-8",
+        "title": "Verification and documentation alignment",
+        "detail": "구현 완료 판단은 테스트, lint, Stenc 검증, 문서 일관성으로만 한다.",
+        "acceptanceCriteria": [
+          "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py succeeds.",
+          "python3 tools/wiki/cli.py lint --report succeeds.",
+          "python3 tools/wiki/cli.py health succeeds.",
+          "Stenc JSON validation and rendered page checks succeed.",
+          "README-level and agent-level docs do not reintroduce deprecated durable flow guidance."
+        ]
+      }
+    ],
+    "approaches": [
+      {
+        "name": "Deterministic workflow checkpoints",
+        "tradeoffs": [
+          "agent가 반복 workflow를 더 쉽게 수행한다.",
+          "CLI/MCP가 semantic extraction을 하지 않는다는 경계를 유지한다.",
+          "몇 개의 facade command와 report scaffold가 추가된다."
+        ],
+        "recommendation": "Recommended. 품질 게이트를 강화하면서도 LLM Wiki의 cognition/mutation 분리를 보존한다."
+      },
+      {
+        "name": "End-to-end semantic CLI",
+        "tradeoffs": [
+          "사용자는 하나의 명령만 실행하면 된다고 느낄 수 있다.",
+          "LLM 판단, merge, contradiction 해석이 deterministic tool로 숨어 들어간다.",
+          "품질 실패의 원인을 추적하기 어려워진다."
+        ],
+        "recommendation": "Reject. 이 vault의 root cause는 자동화 부족이 아니라 품질 경계의 명확성 부족이다."
+      },
+      {
+        "name": "Documentation-only hardening",
+        "tradeoffs": [
+          "빠르게 적용할 수 있다.",
+          "실제 source clobber와 section lock 변경 같은 위험은 계속 도구가 막지 못한다.",
+          "agent가 문서를 놓치면 같은 문제가 반복된다."
+        ],
+        "recommendation": "Reject as sufficient. 문서 정정은 필요하지만 deterministic guard가 함께 있어야 한다."
+      }
+    ],
+    "components": [
+      {
+        "name": "docs/agent/DRAFTS.md",
+        "responsibility": "draft가 durable knowledge가 되는 권장 경로를 publish-draft로 고정한다.",
+        "interfaces": [
+          "python3 tools/wiki/cli.py publish-draft scratch/drafts/example.json --report",
+          "python3 tools/wiki/cli.py apply-draft scratch/drafts/example.json --dry-run"
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py",
+          "tools/wiki/templates/draft-upsert-page.json"
+        ]
+      },
+      {
+        "name": "agents/skills/wiki-ingest/SKILL.md",
+        "responsibility": "source registration, semantic extraction, draft publication, final lint gate를 agent-executable workflow로 정의한다.",
+        "interfaces": [
+          "raw/sources/example.md를 wiki에 반영해주세요.",
+          "wiki-ingest 방식으로 새 원본을 등록하고 page draft를 만들어주세요."
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py ingest-source",
+          "tools/wiki/cli.py workflow ingest",
+          "tools/wiki/cli.py publish-draft"
+        ]
+      },
+      {
+        "name": "agents/skills/wiki-update/SKILL.md",
+        "responsibility": "기존 page update에서 lock, contradiction, report/review routing, draft publication을 정의한다.",
+        "interfaces": [
+          "wiki/concepts/example.md를 최신 원본 기준으로 업데이트해주세요.",
+          "human-locked section 변경이 필요한지 검토해주세요."
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py workflow update",
+          "tools/wiki/cli.py publish-draft",
+          "scratch/review/"
+        ]
+      },
+      {
+        "name": "agents/skills/wiki-query/SKILL.md",
+        "responsibility": "wiki 질의의 answer-only, answer-with-report, answer-and-capture 산출물과 citation 규칙을 정의한다.",
+        "interfaces": [
+          "answer-with-report 방식으로 질문에 답해주세요.",
+          "answer-and-capture 방식으로 reusable result를 wiki에 남겨주세요."
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py workflow query",
+          "tools/wiki/templates/draft-upsert-page.json",
+          "wiki/index.md"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/ingest.py",
+        "responsibility": "raw source registration의 no-clobber, idempotency, drift/collision outcome을 구현한다.",
+        "interfaces": [
+          "ingest_source(root, source_path, title, summary, report_path)"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/frontmatter.py",
+          "tools/wiki/lib/hash_source.py",
+          "tools/wiki/lib/wiki_update.py"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/draft.py",
+        "responsibility": "draft validation and publication에서 page-level and section-level human lock을 보존한다.",
+        "interfaces": [
+          "apply_draft(root, draft_path, report_path, dry_run)"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/lint.py"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/workflow.py",
+        "responsibility": "workflow CLI/MCP가 공유할 deterministic preflight, report scaffold, publish wrapper를 제공한다.",
+        "interfaces": [
+          "prepare_ingest_workflow",
+          "prepare_update_workflow",
+          "publish_update_workflow",
+          "prepare_query_workflow",
+          "publish_query_workflow"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/ingest.py",
+          "tools/wiki/lib/draft.py",
+          "tools/wiki/lib/lint.py"
+        ]
+      },
+      {
+        "name": "tools/wiki/cli.py",
+        "responsibility": "workflow ingest/update/query subcommands를 노출한다.",
+        "interfaces": [
+          "python3 tools/wiki/cli.py workflow ingest --source raw/sources/example.md --report",
+          "python3 tools/wiki/cli.py workflow update --target wiki/concepts/example.md --preflight --report",
+          "python3 tools/wiki/cli.py workflow update --target wiki/concepts/example.md --draft scratch/drafts/example.json --publish --report",
+          "python3 tools/wiki/cli.py workflow query --question \"...\" --prepare-report",
+          "python3 tools/wiki/cli.py workflow query --draft scratch/drafts/example.json --publish --report"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/workflow.py"
+        ]
+      },
+      {
+        "name": "tools/wiki/mcp_server.py",
+        "responsibility": "workflow CLI와 같은 checkpoint를 MCP tool로 노출한다.",
+        "interfaces": [
+          "wiki_workflow_ingest",
+          "wiki_workflow_update_preflight",
+          "wiki_workflow_update_publish",
+          "wiki_workflow_query_prepare",
+          "wiki_workflow_query_publish"
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py or tools/wiki/lib/workflow.py"
+        ]
+      }
+    ],
+    "dataFlow": [
+      "wiki-ingest: raw source -> workflow ingest checkpoint -> source page registration or duplicate/drift report -> LLM semantic draft -> publish-draft -> health/lint report.",
+      "wiki-update: target page -> workflow update preflight -> lock/related evidence review -> LLM semantic draft or review item -> publish-draft -> health/lint report.",
+      "wiki-query: question -> wiki/index.md and relevant pages -> answer-only/report/capture mode -> workflow query report scaffold or capture draft -> publish-draft only when durable capture is requested."
+    ],
+    "errorHandling": [
+      {
+        "case": "DRAFTS.md or skill docs mention apply-draft as the primary durable path",
+        "behavior": "Baseline documentation test fails and implementation must update the docs to publish-draft-centered wording."
+      },
+      {
+        "case": "Existing source page has same canonical_source and same raw_sha256",
+        "behavior": "ingest-source returns unchanged/idempotent outcome and does not duplicate index or log entries."
+      },
+      {
+        "case": "Existing source page has same canonical_source and different raw_sha256",
+        "behavior": "ingest-source fails with source-drift outcome unless an explicit future drift-resolution option is implemented."
+      },
+      {
+        "case": "Existing source page slug belongs to another canonical_source",
+        "behavior": "ingest-source fails with slug-collision outcome and points to review or alternate slug guidance."
+      },
+      {
+        "case": "Draft changes content inside human-locked:start/end",
+        "behavior": "apply-draft dry-run and publish-draft fail before durable write."
+      },
+      {
+        "case": "workflow command would require semantic judgment",
+        "behavior": "command writes a report/scaffold that states LLM semantic work is required and exits without inventing wiki claims."
+      }
+    ],
+    "contracts": [
+      {
+        "name": "Cognition and mutation boundary",
+        "rules": [
+          "Skill = cognition: source reading, semantic extraction, duplicate judgment, contradiction interpretation, query synthesis.",
+          "CLI/MCP = mutation and validation: hashing, path checks, lock checks, draft validation, publish, lint, reports.",
+          "No workflow CLI/MCP command may generate durable semantic claims without an explicit draft supplied by the agent."
+        ]
+      },
+      {
+        "name": "Durable knowledge gate",
+        "rules": [
+          "Durable wiki page changes go through scratch/drafts/*.json.",
+          "publish-draft is the default durable apply path.",
+          "lint --report or health must succeed before work is reported complete."
+        ]
+      },
+      {
+        "name": "Human lock contract",
+        "rules": [
+          "Page-level human lock blocks direct draft application.",
+          "Section-level human lock requires exact content preservation.",
+          "Needed changes to locked content become proposed patches or review items."
+        ]
+      },
+      {
+        "name": "Query capture contract",
+        "rules": [
+          "answer-only produces conversation output only.",
+          "answer-with-report writes a query report with consulted pages and confidence.",
+          "answer-and-capture writes a draft and publishes only through publish-draft when durable capture is requested."
+        ]
+      }
+    ],
+    "surfaces": [
+      {
+        "path": "docs/agent/DRAFTS.md",
+        "role": "Agent draft publication contract.",
+        "owner": "agent"
+      },
+      {
+        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "role": "Agent ingest workflow.",
+        "owner": "agent"
+      },
+      {
+        "path": "agents/skills/wiki-update/SKILL.md",
+        "role": "Agent update workflow.",
+        "owner": "agent"
+      },
+      {
+        "path": "agents/skills/wiki-query/SKILL.md",
+        "role": "Agent query workflow.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/lib/ingest.py",
+        "role": "Source registration safety.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/lib/draft.py",
+        "role": "Draft validation and human lock preservation.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/lib/workflow.py",
+        "role": "Shared deterministic workflow checkpoint behavior.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/cli.py",
+        "role": "CLI command surface.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/mcp_server.py",
+        "role": "MCP command surface.",
+        "owner": "agent"
+      }
+    ],
+    "testingStrategy": [
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+        "expected": "Fails before docs are aligned; passes when skill and draft docs preserve the publish-draft boundary."
+      },
+      {
+        "command": "python3 -m unittest tests/test_wiki_tools.py",
+        "expected": "Covers no-clobber source ingest, section lock preservation, workflow CLI commands, and MCP parity."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py lint --report",
+        "expected": "No issues found and a dated lint report is written."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py health",
+        "expected": "No issues found and a dated lint report is written."
+      }
+    ],
+    "validation": [
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+        "purpose": "Validate this Stenc spec JSON."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
+        "purpose": "Validate the paired Stenc implementation plan JSON."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc",
+        "purpose": "Regenerate styled Stenc pages from JSON sources."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm each Stenc JSON source has a rendered page."
+      }
+    ],
+    "agentInstructions": [
+      "Read this spec and the paired plan before changing workflow CLI/MCP or wiki skill behavior.",
+      "Start implementation with failing tests for the specific quality risk being addressed.",
+      "Do not implement semantic extraction inside CLI or MCP workflow commands.",
+      "Keep docs, tests, CLI, MCP, and skill wording aligned in the same change set.",
+      "Run full wiki validation before reporting completion."
+    ],
+    "reviewChecklist": [
+      "Spec preserves cognition/mutation separation.",
+      "Every subagent finding maps to a requirement or explicit non-goal.",
+      "Workflow CLI/MCP wording cannot be mistaken for automatic knowledge generation.",
+      "No-clobber and section-lock risks are covered by deterministic tests.",
+      "Query report and capture behavior is concrete enough for agents to execute."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Root cause coverage",
+        "purpose": "Confirm the spec addresses contract drift and missing deterministic guards rather than adding convenience wrappers only."
+      },
+      {
+        "name": "Boundary preservation",
+        "purpose": "Confirm CLI/MCP stay deterministic and skill docs keep semantic work in the agent layer."
+      },
+      {
+        "name": "Testability",
+        "purpose": "Confirm every requirement can be verified by unittest, lint, health, Stenc validation, or explicit report output."
+      }
+    ],
+    "implementationHandoff": {
+      "planLocation": "docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
+      "requiredSkill": "superpowers:writing-plans",
+      "notes": [
+        "Use subagent-driven implementation for independent slices when possible.",
+        "Do not start implementation until this spec and plan validate as Stenc JSON and render successfully."
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "Subagent Review Findings",
+        "content": "Four focused subagent reviews approved the direction but found contract and guardrail gaps that should be fixed before expanding usage.",
+        "items": [
+          "wiki-ingest review: DRAFTS.md still points to apply-draft as the durable path, duplicate/source registration is underspecified, final lint/health is ambiguous, and provenance quality can be bypassed.",
+          "wiki-update review: section-level human locks are not deterministically protected, and scratch/reports versus scratch/review routing needs explicit rules.",
+          "wiki-query review: answer-with-report and answer-and-capture need concrete file names, required sections, draft template linkage, and mandatory citations for substantive answers.",
+          "CLI/MCP workflow review: workflow commands are useful only as deterministic checkpoints and must not claim semantic extraction, merge, contradiction resolution, or query answering."
+        ],
+        "facts": [
+          {
+            "label": "publish-draft",
+            "value": "Current publish-draft already provides pre-lint, dry-run, apply, post-lint, report, and rollback behavior."
+          },
+          {
+            "label": "ingest-source",
+            "value": "Initial review found ingest-source wrote wiki/sources/<slug>.md directly."
+          },
+          {
+            "label": "human lock",
+            "value": "Initial review found apply-draft blocked page-level human lock but did not compare existing and new section-level locked ranges."
+          },
+          {
+            "label": "MCP",
+            "value": "Initial review found MCP exposed wiki_health and wiki_publish_draft but not workflow checkpoint tools."
+          }
+        ],
+        "links": [
+          {
+            "label": "Draft guide",
+            "target": "docs/agent/DRAFTS.md",
+            "purpose": "Agent-facing draft publication flow that needs publish-draft alignment."
+          },
+          {
+            "label": "Ingest library",
+            "target": "tools/wiki/lib/ingest.py",
+            "purpose": "Source registration implementation that needs no-clobber behavior."
+          },
+          {
+            "label": "Draft library",
+            "target": "tools/wiki/lib/draft.py",
+            "purpose": "Draft application implementation that needs section lock preservation."
+          },
+          {
+            "label": "MCP server",
+            "target": "tools/wiki/mcp_server.py",
+            "purpose": "Agent tool surface that needs workflow checkpoint parity."
+          }
+        ],
+        "steps": [],
+        "subSections": [],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": []
+  }
+}

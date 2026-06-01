@@ -1,0 +1,435 @@
+{
+  "schemaVersion": 2,
+  "docType": "spec",
+  "id": "spec:2026-05-29-wiki-skill-workflows",
+  "slug": "2026-05-29-wiki-skill-workflows",
+  "status": "approved",
+  "title": "Wiki Skill Workflows",
+  "description": "LLM Wiki를 사람이 단순하게 사용하도록 wiki-ingest, wiki-update, wiki-query skill/workflow와 CLI facade를 정의하는 명세.",
+  "owner": "agent",
+  "createdAt": "2026-05-29",
+  "updatedAt": "2026-05-29",
+  "links": {
+    "sourceOfTruth": [
+      "docs/usage.md",
+      "docs/architecture.md",
+      "docs/LLM-WIKI.md",
+      "AGENTS.md",
+      "tools/wiki/cli.py",
+      "tools/wiki/mcp_server.py",
+      "tools/wiki/templates/draft-upsert-page.json"
+    ],
+    "relatedPlans": [
+      "plan:2026-05-29-wiki-skill-workflows-implementation"
+    ],
+    "relatedDecisions": [
+      "wiki/decisions/use-markdown-for-compiled-knowledge.md"
+    ]
+  },
+  "page": {
+    "humanSummary": "사람은 wiki-ingest, wiki-update, wiki-query 세 요청만 기억하고, 품질 단계는 skill과 CLI가 처리한다.",
+    "agentSummary": "Define repo-local wiki-ingest, wiki-update, and wiki-query workflows that preserve the cognition/mutation split: skills inspect, synthesize, and draft; CLI commands perform durable mutation, validation, linting, reports, and MCP exposure.",
+    "styleTemplate": "task-first"
+  },
+  "body": {
+    "goal": "LLM Wiki 사용자가 원본 등록, 기존 문서 변경, wiki 질의를 단순한 세 가지 요청으로 수행하면서도 기존 품질 게이트를 유지하도록 skill/workflow 계약과 CLI facade를 고정한다.",
+    "problem": "현재 사용자는 ingest-source, draft 생성, apply-draft --dry-run, apply-draft --report, lint --report의 순서를 직접 이해해야 한다. 이 구조는 품질에는 안전하지만, 사람이 반복 사용하기에는 복잡하다.",
+    "scope": {
+      "in": [
+        "wiki-ingest skill/workflow 계약",
+        "wiki-update skill/workflow 계약",
+        "wiki-query skill/workflow 계약",
+        "query mode: answer-only, answer-with-report, answer-and-capture",
+        "publish-draft CLI facade contract",
+        "health CLI facade contract",
+        "MCP exposure for new facade commands",
+        "usage and architecture documentation alignment",
+        "AGENTS.md and init-vault.sh alignment with repo-local skill workflows",
+        "tests for CLI facade behavior and workflow documentation presence"
+      ],
+      "out": [
+        "자동 LLM 모델 호출 구현",
+        "PDF/image OCR or extraction engine",
+        "claim truth arbitration",
+        "automatic contested claim resolution",
+        "Obsidian plugin UI",
+        "remote hosted service",
+        "Git commit automation without explicit user request"
+      ]
+    },
+    "architecture": {
+      "summary": "세 skill/workflow는 사람이 말한 의도를 해석하고, 기존 wiki를 읽고, 필요한 JSON draft와 report를 만든다. 영구 파일 변경, 해시 검증, dry-run, 적용, lint, report 작성은 tools/wiki CLI가 담당한다.",
+      "flow": [
+        "사용자는 새 원본 반영, 기존 page 수정, wiki 질의 중 하나를 자연어로 요청한다.",
+        "agent는 요청을 wiki-ingest, wiki-update, wiki-query 중 하나로 분류한다.",
+        "skill/workflow는 wiki/index.md와 관련 wiki/source/raw 자료를 읽는다.",
+        "skill/workflow는 중복 page, human lock, contradiction, provenance 필요 여부를 판단한다.",
+        "durable 변경이 필요하면 skill/workflow는 scratch/drafts/*.json을 작성한다.",
+        "CLI facade가 clean pre-lint, draft dry-run, 적용, post-lint, report를 수행하고 post-lint 실패 시 page/index/log 변경을 되돌린다.",
+        "agent는 변경 page, 검증 결과, human review 항목, 다음 행동을 짧게 보고한다."
+      ]
+    },
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "title": "세 가지 사용자 요청으로 단순화",
+        "detail": "사용자는 wiki-ingest, wiki-update, wiki-query 세 workflow만 기억하면 되어야 한다.",
+        "acceptanceCriteria": [
+          "docs/usage.md는 세 workflow 이름과 예시 요청을 첫 사용 흐름에 포함한다.",
+          "각 workflow는 내부 CLI 조합을 설명하지만, 사용자에게 저수준 명령 암기를 요구하지 않는다.",
+          "기존 저수준 CLI 명령은 고급 사용과 자동화 표면으로 유지한다."
+        ]
+      },
+      {
+        "id": "REQ-2",
+        "title": "wiki-ingest workflow",
+        "detail": "새 raw source를 wiki에 반영하는 기본 workflow를 정의한다.",
+        "acceptanceCriteria": [
+          "source가 raw/ 아래에 있는지 확인한다.",
+          "source page가 없으면 ingest-source를 실행한다.",
+          "wiki/index.md와 관련 page를 확인해 중복 page 생성을 피한다.",
+          "필요한 durable 변경은 scratch/drafts/*.json으로 작성한다.",
+          "최종 반영은 publish-draft로 수행한다."
+        ]
+      },
+      {
+        "id": "REQ-3",
+        "title": "wiki-update workflow",
+        "detail": "기존 wiki page를 최신 source나 사용자 지시에 맞게 변경하는 workflow를 정의한다.",
+        "acceptanceCriteria": [
+          "대상 page와 관련 source를 먼저 읽는다.",
+          "page-level and section-level human lock을 확인한다.",
+          "변경 유형을 단순 update, merge proposal, contradiction, review item 중 하나로 분류한다.",
+          "human-locked 내용은 직접 덮어쓰지 않고 report 또는 review item으로 남긴다.",
+          "durable 변경은 draft 검증 후 적용한다."
+        ]
+      },
+      {
+        "id": "REQ-4",
+        "title": "wiki-query workflow and modes",
+        "detail": "질의응답은 단순 답변, 보고서 생성, wiki 반영 모드로 나뉘어야 한다.",
+        "acceptanceCriteria": [
+          "answer-only는 대화 답변만 생성한다.",
+          "answer-with-report는 scratch/reports/에 query report를 남긴다.",
+          "answer-and-capture는 reusable answer를 draft로 작성하고 검증 후 wiki 반영을 제안하거나 수행한다.",
+          "새 원본의 내용을 반영한 답변은 ingest/draft/apply/lint 이후를 기본 순서로 설명한다."
+        ]
+      },
+      {
+        "id": "REQ-5",
+        "title": "CLI facade commands",
+        "detail": "반복되는 품질 명령 묶음을 사람이 기억하기 쉬운 facade로 제공한다.",
+        "acceptanceCriteria": [
+          "publish-draft는 clean pre-lint, apply-draft --dry-run, apply, post-lint/report를 순서대로 실행한다.",
+          "publish-draft는 dry-run 또는 draft side-effect schema 실패 시 파일을 적용하지 않는다.",
+          "publish-draft는 post-apply lint 실패 시 page/index/log 변경을 rollback한다.",
+          "health는 항상 scratch/reports/YYYY-MM-DD-lint.md 기본 보고서를 쓰고 lint와 같은 성공/실패 상태로 종료한다.",
+          "기존 apply-draft, ingest-source, lint 명령은 유지된다."
+        ]
+      },
+      {
+        "id": "REQ-6",
+        "title": "MCP parity",
+        "detail": "agent가 CLI facade와 동일한 품질 경계를 MCP tool로 사용할 수 있어야 한다.",
+        "acceptanceCriteria": [
+          "MCP tool list에 wiki_publish_draft와 wiki_health가 추가된다.",
+          "MCP wrapper는 새 business logic을 만들지 않고 CLI/lib 기능만 호출한다.",
+          "CLI와 MCP는 같은 validation/report semantics를 공유한다."
+        ]
+      },
+      {
+        "id": "REQ-7",
+        "title": "Cognition and mutation separation",
+        "detail": "skill은 의미 판단과 draft 작성, CLI는 영구 변경과 검증을 담당한다.",
+        "acceptanceCriteria": [
+          "skill 문서에는 직접 durable wiki page를 임의 저장하지 말라는 규칙이 포함된다.",
+          "CLI는 draft path가 wiki/ 아래 markdown target인지 검증한다.",
+          "human review가 필요한 항목은 scratch/review 또는 scratch/reports에 남긴다."
+        ]
+      }
+    ],
+    "approaches": [
+      {
+        "name": "Skill plus CLI facade",
+        "tradeoffs": [
+          "사용자는 세 요청만 기억하면 된다.",
+          "기존 결정론적 품질 게이트를 유지한다.",
+          "repo-local skill 문서와 CLI facade를 함께 관리해야 한다."
+        ],
+        "recommendation": "Recommended. 현재 품질 중심 구조와 가장 잘 맞고, future MCP integration도 단순하다."
+      },
+      {
+        "name": "Skill only",
+        "tradeoffs": [
+          "사용자 경험은 단순하다.",
+          "agent마다 파일 저장과 검증 방식이 흔들릴 수 있다.",
+          "dry-run, lint, report 보장이 약해진다."
+        ],
+        "recommendation": "Reject. 품질 게이트가 agent 행동에 과도하게 의존한다."
+      },
+      {
+        "name": "CLI only",
+        "tradeoffs": [
+          "결정론적 실행은 강하다.",
+          "의미 추출, 중복 판단, contradiction 해석을 사람이 직접 해야 한다.",
+          "사용자 경험이 현재보다 크게 단순해지지 않는다."
+        ],
+        "recommendation": "Reject as the sole interface. CLI는 mutation boundary로 남기고 skill이 cognition을 맡아야 한다."
+      }
+    ],
+    "components": [
+      {
+        "name": "agents/skills/wiki-ingest/SKILL.md",
+        "responsibility": "새 raw source를 source page와 durable wiki draft로 연결하는 agent workflow.",
+        "interfaces": [
+          "raw/sources/example.md를 wiki에 반영해주세요.",
+          "이 URL 또는 파일을 raw에 저장하고 wiki에 반영해주세요."
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py ingest-source",
+          "tools/wiki/cli.py publish-draft",
+          "docs/agent/DRAFTS.md"
+        ]
+      },
+      {
+        "name": "agents/skills/wiki-update/SKILL.md",
+        "responsibility": "기존 wiki page를 source-backed draft로 안전하게 갱신하는 agent workflow.",
+        "interfaces": [
+          "wiki/concepts/example.md를 최신 원본 기준으로 업데이트해주세요.",
+          "이 결정 page에 새 근거를 반영해주세요."
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py publish-draft",
+          "tools/wiki/lib/lint.py",
+          "docs/agent/OPERATING-SCHEMA.md"
+        ]
+      },
+      {
+        "name": "agents/skills/wiki-query/SKILL.md",
+        "responsibility": "wiki/index.md에서 시작해 answer-only, answer-with-report, answer-and-capture 모드로 답변한다.",
+        "interfaces": [
+          "현재 wiki 기준으로 질문에 답해주세요.",
+          "answer-with-report 방식으로 설명해주세요.",
+          "answer-and-capture 방식으로 wiki에 남겨주세요."
+        ],
+        "dependencies": [
+          "wiki/index.md",
+          "wiki/sources/",
+          "raw/sources/",
+          "tools/wiki/cli.py publish-draft"
+        ]
+      },
+      {
+        "name": "tools/wiki/cli.py",
+        "responsibility": "publish-draft and health facade commands를 노출한다.",
+        "interfaces": [
+          "python3 tools/wiki/cli.py publish-draft scratch/drafts/example.json --report",
+          "python3 tools/wiki/cli.py health"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/draft.py",
+          "tools/wiki/lib/lint.py"
+        ]
+      },
+      {
+        "name": "tools/wiki/mcp_server.py",
+        "responsibility": "wiki_publish_draft and wiki_health MCP tools를 CLI와 동일한 계약으로 노출한다.",
+        "interfaces": [
+          "wiki_publish_draft",
+          "wiki_health"
+        ],
+        "dependencies": [
+          "tools/wiki/cli.py or shared lib functions"
+        ]
+      }
+    ],
+    "dataFlow": [
+      "사용자가 원본 반영, page 변경, 질문 중 하나를 요청한다.",
+      "agent가 적절한 skill/workflow를 선택한다.",
+      "skill이 wiki/index.md와 관련 page/source를 읽는다.",
+      "skill이 semantic draft 또는 query report를 작성한다.",
+      "CLI facade가 pre-lint, 검증, 적용, post-lint, report, 실패 시 rollback을 수행한다.",
+      "agent가 결과와 unresolved review items를 사용자에게 보고한다."
+    ],
+    "errorHandling": [
+      {
+        "case": "Raw source is outside raw/",
+        "behavior": "wiki-ingest는 durable ingest를 중단하고 source를 raw/ 아래로 옮길지 사용자에게 확인한다."
+      },
+      {
+        "case": "Draft dry-run fails",
+        "behavior": "publish-draft는 적용을 중단하고 validation issue를 출력한다. report path는 실제로 생성된 경우에만 출력한다."
+      },
+      {
+        "case": "Post-apply lint fails",
+        "behavior": "publish-draft는 lint issue를 출력하고 page/index/log 변경을 rollback한다."
+      },
+      {
+        "case": "Human-locked page or section",
+        "behavior": "wiki-update는 직접 수정하지 않고 scratch/reports 또는 scratch/review에 proposed patch를 남긴다."
+      },
+      {
+        "case": "Contradiction affects a decision",
+        "behavior": "skill은 양쪽 근거를 기록하고 human review 항목으로 분리한다."
+      },
+      {
+        "case": "answer-and-capture lacks provenance",
+        "behavior": "draft는 publish하지 않고 provenance 보강이 필요한 상태로 report한다."
+      }
+    ],
+    "contracts": [
+      {
+        "name": "User-facing command vocabulary",
+        "rules": [
+          "새 원본 반영은 wiki-ingest로 부른다.",
+          "기존 page 변경은 wiki-update로 부른다.",
+          "질의응답은 wiki-query로 부른다.",
+          "wiki-capture라는 이름은 사용하지 않는다."
+        ]
+      },
+      {
+        "name": "Durable mutation boundary",
+        "rules": [
+          "skill은 durable wiki page를 직접 최종 저장하지 않는다.",
+          "skill은 scratch/drafts 또는 scratch/reports를 생성할 수 있다.",
+          "wiki/ durable 변경은 CLI validation path를 통과해야 한다."
+        ]
+      }
+    ],
+    "surfaces": [
+      {
+        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "role": "New repo-local skill instructions for ingesting sources into the wiki.",
+        "owner": "agent"
+      },
+      {
+        "path": "agents/skills/wiki-update/SKILL.md",
+        "role": "New repo-local skill instructions for updating existing durable pages.",
+        "owner": "agent"
+      },
+      {
+        "path": "agents/skills/wiki-query/SKILL.md",
+        "role": "New repo-local skill instructions for query and capture modes.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/cli.py",
+        "role": "CLI facade command routing.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/mcp_server.py",
+        "role": "MCP wrapper parity for facade commands.",
+        "owner": "agent"
+      },
+      {
+        "path": "docs/usage.md",
+        "role": "Human-facing simplified usage guide.",
+        "owner": "agent"
+      },
+      {
+        "path": "docs/architecture.md",
+        "role": "Technical explanation of skill and CLI boundary.",
+        "owner": "agent"
+      },
+      {
+        "path": "AGENTS.md",
+        "role": "First-read agent contract that points to repo-local skill workflows and publish-draft.",
+        "owner": "agent"
+      },
+      {
+        "path": "init-vault.sh",
+        "role": "Bootstrap script that copies human docs and repo-local skill workflow files into new vaults.",
+        "owner": "agent"
+      }
+    ],
+    "testingStrategy": [
+      {
+        "command": "python3 -m unittest tests/test_wiki_tools.py",
+        "expected": "Tests cover publish-draft sequencing, dry-run failure safety, rollback behavior, health alias, bootstrap copied docs, AGENTS entrypoint alignment, and MCP tool listing/calls."
+      },
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py",
+        "expected": "All wiki quality and tooling tests pass."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py health",
+        "expected": "Writes scratch/reports/YYYY-MM-DD-lint.md, exits with the same status as lint, and exits 0 for the current vault."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py publish-draft scratch/drafts/example.json --report",
+        "expected": "Runs clean pre-lint and dry-run before apply, rolls back page/index/log changes when post-apply lint fails, and writes a publish report only when validation succeeds."
+      }
+    ],
+    "validation": [
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
+        "purpose": "Validate the Stenc spec JSON source."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm rendered pages exist for all Stenc JSON documents."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py lint --report",
+        "purpose": "Confirm the current wiki still passes quality lint."
+      }
+    ],
+    "agentInstructions": [
+      "Use this spec before implementing repo-local wiki skill workflows or CLI facade commands.",
+      "Do not replace deterministic CLI validation with agent-only behavior.",
+      "Prefer wiki-ingest naming for new-source reflection; do not use wiki-capture."
+    ],
+    "reviewChecklist": [
+      "The spec defines exactly one workflow family.",
+      "The spec preserves the cognition and mutation separation.",
+      "Every user-facing workflow maps to CLI validation or report behavior.",
+      "The query modes are distinguishable and actionable."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Completeness",
+        "purpose": "Confirm requirements cover ingest, update, query, CLI facade, MCP parity, docs, and validation."
+      },
+      {
+        "name": "No hidden mutation",
+        "purpose": "Confirm skill responsibilities do not bypass apply-draft, lint, or report generation."
+      },
+      {
+        "name": "Naming consistency",
+        "purpose": "Confirm wiki-ingest is used instead of wiki-capture."
+      }
+    ],
+    "implementationHandoff": {
+      "planLocation": "docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+      "requiredSkill": "superpowers:writing-plans",
+      "notes": [
+        "Use Stenc plan JSON instead of Markdown because this repo freezes implementation plans as Stenc documents.",
+        "Run Stenc validation and rendered-page checks after writing the plan."
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "Human Mental Model",
+        "content": "The intended human model is: add a source, ask the agent to reflect it into the wiki, then ask questions against the validated wiki.",
+        "items": [
+          "원본을 wiki에 반영해주세요.",
+          "기존 page를 업데이트해주세요.",
+          "현재 wiki 기준으로 질문에 답해주세요."
+        ],
+        "facts": [],
+        "links": [
+          {
+            "label": "Usage guide",
+            "target": "docs/usage.md",
+            "purpose": "Human-facing guide that introduces the simplified workflow names."
+          }
+        ],
+        "steps": [],
+        "subSections": [],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": []
+  }
+}

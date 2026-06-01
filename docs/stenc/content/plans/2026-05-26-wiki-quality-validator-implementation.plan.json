@@ -1,0 +1,422 @@
+{
+  "schemaVersion": 2,
+  "docType": "plan",
+  "id": "plan:2026-05-26-wiki-quality-validator-implementation",
+  "slug": "2026-05-26-wiki-quality-validator-implementation",
+  "status": "canonical",
+  "title": "Wiki Quality Validator Implementation Plan",
+  "description": "tools/wiki validate-page와 lint를 구현하기 위한 실행 계획.",
+  "owner": "agent",
+  "createdAt": "2026-05-26",
+  "updatedAt": "2026-05-26",
+  "links": {
+    "sourceOfTruth": [
+      "docs/stenc/content/specs/2026-05-26-wiki-quality-validator.spec.json",
+      "AGENTS.md",
+      "tests/test_wiki_quality_baseline.py"
+    ],
+    "relatedSpec": "spec:2026-05-26-wiki-quality-validator"
+  },
+  "page": {
+    "humanSummary": "다음 구현은 MCP나 ingest가 아니라 deterministic validator와 lint부터 진행한다.",
+    "agentSummary": "Implement tests first, then tools/wiki parser, schema validator, link/index/log/provenance checks, CLI, report output, and final verification.",
+    "styleTemplate": "operator-console"
+  },
+  "body": {
+    "goal": "현재 vault가 품질 스키마를 실제로 강제하도록 tools/wiki validate-page와 lint 명령을 구현한다.",
+    "architecture": "A small Python CLI coordinates focused library modules. Tests define malformed and valid wiki pages. The CLI reads but does not mutate wiki files unless a future apply command is explicitly added.",
+    "techStack": [
+      "Python 3",
+      "unittest",
+      "pathlib",
+      "re",
+      "json",
+      "Stenc JSON docs"
+    ],
+    "workerInstructions": {
+      "requiredSubSkills": [
+        "superpowers:subagent-driven-development",
+        "superpowers:executing-plans",
+        "superpowers:test-driven-development",
+        "superpowers:verification-before-completion"
+      ],
+      "trackingSyntax": "- [ ]",
+      "note": "각 slice는 failing test를 먼저 만들고, 통과 구현 후 전체 검증을 실행한다."
+    },
+    "scopeCheck": {
+      "assessment": "단일 repo-local tooling 작업이다. MCP, ingest automation, raw parsing은 제외한다.",
+      "decomposition": "Parser/schema, links/index/log/provenance, CLI/reporting, docs alignment 순서로 나눈다."
+    },
+    "currentState": "품질 스키마와 baseline pages가 존재하고, tools/wiki에는 validate-page와 lint 명령이 구현되어 있다. Current vault lint는 exit 0으로 통과한다.",
+    "targetState": "구현된 validator baseline을 유지하고, 다음 단계에서는 apply-draft 또는 source hashing을 별도 Stenc plan으로 다룬다.",
+    "scope": {
+      "in": [
+        "tools/wiki/cli.py",
+        "tools/wiki/lib/frontmatter.py",
+        "tools/wiki/lib/schema.py",
+        "tools/wiki/lib/links.py",
+        "tools/wiki/lib/lint.py",
+        "tests/test_wiki_tools.py",
+        "scratch/reports lint output",
+        "README/tools docs updates if command usage changes"
+      ],
+      "out": [
+        "MCP server",
+        "apply-draft implementation",
+        "semantic extraction",
+        "auto-fixing pages",
+        "claim truth scoring",
+        "raw file mutation"
+      ]
+    },
+    "fileStructure": [
+      {
+        "action": "Add",
+        "path": "tools/wiki/cli.py",
+        "responsibility": "Command routing, exit codes, output formatting."
+      },
+      {
+        "action": "Add",
+        "path": "tools/wiki/lib/frontmatter.py",
+        "responsibility": "Parse markdown frontmatter and body."
+      },
+      {
+        "action": "Add",
+        "path": "tools/wiki/lib/schema.py",
+        "responsibility": "Required field and enum validation."
+      },
+      {
+        "action": "Add",
+        "path": "tools/wiki/lib/links.py",
+        "responsibility": "Wiki link extraction and resolution."
+      },
+      {
+        "action": "Add",
+        "path": "tools/wiki/lib/lint.py",
+        "responsibility": "Repo-wide orchestration and report model."
+      },
+      {
+        "action": "Add",
+        "path": "tests/test_wiki_tools.py",
+        "responsibility": "TDD coverage for validator behavior."
+      }
+    ],
+    "slices": [
+      {
+        "id": "slice-1",
+        "title": "Parser and schema validation",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/lib/frontmatter.py",
+          "tools/wiki/lib/schema.py",
+          "tests/test_wiki_tools.py"
+        ],
+        "files": [
+          {
+            "action": "Add",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Failing tests for missing frontmatter, missing required fields, and invalid enum values."
+          },
+          {
+            "action": "Add",
+            "path": "tools/wiki/lib/frontmatter.py",
+            "role": "Markdown parser for YAML frontmatter block and body."
+          },
+          {
+            "action": "Add",
+            "path": "tools/wiki/lib/schema.py",
+            "role": "Schema validator returning structured issues."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing tests",
+            "status": "done",
+            "instruction": "Add unittest cases that prove missing frontmatter, missing quality fields, and invalid type/status/confidence values fail validation.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "Tests fail because validator modules do not exist or behavior is not implemented.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement parser and schema validator",
+            "status": "done",
+            "instruction": "Implement minimal deterministic parsing and schema validation needed to satisfy the tests. Do not implement link or provenance logic in this slice.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Verify green",
+            "status": "done",
+            "instruction": "Run focused tests and baseline tests.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py tests/test_wiki_quality_baseline.py",
+            "expected": "All tests pass.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Schema validation tests pass.",
+          "Existing baseline quality test still passes."
+        ]
+      },
+      {
+        "id": "slice-2",
+        "title": "Link, index, log, and provenance checks",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/lib/links.py",
+          "tools/wiki/lib/lint.py",
+          "tests/test_wiki_tools.py"
+        ],
+        "files": [
+          {
+            "action": "Add",
+            "path": "tools/wiki/lib/links.py",
+            "role": "Extract and resolve Obsidian links."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/lint.py",
+            "role": "Coordinate repo-wide validation checks."
+          },
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add failing tests for broken links, log format, and provenance signals."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Add failing structural tests",
+            "status": "done",
+            "instruction": "Test broken wiki links, missing index coverage for core pages, invalid log event prefix, and quality.provenance mismatch with body evidence signals.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "New tests fail until link and lint orchestration are implemented.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement validators",
+            "status": "done",
+            "instruction": "Implement link extraction, wiki path resolution, log prefix validation, and basic provenance signal checks. Keep claim truth arbitration out of scope.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Verify current vault",
+            "status": "done",
+            "instruction": "Run tests and ensure current wiki baseline has no lint issues under the implemented checks.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py tests/test_wiki_quality_baseline.py",
+            "expected": "All tests pass.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Broken links are detected in tests.",
+          "Current vault links resolve.",
+          "Log format validation is covered.",
+          "Provenance signal mismatch is covered."
+        ]
+      },
+      {
+        "id": "slice-3",
+        "title": "CLI and report output",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/cli.py",
+          "tools/wiki/lib/lint.py",
+          "scratch/reports/"
+        ],
+        "files": [
+          {
+            "action": "Add",
+            "path": "tools/wiki/cli.py",
+            "role": "Expose validate-page and lint commands."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/lint.py",
+            "role": "Add report rendering for lint results."
+          },
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add CLI behavior tests where practical."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Add CLI tests",
+            "status": "done",
+            "instruction": "Test that validate-page returns exit code 0 for a valid page and non-zero for an invalid temporary fixture. Test lint can run against the current repo.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "CLI tests fail until cli.py exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement CLI commands",
+            "status": "done",
+            "instruction": "Implement argparse-based validate-page and lint commands. Print concise output grouped by severity and path.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Implement lint report",
+            "status": "done",
+            "instruction": "Add optional report writing to scratch/reports/YYYY-MM-DD-lint.md. The report must be human-readable and include counts, issue groups, and applied fixes as none.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "python3 tools/wiki/cli.py validate-page wiki/overview.md exits 0.",
+          "python3 tools/wiki/cli.py lint exits 0 on the current vault.",
+          "A lint report can be generated without mutating wiki pages."
+        ]
+      },
+      {
+        "id": "slice-4",
+        "title": "Documentation alignment and final verification",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/README.md",
+          "README.md",
+          "docs/stenc/content/plans/2026-05-26-wiki-quality-validator-implementation.plan.json"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tools/wiki/README.md",
+            "role": "Document actual commands and current limitations."
+          },
+          {
+            "action": "Modify",
+            "path": "README.md",
+            "role": "Point users to lint command if appropriate."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Update command docs",
+            "status": "done",
+            "instruction": "Document validate-page, lint, expected exit codes, and what the validator intentionally does not decide.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Run final verification",
+            "status": "done",
+            "instruction": "Run all required verification commands and inspect git diff.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py && python3 tools/wiki/cli.py lint && git diff --check",
+            "expected": "All commands exit 0.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Docs match implemented command behavior.",
+          "All tests pass.",
+          "lint passes on the current vault.",
+          "git diff --check passes."
+        ]
+      }
+    ],
+    "executionOrder": [
+      "slice-1",
+      "slice-2",
+      "slice-3",
+      "slice-4"
+    ],
+    "risks": [
+      {
+        "risk": "YAML parsing becomes too clever or too weak.",
+        "mitigation": "Start with constrained frontmatter shapes used by this vault; add PyYAML only if tests prove the constrained parser is insufficient."
+      },
+      {
+        "risk": "Validator starts judging claim truth.",
+        "mitigation": "Limit provenance checks to evidence signals and review flags. Human review resolves contested truth."
+      },
+      {
+        "risk": "CLI mutates wiki pages prematurely.",
+        "mitigation": "This plan only implements validation and report writing. Auto-fix and apply-draft remain out of scope."
+      }
+    ],
+    "validation": [
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-26-wiki-quality-validator-implementation.plan.json",
+        "purpose": "Validate this Stenc plan source."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm rendered pages exist for Stenc JSON sources."
+      },
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+        "purpose": "Confirm current quality baseline remains valid."
+      }
+    ],
+    "agentInstructions": [
+      "Follow executionOrder unless new evidence invalidates a slice.",
+      "Use TDD for each implementation slice.",
+      "Do not implement MCP, ingest, or auto-fix behavior in this plan.",
+      "Do not mutate raw/.",
+      "Before claiming completion, run the full verification command from slice-4."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Spec coverage",
+        "purpose": "Confirm every spec requirement maps to a slice or explicit out-of-scope decision."
+      },
+      {
+        "name": "No placeholders",
+        "purpose": "Confirm each step contains a concrete file, command, or implementation instruction."
+      },
+      {
+        "name": "Quality-first sequencing",
+        "purpose": "Confirm lint and validation land before ingest or MCP."
+      }
+    ],
+    "executionHandoff": {
+      "defaultPath": "docs/stenc/content/plans/2026-05-26-wiki-quality-validator-implementation.plan.json",
+      "options": [
+        {
+          "label": "Inline Execution",
+          "description": "Execute the plan in this session with TDD and verification gates.",
+          "requiredSkill": "superpowers:executing-plans"
+        },
+        {
+          "label": "Subagent-Driven",
+          "description": "Dispatch separate workers for parser/schema and link/lint slices after slice ownership is clear.",
+          "requiredSkill": "superpowers:subagent-driven-development"
+        }
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "No Placeholders",
+        "content": "Every implementation step should leave a runnable command, a concrete module, or a test assertion.",
+        "items": [
+          "Do not add empty functions for future work.",
+          "Do not mark unsupported checks as passing.",
+          "Do not call the validator complete until it fails on bad fixtures and passes on the current vault."
+        ],
+        "codeBlocks": []
+      },
+      {
+        "heading": "Next Handoff",
+        "content": "After this plan is complete, the next architectural step is apply-draft or ingest planning, not MCP.",
+        "items": [
+          "apply-draft should consume structured semantic drafts.",
+          "MCP should wrap stable CLI commands only after local behavior settles."
+        ],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": [
+      "Should lint report writing be enabled by default or only behind --report?"
+    ]
+  }
+}

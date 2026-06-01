@@ -1,0 +1,6 @@
+.DS_Store
+.obsidian/workspace.json
+__pycache__/
+*.pyc
+scratch/reports/*.tmp
+scratch/reports/*.cache

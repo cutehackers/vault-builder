@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "operation": "batch-upsert-pages",
+  "pages": [
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/concepts/example.md",
+      "frontmatter": {
+        "title": "Example",
+        "type": "concept",
+        "status": "active",
+        "created": "2026-05-30",
+        "updated": "2026-05-30",
+        "owner": "agent",
+        "summary": "One-sentence summary of the durable page.",
+        "source_count": 0,
+        "tags": [],
+        "related": [],
+        "confidence": "medium",
+        "quality": {
+          "provenance": "none",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Example\n\nDraft body. Add provenance before using section or claim provenance.\n",
+      "index": {
+        "section": "Concepts",
+        "target": "concepts/example",
+        "summary": "One-sentence summary of the durable page."
+      }
+    }
+  ],
+  "log": {
+    "event_type": "repair",
+    "title": "Apply Example Batch",
+    "items": [
+      "Added [[concepts/example]]."
+    ]
+  }
+}

@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 2,
+  "docType": "spec",
+  "id": "spec:2026-05-26-wiki-quality-validator",
+  "slug": "2026-05-26-wiki-quality-validator",
+  "status": "approved",
+  "title": "Wiki Quality Validator",
+  "description": "tools/wiki가 위키 품질 계약을 결정론적으로 검증하기 위한 동작 명세.",
+  "owner": "agent",
+  "createdAt": "2026-05-26",
+  "updatedAt": "2026-05-26",
+  "links": {
+    "sourceOfTruth": [
+      "AGENTS.md",
+      "wiki/index.md",
+      "wiki/log.md",
+      "tools/wiki/templates/frontmatter.yaml",
+      "tests/test_wiki_quality_baseline.py"
+    ],
+    "relatedPlans": [
+      "plan:2026-05-26-wiki-quality-validator-implementation"
+    ],
+    "relatedDecisions": [
+      "wiki/decisions/use-markdown-for-compiled-knowledge.md"
+    ]
+  },
+  "page": {
+    "humanSummary": "다음 단계는 위키 품질을 말로 약속하는 것이 아니라 tools/wiki 검증기로 강제하는 것이다.",
+    "agentSummary": "Implement deterministic validation for frontmatter, topology, links, provenance signals, index coverage, log entries, and human-lock safety before extending ingest automation.",
+    "styleTemplate": "evidence-led"
+  },
+  "body": {
+    "goal": "현재 품질 게이트 스키마를 실행 가능한 validator와 lint workflow로 고정하여, durable wiki update가 구조적으로 검증되도록 만든다.",
+    "problem": "AGENTS.md와 초기 wiki baseline은 품질 규칙을 정의하지만, 아직 tools/wiki가 이를 강제하지 않는다. 이 상태에서 ingest 자동화를 먼저 만들면 검증되지 않은 LLM 출력이 wiki에 들어갈 수 있다.",
+    "scope": {
+      "in": [
+        "tools/wiki의 로컬 CLI 진입점",
+        "frontmatter schema validation",
+        "wiki page discovery and topology checks",
+        "Obsidian-style link existence checks",
+        "index coverage checks",
+        "log entry format checks",
+        "human-lock marker detection",
+        "basic provenance signal checks",
+        "machine-readable and human-readable lint output"
+      ],
+      "out": [
+        "MCP server implementation",
+        "LLM semantic extraction",
+        "raw PDF or image parsing",
+        "automatic page merge decisions",
+        "claim truth arbitration",
+        "Obsidian plugin integration"
+      ]
+    },
+    "architecture": {
+      "summary": "CLI는 thin entrypoint이고, 검증 로직은 focused library modules로 나눈다. Validator는 wiki 파일을 읽고, schema/link/index/log/provenance/human-lock 문제를 issue list로 반환한다. CLI는 이 issue list를 exit code와 report로 노출한다.",
+      "flow": [
+        "사용자 또는 agent가 python tools/wiki/cli.py validate-page <path> 또는 python tools/wiki/cli.py lint를 실행한다.",
+        "CLI가 repository root와 wiki root를 확인한다.",
+        "frontmatter parser가 YAML block과 body를 분리한다.",
+        "schema validator가 required fields, type/status/confidence/quality enum을 확인한다.",
+        "link validator가 [[...]] 링크를 wiki 내 실제 markdown 파일로 해석한다.",
+        "index validator가 durable initial/core pages가 index 또는 map에서 도달 가능한지 확인한다.",
+        "log validator가 parseable event prefix를 확인한다.",
+        "provenance validator가 substantive sections에 Source, Evidence, provenance comment, claim table evidence 중 하나가 있는지 점검한다.",
+        "report writer가 scratch/reports/YYYY-MM-DD-lint.md에 결과를 저장한다."
+      ]
+    },
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "title": "Frontmatter contract validation",
+        "detail": "모든 wiki markdown page는 AGENTS.md Section 4의 required frontmatter와 quality block을 가져야 한다.",
+        "acceptanceCriteria": [
+          "frontmatter가 없으면 validate-page가 실패한다.",
+          "required key가 없으면 missing field issue가 출력된다.",
+          "quality.provenance, quality.links, quality.contradictions, quality.review_required가 없으면 실패한다.",
+          "type, status, confidence, quality enum 값이 허용 목록 밖이면 실패한다."
+        ]
+      },
+      {
+        "id": "REQ-2",
+        "title": "Topology and durable page discovery",
+        "detail": "Validator는 wiki/ 아래 durable markdown page를 대상으로 하고 scratch/의 draft/review 파일을 source truth로 취급하지 않는다.",
+        "acceptanceCriteria": [
+          "wiki/**/*.md 파일은 검증 대상이다.",
+          "scratch/drafts와 scratch/review는 durable wiki validation 대상이 아니다.",
+          "raw/ 파일은 읽을 수 있지만 수정하거나 wiki page로 오인하지 않는다."
+        ]
+      },
+      {
+        "id": "REQ-3",
+        "title": "Link validation",
+        "detail": "Obsidian-style links must resolve to existing wiki pages where possible.",
+        "acceptanceCriteria": [
+          "[[concepts/compiled-knowledge]]는 wiki/concepts/compiled-knowledge.md로 resolve된다.",
+          "존재하지 않는 wiki link는 broken link issue로 보고된다.",
+          "plain raw path evidence는 wiki link validation과 분리해서 처리한다."
+        ]
+      },
+      {
+        "id": "REQ-4",
+        "title": "Index coverage",
+        "detail": "중요 durable pages는 wiki/index.md 또는 map page에서 도달 가능해야 한다.",
+        "acceptanceCriteria": [
+          "overview, inbox, log, initial concept/workflow/decision/map pages가 index에 없으면 lint가 실패한다.",
+          "새 durable page가 index와 map 어디에도 없으면 orphan/navigation issue로 보고된다.",
+          "index에 존재하지 않는 page link가 있으면 broken index issue로 보고된다."
+        ]
+      },
+      {
+        "id": "REQ-5",
+        "title": "Log event validation",
+        "detail": "wiki/log.md entries must keep the parseable prefix required by AGENTS.md.",
+        "acceptanceCriteria": [
+          "## [YYYY-MM-DD] event-type | Short Title 형식이 하나 이상 있어야 한다.",
+          "event-type이 허용 목록 밖이면 issue로 보고한다.",
+          "append-only 여부는 이 단계에서 Git diff 기반으로 강제하지 않고 future work로 둔다."
+        ]
+      },
+      {
+        "id": "REQ-6",
+        "title": "Provenance signal validation",
+        "detail": "Validator는 claim-level truth를 판정하지 않지만, section-level provenance signal 누락은 탐지해야 한다.",
+        "acceptanceCriteria": [
+          "quality.provenance가 section 또는 claim인데 본문에 Source, Evidence, provenance comment, Supporting Sources, claim table evidence가 전혀 없으면 issue를 낸다.",
+          "quality.provenance가 none인 page는 source_count가 0이어야 한다.",
+          "source_count는 증거가 아니라 lintable metadata로 취급한다."
+        ]
+      },
+      {
+        "id": "REQ-7",
+        "title": "Human-lock safety",
+        "detail": "human-locked pages and sections must be detected so future write paths can avoid unsafe overwrites.",
+        "acceptanceCriteria": [
+          "<!-- human-locked --> marker is reported as locked page metadata.",
+          "<!-- human-locked:start --> and <!-- human-locked:end --> ranges are detected.",
+          "unmatched lock markers produce a validation issue."
+        ]
+      },
+      {
+        "id": "REQ-8",
+        "title": "Report and exit code contract",
+        "detail": "CLI output must be actionable for humans and agents.",
+        "acceptanceCriteria": [
+          "No issues returns exit code 0.",
+          "Validation issues return non-zero exit code.",
+          "lint can write scratch/reports/YYYY-MM-DD-lint.md.",
+          "Report groups issues by severity and file path."
+        ]
+      }
+    ],
+    "approaches": [
+      {
+        "name": "Minimal deterministic Python CLI",
+        "tradeoffs": [
+          "Fastest path with no external runtime dependency beyond Python standard library plus optional PyYAML.",
+          "Good fit for current repo size and local-first workflow.",
+          "YAML parsing requires either a tiny constrained parser or dependency decision."
+        ],
+        "recommendation": "Recommended for the next step. Keep the first validator local and deterministic before adding MCP."
+      },
+      {
+        "name": "Full MCP-first implementation",
+        "tradeoffs": [
+          "Good future agent integration surface.",
+          "Premature before CLI contract is stable.",
+          "Can hide local validation semantics behind protocol details."
+        ],
+        "recommendation": "Do not start here."
+      },
+      {
+        "name": "Markdown-only manual checklist",
+        "tradeoffs": [
+          "No code to maintain.",
+          "Does not enforce quality and repeats the root problem.",
+          "Hard for future agents to verify consistently."
+        ],
+        "recommendation": "Reject for this phase."
+      }
+    ],
+    "components": [
+      {
+        "name": "tools/wiki/cli.py",
+        "responsibility": "Expose validate-page and lint commands with stable exit codes.",
+        "interfaces": [
+          "python tools/wiki/cli.py validate-page wiki/overview.md",
+          "python tools/wiki/cli.py lint"
+        ],
+        "dependencies": [
+          "tools/wiki/lib/*"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/frontmatter.py",
+        "responsibility": "Parse YAML frontmatter and markdown body without mutating files.",
+        "interfaces": [
+          "parse_page(path) -> Page"
+        ],
+        "dependencies": [
+          "Python standard library or explicitly chosen YAML parser"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/schema.py",
+        "responsibility": "Validate required frontmatter fields and enum values.",
+        "interfaces": [
+          "validate_schema(page) -> list[Issue]"
+        ],
+        "dependencies": [
+          "frontmatter parser"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/links.py",
+        "responsibility": "Extract and resolve Obsidian-style links against wiki markdown files.",
+        "interfaces": [
+          "validate_links(page, wiki_index) -> list[Issue]"
+        ],
+        "dependencies": [
+          "wiki page discovery"
+        ]
+      },
+      {
+        "name": "tools/wiki/lib/lint.py",
+        "responsibility": "Coordinate repo-wide checks and report generation.",
+        "interfaces": [
+          "lint_repo(root) -> LintResult"
+        ],
+        "dependencies": [
+          "schema, links, provenance, log validators"
+        ]
+      }
+    ],
+    "dataFlow": [
+      "Markdown files are read from wiki/.",
+      "Each file is parsed into frontmatter and body.",
+      "Validators emit structured issues with severity, path, message, and optional line.",
+      "CLI prints a concise summary and optionally writes a report.",
+      "Tests assert both passing baseline behavior and failing fixture behavior."
+    ],
+    "errorHandling": [
+      {
+        "case": "Invalid or missing frontmatter",
+        "behavior": "Return an issue tied to the file and exit non-zero for validate-page."
+      },
+      {
+        "case": "Broken wiki link",
+        "behavior": "Return a broken-link issue without editing the page."
+      },
+      {
+        "case": "Unreadable file",
+        "behavior": "Return an error issue and continue linting other files when running repo-wide lint."
+      },
+      {
+        "case": "Ambiguous source or claim support",
+        "behavior": "Report needs-review; do not rewrite or judge the claim."
+      }
+    ],
+    "contracts": [
+      {
+        "name": "Durable wiki boundary",
+        "rules": [
+          "Only wiki/**/*.md pages are durable compiled knowledge.",
+          "scratch/drafts and scratch/review are not source truth.",
+          "raw/ must never be modified by validator commands."
+        ]
+      },
+      {
+        "name": "Quality metadata boundary",
+        "rules": [
+          "Frontmatter stores routing and quality triage metadata.",
+          "Claim evidence belongs in the body near the claim.",
+          "Validation reports belong in scratch/reports, not as churn-heavy timestamps in every page."
+        ]
+      }
+    ],
+    "surfaces": [
+      {
+        "path": "tools/wiki/cli.py",
+        "role": "CLI entrypoint for validation and linting.",
+        "owner": "agent"
+      },
+      {
+        "path": "tools/wiki/lib/",
+        "role": "Focused deterministic validation modules.",
+        "owner": "agent"
+      },
+      {
+        "path": "tests/test_wiki_quality_baseline.py",
+        "role": "Existing baseline quality test.",
+        "owner": "agent"
+      },
+      {
+        "path": "scratch/reports/",
+        "role": "Human-readable lint and audit reports.",
+        "owner": "agent"
+      }
+    ],
+    "testingStrategy": [
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+        "expected": "Existing baseline remains green."
+      },
+      {
+        "command": "python3 -m unittest tests/test_wiki_tools.py",
+        "expected": "New validator tests cover missing frontmatter, broken links, bad enum values, log format, and provenance signal checks."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py lint",
+        "expected": "Current vault exits 0 after implementation."
+      }
+    ],
+    "validation": [
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-26-wiki-quality-validator.spec.json",
+        "purpose": "Validate this Stenc spec source."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm rendered Stenc pages exist for JSON sources."
+      }
+    ],
+    "agentInstructions": [
+      "Read this spec before implementing tools/wiki validation.",
+      "Do not implement MCP until validate-page and lint have stable local behavior.",
+      "Use tests that demonstrate the validator fails on malformed wiki pages before making it pass.",
+      "Do not let CLI write to raw/.",
+      "Do not use frontmatter as a replacement for claim-level evidence in the markdown body."
+    ],
+    "reviewChecklist": [
+      "Every requirement maps to a plan slice.",
+      "The first implementation target is deterministic validation, not ingest or MCP.",
+      "The spec preserves the durable boundary between raw, scratch, and wiki.",
+      "The spec does not require LLM judgment inside deterministic tooling."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Root-cause alignment",
+        "purpose": "Confirm the spec solves the enforcement gap instead of adding another checklist."
+      },
+      {
+        "name": "Boundary clarity",
+        "purpose": "Confirm raw, scratch, wiki, and tools responsibilities are distinct."
+      },
+      {
+        "name": "Testability",
+        "purpose": "Confirm every required behavior can be tested locally."
+      }
+    ],
+    "implementationHandoff": {
+      "planLocation": "docs/stenc/content/plans/2026-05-26-wiki-quality-validator-implementation.plan.json",
+      "requiredSkill": "superpowers:executing-plans",
+      "notes": [
+        "Proceed only after this spec and its related plan validate and render through Stenc.",
+        "Keep implementation local-first and deterministic."
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "Quality Position",
+        "content": "The wiki quality system should make invalid states visible and block completion claims until validation passes.",
+        "items": [
+          "LLM output is a proposal.",
+          "tools/wiki validation is the write boundary.",
+          "Human review resolves contested judgment."
+        ],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": [
+      "Should the first parser depend on PyYAML, or should it support only the constrained YAML shapes used in this vault?"
+    ]
+  }
+}

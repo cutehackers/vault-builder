@@ -1,0 +1,12 @@
+{
+  "max": {
+    "pending_reviews": 0,
+    "contested_claim_rows": 0,
+    "unreviewed_contested_claim_rows": 0,
+    "stale_sources": 0,
+    "unregistered_sources": 0,
+    "orphan_pages": 0,
+    "pages_without_claim_level_provenance": 0,
+    "deprecated_linked_pages": 0
+  }
+}

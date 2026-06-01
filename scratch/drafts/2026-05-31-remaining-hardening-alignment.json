@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "operation": "batch-upsert-pages",
+  "pages": [
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/overview.md",
+      "frontmatter": {
+        "title": "Overview",
+        "type": "overview",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Executive briefing for the LLM Wiki and its quality-gated operating model.",
+        "source_count": 1,
+        "tags": [
+          "overview",
+          "llm-wiki",
+          "quality"
+        ],
+        "related": [
+          "index",
+          "maps/wiki-operating-map",
+          "workflows/ingest-new-source"
+        ],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Overview\n\n## Scope\n\nThis vault is an LLM-managed compiled knowledge system. Raw source material lives under `raw/`, while durable synthesized knowledge lives under `wiki/`.\n\nThe wiki is designed to improve through ingestion, querying, linting, mapping, metrics, and explicit human review.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Current Synthesis\n\nThe central operating model is a quality-gated compiled wiki:\n\n1. Humans provide or reference source material.\n2. LLM agents extract durable knowledge and propose updates.\n3. Deterministic wiki tooling validates structure, links, wiki-root link boundaries, provenance, source hashes, review state, human locks, maps, and maintenance signals.\n4. Durable knowledge is written to markdown and preserved by Git.\n\nStatus: inferred\nConfidence: high\nRationale: This follows the vault contract in `AGENTS.md` and the approved improvement direction.\n\n## Current Architecture\n\nThe canonical architecture definition is `docs/LLM-WIKI.md`. `AGENTS.md` is the concise agent entrypoint, `docs/agent/OPERATING-SCHEMA.md` is the detailed reference, and `docs/agent/DRAFTS.md` defines semantic draft handoff. The implemented tools support page validation, wiki linting, raw source hashing, deterministic source registration, transactional JSON draft publication, idempotent review-backed merge scans, generated maps, configurable maintenance metrics, repo-local release gating, and stdio MCP access.\n\n## Major Areas\n\n- [[concepts/compiled-knowledge]] - The core idea that wiki pages are compiled artifacts, not raw notes.\n- [[concepts/llm-maintained-wiki]] - The agent-maintained operating style for this vault.\n- [[concepts/source-of-truth]] - The boundary between immutable raw input and mutable compiled knowledge.\n- [[workflows/ingest-new-source]] - The main workflow for turning raw input into grounded wiki pages.\n- [[workflows/wiki-linting]] - The workflow for keeping the wiki healthy over time.\n- [[maps/topic-map]] - Generated map of durable wiki pages by type and tag.\n- [[maps/source-map]] - Generated map of raw source registration state.\n- [[maps/review-map]] - Generated map of unresolved human review items.\n- [[maps/lifecycle-map]] - Generated map of stale, contested, deprecated, and source-attention signals.\n\n## Key Decisions\n\n- [[decisions/use-markdown-for-compiled-knowledge]] - Markdown plus Git is the durable knowledge store.\n\n## Open Questions\n\n- What richer semantic extraction prompts should agents use before `publish-draft`?\n- When should `scratch/review/` items be promoted into dedicated claim pages?\n- Which operator-facing dashboards should be added for long-running vault maintenance?\n\n## Recommended Reading Order\n\n1. [[concepts/source-of-truth]]\n2. [[concepts/compiled-knowledge]]\n3. [[workflows/ingest-new-source]]\n4. [[workflows/wiki-linting]]\n5. [[maps/wiki-operating-map]]\n6. [[maps/topic-map]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| This vault separates immutable raw source material under raw/ from durable synthesized knowledge under wiki/. | stated | Human instruction in `AGENTS.md`. |\n| Durable wiki knowledge is validated by deterministic tooling before it is treated as permanent. | stated | Human instruction in `AGENTS.md`. |\n| Maintenance metrics thresholds are configurable, while release validation remains repo-local. | stated | Human instruction in current task. |\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/workflows/wiki-linting.md",
+      "frontmatter": {
+        "title": "Wiki Linting",
+        "type": "workflow",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Workflow for detecting structural, provenance, link, and navigation problems in the wiki.",
+        "source_count": 1,
+        "tags": [
+          "lint",
+          "quality",
+          "workflow"
+        ],
+        "related": [
+          "concepts/compiled-knowledge",
+          "workflows/ingest-new-source",
+          "maps/wiki-operating-map"
+        ],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        },
+        "primary_sources": [],
+        "derived_from": [
+          "AGENTS.md"
+        ]
+      },
+      "body": "# Wiki Linting\n\n## Goal\n\nKeep the wiki structurally valid, navigable, provenance-backed, and safe to build on.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Trigger\n\nRun linting after meaningful wiki changes, before claiming a wiki operation is complete, and periodically during maintenance.\n\n## Inputs\n\n- All markdown files under `wiki/`.\n- `wiki/index.md`.\n- `wiki/log.md`.\n- Raw source references.\n- Human-lock markers.\n- Review queue items under `scratch/review/`.\n\n## Procedure\n\n1. Check required frontmatter.\n2. Check broken wiki links and reject links that escape the `wiki/` root.\n3. Check index entries against existing pages.\n4. Check source pages, `canonical_source`, and `raw_sha256` drift.\n5. Flag pages with unsupported claims.\n6. Flag unresolved contradictions or review items.\n7. Check review item related pages and raw evidence references.\n8. Write a lint report under `scratch/reports/`.\n9. Route deterministic fixes through draft/publish or a targeted tool; route judgment-heavy items to review.\n\n## Outputs\n\n- Lint report.\n- Human-review list for contested or judgment-heavy issues.\n- Follow-up draft or targeted tool run when a deterministic repair is safe.\n\n## Quality Gates\n\n- [ ] Every durable page has required frontmatter.\n- [ ] Important pages are reachable from the index or a map.\n- [ ] Broken links and wiki-root escape links are reported or repaired.\n- [ ] Claims without provenance are reported.\n- [ ] Source hash drift is reported.\n- [ ] Review queue references still resolve.\n- [ ] Human-locked content is preserved.\n- [ ] Deletions, major merges, and contested claim changes require human approval.\n\n## Failure Handling\n\nIf linting cannot determine whether a claim is supported, mark the issue for review instead of rewriting the claim.\n\n## Related Pages\n\n- [[concepts/compiled-knowledge]]\n- [[workflows/ingest-new-source]]\n- [[maps/wiki-operating-map]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| Wiki linting checks frontmatter, links, navigation, provenance, source drift, log shape, review references, and human locks. | stated | Human instruction in `AGENTS.md`. |\n| Wiki links must resolve inside the wiki root and must not escape to sibling files. | stated | Human instruction in current task. |\n| Unclear support or contested judgment should be routed to review instead of silently rewritten. | stated | Human instruction in `AGENTS.md`. |\n"
+    }
+  ],
+  "log": {
+    "event_type": "repair",
+    "title": "Harden Remaining Wiki Operations",
+    "items": [
+      "Updated [[overview]] with configurable metrics and repo-local release gate status.",
+      "Updated [[workflows/wiki-linting]] with wiki-root link boundary checks."
+    ]
+  }
+}

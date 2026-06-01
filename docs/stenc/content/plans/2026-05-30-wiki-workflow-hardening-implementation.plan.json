@@ -1,0 +1,858 @@
+{
+  "schemaVersion": 2,
+  "docType": "plan",
+  "id": "plan:2026-05-30-wiki-workflow-hardening-implementation",
+  "slug": "2026-05-30-wiki-workflow-hardening-implementation",
+  "status": "canonical",
+  "title": "Wiki Workflow Hardening Implementation Plan",
+  "description": "subagent 검증에서 발견된 skill/CLI/MCP 품질 경계 문제를 테스트 우선으로 개선하는 Stenc 실행 계획.",
+  "owner": "agent",
+  "createdAt": "2026-05-30",
+  "updatedAt": "2026-05-30",
+  "links": {
+    "sourceOfTruth": [
+      "docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+      "AGENTS.md",
+      "docs/agent/DRAFTS.md",
+      "agents/skills/wiki-ingest/SKILL.md",
+      "agents/skills/wiki-update/SKILL.md",
+      "agents/skills/wiki-query/SKILL.md",
+      "tools/wiki/cli.py",
+      "tools/wiki/mcp_server.py",
+      "tools/wiki/lib/ingest.py",
+      "tools/wiki/lib/draft.py",
+      "tools/wiki/lib/workflow.py",
+      "tests/test_wiki_tools.py",
+      "tests/test_wiki_quality_baseline.py"
+    ],
+    "relatedSpec": "spec:2026-05-30-wiki-workflow-hardening"
+  },
+  "page": {
+    "humanSummary": "이 계획은 문서 계약 정정, ingest/draft 안전장치, query scaffolding, workflow CLI/MCP를 순서대로 구현한다.",
+    "agentSummary": "Implement wiki workflow hardening in test-first slices: align draft and skill docs around publish-draft, add no-clobber source ingest, enforce section-level human-lock preservation, standardize query reports/capture scaffolds, add workflow CLI checkpoint commands, expose MCP parity, and run full wiki/Stenc verification.",
+    "styleTemplate": "operator-console"
+  },
+  "body": {
+    "goal": "LLM Wiki agent skills and CLI/MCP workflows를 실제 운영에서 안전하게 사용할 수 있도록 subagent findings를 코드, 문서, 테스트에 반영한다.",
+    "architecture": "Repo-local skills remain the cognition layer. tools/wiki library functions provide deterministic checks and reports. CLI and MCP expose the same deterministic checkpoint behavior while durable semantic knowledge still enters through publish-draft.",
+    "techStack": [
+      "Python 3",
+      "unittest",
+      "argparse",
+      "JSON-RPC style MCP wrapper",
+      "Markdown docs",
+      "Stenc JSON docs"
+    ],
+    "workerInstructions": {
+      "requiredSubSkills": [
+        "superpowers:subagent-driven-development",
+        "superpowers:executing-plans",
+        "superpowers:test-driven-development",
+        "superpowers:verification-before-completion"
+      ],
+      "trackingSyntax": "- [ ]",
+      "note": "각 slice는 fail-first 테스트 또는 문서 검증 기준을 먼저 추가하고, 해당 slice만 통과시킨 뒤 다음 slice로 이동한다."
+    },
+    "scopeCheck": {
+      "assessment": "이 계획은 하나의 품질 hardening 프로젝트다. docs, deterministic guard, CLI/MCP workflow surface가 함께 움직여야 하므로 분리된 프로젝트로 나누면 계약 drift가 생긴다.",
+      "decomposition": "계약 정정, ingest no-clobber, section lock 보존, query scaffold, workflow CLI, MCP parity, 문서/검증 순서로 나눈다."
+    },
+    "currentState": "완료 전 상태는 wiki-ingest/wiki-update/wiki-query skill docs, publish-draft, health, MCP wiki_health/wiki_publish_draft만 갖춘 상태였다. docs/agent/DRAFTS.md는 apply-draft 중심 durable flow를 안내했고, ingest-source는 slug 기반 source page를 바로 썼으며, apply-draft는 page-level human lock만 차단했다.",
+    "targetState": "현재 목표 상태는 agent가 세 skill을 별도 추측 없이 실행할 수 있고, source ingest가 기존 source page를 clobber하지 않으며, draft publish가 section-level human lock을 보존하는 것이다. Query reports and capture drafts have stable scaffolds. workflow CLI/MCP commands provide deterministic checkpoint behavior and explicitly leave semantic extraction/query answering to the agent.",
+    "scope": {
+      "in": [
+        "docs/agent/DRAFTS.md publish-draft contract",
+        "agents/skills/wiki-ingest/SKILL.md hardening",
+        "agents/skills/wiki-update/SKILL.md hardening",
+        "agents/skills/wiki-query/SKILL.md hardening",
+        "tools/wiki/lib/ingest.py no-clobber behavior",
+        "tools/wiki/lib/draft.py section lock preservation",
+        "tools/wiki/lib/workflow.py checkpoint helpers",
+        "tools/wiki/cli.py workflow subcommands",
+        "tools/wiki/mcp_server.py workflow MCP tools",
+        "tests/test_wiki_tools.py and tests/test_wiki_quality_baseline.py coverage",
+        "docs/usage.md, docs/architecture.md, docs/LLM-WIKI.md, AGENTS.md alignment",
+        "Stenc validation and rendered page generation"
+      ],
+      "out": [
+        "Automatic LLM model invocation",
+        "Automatic semantic page extraction inside CLI",
+        "Automatic contradiction truth resolution",
+        "Remote MCP deployment packaging",
+        "Obsidian plugin UI",
+        "Git commit unless explicitly requested after implementation"
+      ]
+    },
+    "fileStructure": [
+      {
+        "action": "Modify",
+        "path": "tests/test_wiki_quality_baseline.py",
+        "responsibility": "Add documentation contract checks for publish-draft, skill completion gates, and absence of misleading workflow wording."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/agent/DRAFTS.md",
+        "responsibility": "Make publish-draft the default durable path and demote apply-draft to low-level dry-run/debug use."
+      },
+      {
+        "action": "Modify",
+        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "responsibility": "Clarify duplicate handling, source_count/provenance requirements, contradiction handling, and final validation."
+      },
+      {
+        "action": "Modify",
+        "path": "agents/skills/wiki-update/SKILL.md",
+        "responsibility": "Clarify section-lock behavior, report versus review routing, draft template, index/log expectations, and final validation."
+      },
+      {
+        "action": "Modify",
+        "path": "agents/skills/wiki-query/SKILL.md",
+        "responsibility": "Define query report filename/sections, mandatory citations for substantive answers, and answer-and-capture draft flow."
+      },
+      {
+        "action": "Modify",
+        "path": "tests/test_wiki_tools.py",
+        "responsibility": "Add fail-first tests for no-clobber ingest, section lock preservation, workflow CLI commands, query report scaffold, and MCP parity."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/lib/ingest.py",
+        "responsibility": "Implement idempotent source registration, drift/collision failure, human-lock protection, and richer ingest reports."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/lib/draft.py",
+        "responsibility": "Reject drafts that alter existing human-locked sections while preserving page-level lock behavior."
+      },
+      {
+        "action": "Add",
+        "path": "tools/wiki/lib/workflow.py",
+        "responsibility": "Provide shared deterministic workflow preflight, publish, and report-scaffold helpers."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/cli.py",
+        "responsibility": "Add workflow ingest/update/query subcommands backed by tools/wiki/lib/workflow.py."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/mcp_server.py",
+        "responsibility": "Expose workflow checkpoint tools with CLI-equivalent behavior."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/usage.md",
+        "responsibility": "Show simplified human workflow while naming workflow CLI/MCP as checkpoints, not semantic generators."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/architecture.md",
+        "responsibility": "Explain internal processing with no-clobber ingest, section lock preservation, query report/capture, and workflow checkpoints."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/LLM-WIKI.md",
+        "responsibility": "Update final architecture and next-step status for workflow hardening."
+      },
+      {
+        "action": "Modify",
+        "path": "AGENTS.md",
+        "responsibility": "Keep the short agent contract aligned with the hardened flow."
+      }
+    ],
+    "slices": [
+      {
+        "id": "slice-1",
+        "title": "Contract drift and skill hardening",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_quality_baseline.py",
+          "docs/agent/DRAFTS.md",
+          "agents/skills/wiki-ingest/SKILL.md",
+          "agents/skills/wiki-update/SKILL.md",
+          "agents/skills/wiki-query/SKILL.md"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_quality_baseline.py",
+            "role": "Add tests that reject apply-draft-centered durable flow and require skill-specific hardening terms."
+          },
+          {
+            "action": "Modify",
+            "path": "docs/agent/DRAFTS.md",
+            "role": "Replace durable apply instructions with publish-draft instructions."
+          },
+          {
+            "action": "Modify",
+            "path": "agents/skills/wiki-ingest/SKILL.md",
+            "role": "Add duplicate, provenance, contradiction, and final validation rules."
+          },
+          {
+            "action": "Modify",
+            "path": "agents/skills/wiki-update/SKILL.md",
+            "role": "Add section lock, report/review routing, draft template, index/log, and final validation rules."
+          },
+          {
+            "action": "Modify",
+            "path": "agents/skills/wiki-query/SKILL.md",
+            "role": "Add report filename, report sections, mandatory citations, capture draft, and final validation rules."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing documentation contract tests",
+            "status": "done",
+            "instruction": "In tests/test_wiki_quality_baseline.py, add tests that docs/agent/DRAFTS.md contains publish-draft as the required durable publication command, does not list apply-draft --report as the normal durable flow, and that the three skill docs mention their new hardening responsibilities.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+            "expected": "FAIL until docs are updated.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Update DRAFTS.md",
+            "status": "done",
+            "instruction": "Rewrite the Required Flow so it uses publish-draft --report for durable publication. Keep apply-draft --dry-run as an optional low-level validation command only.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Harden wiki-ingest skill",
+            "status": "done",
+            "instruction": "Add explicit source duplicate criteria: same canonical_source plus same hash is unchanged, same canonical_source plus different hash is drift, same slug plus different source is collision. Require source_count/provenance updates for substantive pages and final lint --report or health success.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Harden wiki-update skill",
+            "status": "done",
+            "instruction": "Add exact section-lock preservation expectation, scratch/reports for proposed patches to locked content, scratch/review for contested decisions or important contradictions, and index/log requirements for durable changes.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Harden wiki-query skill",
+            "status": "done",
+            "instruction": "Add scratch/reports/YYYY-MM-DD-query-<slug>.md naming, required report sections, mandatory durable citations for substantive synthesis, and answer-and-capture draft template plus publish-draft path.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-6",
+            "title": "Verify documentation contract",
+            "status": "done",
+            "instruction": "Run the baseline tests after docs are updated.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+            "expected": "PASS.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "DRAFTS.md no longer instructs apply-draft --report as the normal durable path.",
+          "Each skill contains enough operational detail for an agent to execute without guessing.",
+          "Baseline documentation tests pass."
+        ]
+      },
+      {
+        "id": "slice-2",
+        "title": "Source ingest no-clobber",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_tools.py",
+          "tools/wiki/lib/ingest.py",
+          "tools/wiki/cli.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add tests for idempotent same source, source drift, slug collision, and locked source page behavior."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/ingest.py",
+            "role": "Implement no-clobber and richer report outcomes."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/cli.py",
+            "role": "Print clear ingest outcomes and preserve nonzero exits for drift/collision/lock."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing idempotency test",
+            "status": "done",
+            "instruction": "Create a temp vault, ingest the same raw source twice, and assert the second run exits successfully without duplicating index/log entries and reports outcome unchanged.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before no-clobber behavior exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Write failing drift and collision tests",
+            "status": "done",
+            "instruction": "Test same canonical source with changed hash and same slug with different canonical source. Both should fail without overwriting the existing source page.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before drift/collision detection exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Write failing locked source page test",
+            "status": "done",
+            "instruction": "Test that ingest-source fails when the existing target source page contains <!-- human-locked -->.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before lock check exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Implement ingest outcome model",
+            "status": "done",
+            "instruction": "Extend IngestResult with outcome values such as created and unchanged. Raise ValueError with clear messages for source-drift, slug-collision, and human-locked target. Read existing target frontmatter before writing.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Make index/log idempotent for unchanged ingest",
+            "status": "done",
+            "instruction": "When outcome is unchanged, do not call apply_index_entry or append_log_entry. Still allow report output that explains no durable change was made.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-6",
+            "title": "Verify ingest safety",
+            "status": "done",
+            "instruction": "Run focused tests after implementation.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "PASS for ingest-source no-clobber cases.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Repeated same-source ingest is idempotent.",
+          "Drift, collision, and locked source target do not overwrite existing source pages.",
+          "Reports expose created/unchanged/drift/collision outcomes."
+        ]
+      },
+      {
+        "id": "slice-3",
+        "title": "Section-level human-lock preservation",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_tools.py",
+          "tools/wiki/lib/draft.py",
+          "tools/wiki/lib/lint.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add tests for changed versus preserved human-locked sections in dry-run and publish paths."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/draft.py",
+            "role": "Compare existing locked ranges with draft-rendered locked ranges and reject modified locked content."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing locked-section mutation test",
+            "status": "done",
+            "instruction": "Create an existing page with a human-locked:start/end section. Prepare a draft that changes text inside the locked range. Assert apply-draft --dry-run and publish-draft both fail before writing.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before exact range preservation exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Write preserved locked-section positive test",
+            "status": "done",
+            "instruction": "Prepare a draft that changes content outside the locked section while preserving the locked range exactly. Assert dry-run succeeds.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL until preservation comparison handles valid changes.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Implement locked range extraction comparison",
+            "status": "done",
+            "instruction": "Use the existing human lock parsing behavior as the source of marker truth. Compare the full text between each start/end marker in the current page and rendered draft. Reject missing, reordered, or changed locked ranges.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Verify publish rollback is not the first defense",
+            "status": "done",
+            "instruction": "Ensure the locked-section failure happens during dry-run validation before durable write, not after post-lint rollback.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "PASS and failure message mentions human-locked section preservation.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Drafts cannot alter section-level locked content.",
+          "Drafts can alter unlocked content around preserved locked sections.",
+          "Failure happens before durable mutation."
+        ]
+      },
+      {
+        "id": "slice-4",
+        "title": "Query report and capture scaffolds",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_tools.py",
+          "tools/wiki/lib/workflow.py",
+          "tools/wiki/cli.py",
+          "agents/skills/wiki-query/SKILL.md"
+        ],
+        "files": [
+          {
+            "action": "Add",
+            "path": "tools/wiki/lib/workflow.py",
+            "role": "Start shared workflow helper module with query report scaffold creation."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/cli.py",
+            "role": "Add workflow query --question --prepare-report and workflow query --draft --publish --report."
+          },
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add CLI tests for query report scaffold and query capture publish routing."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing query report scaffold test",
+            "status": "done",
+            "instruction": "Assert workflow query --question '...' --prepare-report creates scratch/reports/YYYY-MM-DD-query-<slug>.md with required sections: Question, Answer Summary, Pages Consulted, Sources Consulted, Confidence, Contradictions, Reusable Capture Recommendation.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before workflow query exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement query report scaffold helper",
+            "status": "done",
+            "instruction": "Create tools/wiki/lib/workflow.py with deterministic slugging, report path resolution, and query report scaffold rendering. The scaffold must state that semantic answer synthesis is still required from the agent.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Add query publish wrapper",
+            "status": "done",
+            "instruction": "Add workflow query --draft <path> --publish --report as a thin publish-draft wrapper for answer-and-capture drafts.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Verify query workflow commands",
+            "status": "done",
+            "instruction": "Run focused workflow query tests.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "PASS for query workflow command cases.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "answer-with-report has a stable report scaffold.",
+          "answer-and-capture uses publish-draft through the workflow command.",
+          "Workflow output clearly says semantic synthesis is agent work."
+        ]
+      },
+      {
+        "id": "slice-5",
+        "title": "Workflow ingest and update CLI checkpoints",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_tools.py",
+          "tools/wiki/lib/workflow.py",
+          "tools/wiki/cli.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/workflow.py",
+            "role": "Add ingest and update checkpoint helpers."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/cli.py",
+            "role": "Add workflow ingest and workflow update subcommands."
+          },
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add tests for workflow ingest, update preflight, and update publish."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing workflow ingest test",
+            "status": "done",
+            "instruction": "Assert workflow ingest --source raw/sources/example.md --report validates raw location, delegates source registration behavior, writes or references an ingest report, and prints semantic extraction pending.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before workflow ingest exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Write failing workflow update preflight test",
+            "status": "done",
+            "instruction": "Assert workflow update --target wiki/concepts/example.md --preflight --report reads target existence, reports page-level and section-level lock state, and writes a preflight report without mutating the page.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before workflow update preflight exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Write failing workflow update publish test",
+            "status": "done",
+            "instruction": "Assert workflow update --target wiki/concepts/example.md --draft scratch/drafts/example.json --publish --report routes through publish-draft and fails if draft target differs from --target.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before workflow update publish exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Implement workflow ingest helper and CLI",
+            "status": "done",
+            "instruction": "Add prepare_ingest_workflow and CLI routing. Keep output deterministic and avoid semantic extraction.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Implement workflow update helpers and CLI",
+            "status": "done",
+            "instruction": "Add prepare_update_workflow and publish_update_workflow. Use existing draft loading/target validation where possible to avoid duplicate semantics.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-6",
+            "title": "Verify workflow CLI checkpoints",
+            "status": "done",
+            "instruction": "Run focused tests for workflow ingest/update/query.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "PASS for workflow command cases.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "workflow ingest/update/query commands exist.",
+          "Commands never claim to perform semantic extraction or answer generation.",
+          "Publish variants use publish-draft behavior."
+        ]
+      },
+      {
+        "id": "slice-6",
+        "title": "MCP workflow parity",
+        "status": "done",
+        "surfaces": [
+          "tests/test_wiki_tools.py",
+          "tools/wiki/mcp_server.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add MCP tool list and call tests for workflow checkpoint tools."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/mcp_server.py",
+            "role": "Expose workflow checkpoint tools backed by CLI/lib behavior."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write failing MCP tool list test",
+            "status": "done",
+            "instruction": "Assert tools/list includes wiki_workflow_ingest, wiki_workflow_update_preflight, wiki_workflow_update_publish, wiki_workflow_query_prepare, and wiki_workflow_query_publish.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before MCP tools exist.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Write failing MCP call smoke tests",
+            "status": "done",
+            "instruction": "Add at least one non-mutating call test for query_prepare or update_preflight and one publish wrapper argument construction test.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before MCP dispatch exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Implement MCP tool schemas and dispatch",
+            "status": "done",
+            "instruction": "Add tool schemas and map each tool to the matching workflow CLI arguments. Keep business logic in CLI/lib helpers.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Verify MCP parity",
+            "status": "done",
+            "instruction": "Run focused tests after MCP dispatch is added.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "PASS for MCP workflow parity cases.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "MCP exposes all workflow checkpoint tools.",
+          "MCP and CLI return equivalent deterministic output.",
+          "MCP does not duplicate semantic logic."
+        ]
+      },
+      {
+        "id": "slice-7",
+        "title": "Human docs and final verification",
+        "status": "done",
+        "surfaces": [
+          "docs/usage.md",
+          "docs/architecture.md",
+          "docs/LLM-WIKI.md",
+          "AGENTS.md",
+          "docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+          "docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "docs/usage.md",
+            "role": "Update user-facing examples for hardened workflow behavior."
+          },
+          {
+            "action": "Modify",
+            "path": "docs/architecture.md",
+            "role": "Update internal processing explanation for no-clobber, section locks, query scaffolds, and workflow checkpoints."
+          },
+          {
+            "action": "Modify",
+            "path": "docs/LLM-WIKI.md",
+            "role": "Record workflow hardening as the next architecture stage."
+          },
+          {
+            "action": "Modify",
+            "path": "AGENTS.md",
+            "role": "Keep short operational instructions aligned with the hardened flow."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Update human docs",
+            "status": "done",
+            "instruction": "Explain workflow CLI/MCP as checkpoints, not semantic generators. Keep usage.md simple and architecture.md technical.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Update LLM-WIKI and AGENTS",
+            "status": "done",
+            "instruction": "Add hardened command names and completion gate updates without expanding AGENTS.md beyond its concise contract.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Run full unit tests",
+            "status": "done",
+            "instruction": "Run the required unit test suite.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py",
+            "expected": "OK.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Run wiki lint",
+            "status": "done",
+            "instruction": "Run deterministic whole-vault lint with report output.",
+            "command": "python3 tools/wiki/cli.py lint --report",
+            "expected": "No issues found.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Run wiki health",
+            "status": "done",
+            "instruction": "Run the whole-vault health facade.",
+            "command": "python3 tools/wiki/cli.py health",
+            "expected": "No issues found.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-6",
+            "title": "Validate and render Stenc docs",
+            "status": "done",
+            "instruction": "Validate both Stenc docs, regenerate pages, and verify rendered pages exist.",
+            "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json && node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json && node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc && node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+            "expected": "Both JSON files are valid and rendered pages are present.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-7",
+            "title": "Check working tree",
+            "status": "done",
+            "instruction": "Inspect git status and summarize modified files before asking whether to commit.",
+            "command": "git status --short --branch",
+            "expected": "Only intended files are changed.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Human and agent docs agree on the hardened workflow.",
+          "Full unit tests, lint, health, and Stenc validation pass.",
+          "Final report separates implemented behavior from future semantic automation."
+        ]
+      }
+    ],
+    "executionOrder": [
+      "slice-1",
+      "slice-2",
+      "slice-3",
+      "slice-4",
+      "slice-5",
+      "slice-6",
+      "slice-7"
+    ],
+    "risks": [
+      {
+        "risk": "workflow command names may imply semantic extraction or answer generation.",
+        "mitigation": "Every workflow output and doc section must state that semantic extraction/query synthesis is agent work and CLI/MCP only perform deterministic checkpoints."
+      },
+      {
+        "risk": "section lock comparison may be too brittle if whitespace changes inside a locked section are harmless.",
+        "mitigation": "Use exact preservation intentionally. human-locked means human-owned; harmless edits still require a proposed patch or review item."
+      },
+      {
+        "risk": "source ingest no-clobber can block legitimate source refreshes.",
+        "mitigation": "Treat changed hash as drift and require an explicit future drift-resolution workflow instead of silent overwrite."
+      },
+      {
+        "risk": "MCP wrappers can drift from CLI semantics.",
+        "mitigation": "Implement MCP as argument routing to the same CLI/lib behavior and cover tool list plus call behavior in tests."
+      }
+    ],
+    "validation": [
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py",
+        "purpose": "Verify baseline, CLI, MCP, ingest, draft, and workflow behavior."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py lint --report",
+        "purpose": "Verify whole-vault deterministic quality with report output."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py health",
+        "purpose": "Verify human-friendly health facade."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+        "purpose": "Validate the Stenc spec JSON."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
+        "purpose": "Validate the Stenc plan JSON."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc",
+        "purpose": "Regenerate rendered Stenc pages."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm rendered pages exist for all Stenc JSON docs."
+      }
+    ],
+    "agentInstructions": [
+      "Use this plan task-by-task; do not jump straight to convenience wrappers.",
+      "Write failing tests before implementation for each code slice.",
+      "Preserve raw/ immutability and human locks.",
+      "Keep CLI/MCP workflow commands deterministic and explicit about semantic work remaining in the agent layer.",
+      "After each slice, run the narrow test command for that slice before moving on."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Spec coverage",
+        "purpose": "Confirm every requirement in the paired spec maps to a slice and concrete test or doc update."
+      },
+      {
+        "name": "Quality-first behavior",
+        "purpose": "Confirm implemented changes improve durable wiki quality instead of merely shortening commands."
+      },
+      {
+        "name": "No semantic overclaim",
+        "purpose": "Confirm workflow CLI/MCP outputs do not claim to create knowledge without an agent-authored draft."
+      }
+    ],
+    "executionHandoff": {
+      "defaultPath": "docs/stenc/content/plans/2026-05-30-wiki-workflow-hardening-implementation.plan.json",
+      "options": [
+        {
+          "label": "Subagent-Driven",
+          "description": "Dispatch a fresh subagent per independent slice and review between slices.",
+          "requiredSkill": "superpowers:subagent-driven-development"
+        },
+        {
+          "label": "Inline Execution",
+          "description": "Execute slices in this session with checkpointed verification after each slice.",
+          "requiredSkill": "superpowers:executing-plans"
+        }
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "No Placeholders",
+        "content": "This plan intentionally names exact files, commands, expected outputs, and workflow command contracts so the next implementation step can proceed without redesign.",
+        "items": [
+          "Do not replace this plan with broad TODOs.",
+          "Do not move semantic extraction into workflow.py.",
+          "Do not mark implementation complete without unit tests, lint, health, and Stenc checks."
+        ],
+        "facts": [
+          {
+            "label": "durable facade",
+            "value": "publish-draft already exists and should remain the durable mutation facade."
+          },
+          {
+            "label": "workflow scope",
+            "value": "workflow commands are additive checkpoints over existing quality gates."
+          },
+          {
+            "label": "source drift",
+            "value": "source drift resolution is intentionally deferred to a future explicit workflow."
+          }
+        ],
+        "links": [
+          {
+            "label": "Spec",
+            "target": "docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
+            "purpose": "Canonical behavior contract implemented by this plan."
+          },
+          {
+            "label": "CLI",
+            "target": "tools/wiki/cli.py",
+            "purpose": "Command surface that will expose workflow checkpoint commands."
+          },
+          {
+            "label": "MCP server",
+            "target": "tools/wiki/mcp_server.py",
+            "purpose": "Agent tool surface that will mirror workflow checkpoint commands."
+          }
+        ],
+        "steps": [],
+        "subSections": [],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": []
+  }
+}

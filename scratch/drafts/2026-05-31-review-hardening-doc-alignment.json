@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "operation": "batch-upsert-pages",
+  "pages": [
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/workflows/wiki-linting.md",
+      "frontmatter": {
+        "title": "Wiki Linting",
+        "type": "workflow",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Workflow for detecting structural, provenance, link, and navigation problems in the wiki.",
+        "source_count": 1,
+        "tags": ["lint", "quality", "workflow"],
+        "related": ["concepts/compiled-knowledge", "workflows/ingest-new-source", "maps/wiki-operating-map"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        },
+        "primary_sources": [],
+        "derived_from": ["AGENTS.md"]
+      },
+      "body": "# Wiki Linting\n\n## Goal\n\nKeep the wiki structurally valid, navigable, provenance-backed, and safe to build on.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Trigger\n\nRun linting after meaningful wiki changes, before claiming a wiki operation is complete, and periodically during maintenance.\n\n## Inputs\n\n- All markdown files under `wiki/`.\n- `wiki/index.md`.\n- `wiki/log.md`.\n- Raw source references.\n- Human-lock markers.\n- Review queue items under `scratch/review/`.\n\n## Procedure\n\n1. Check required frontmatter.\n2. Check broken wiki links.\n3. Check index entries against existing pages.\n4. Check source pages, `canonical_source`, and `raw_sha256` drift.\n5. Flag pages with unsupported claims.\n6. Flag unresolved contradictions or review items.\n7. Check review item related pages and raw evidence references.\n8. Write a lint report under `scratch/reports/`.\n9. Route deterministic fixes through draft/publish or a targeted tool; route judgment-heavy items to review.\n\n## Outputs\n\n- Lint report.\n- Human-review list for contested or judgment-heavy issues.\n- Follow-up draft or targeted tool run when a deterministic repair is safe.\n\n## Quality Gates\n\n- [ ] Every durable page has required frontmatter.\n- [ ] Important pages are reachable from the index or a map.\n- [ ] Broken links are reported or repaired.\n- [ ] Claims without provenance are reported.\n- [ ] Source hash drift is reported.\n- [ ] Review queue references still resolve.\n- [ ] Human-locked content is preserved.\n- [ ] Deletions, major merges, and contested claim changes require human approval.\n\n## Failure Handling\n\nIf linting cannot determine whether a claim is supported, mark the issue for review instead of rewriting the claim.\n\n## Related Pages\n\n- [[concepts/compiled-knowledge]]\n- [[workflows/ingest-new-source]]\n- [[maps/wiki-operating-map]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| Wiki linting checks frontmatter, links, navigation, provenance, source drift, log shape, review references, and human locks. | stated | Human instruction in `AGENTS.md`. |\n| Unclear support or contested judgment should be routed to review instead of silently rewritten. | stated | Human instruction in `AGENTS.md`. |\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/overview.md",
+      "frontmatter": {
+        "title": "Overview",
+        "type": "overview",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Executive briefing for the LLM Wiki and its quality-gated operating model.",
+        "source_count": 1,
+        "tags": ["overview", "llm-wiki", "quality"],
+        "related": ["index", "maps/wiki-operating-map", "workflows/ingest-new-source"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Overview\n\n## Scope\n\nThis vault is an LLM-managed compiled knowledge system. Raw source material lives under `raw/`, while durable synthesized knowledge lives under `wiki/`.\n\nThe wiki is designed to improve through ingestion, querying, linting, mapping, metrics, and explicit human review.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Current Synthesis\n\nThe central operating model is a quality-gated compiled wiki:\n\n1. Humans provide or reference source material.\n2. LLM agents extract durable knowledge and propose updates.\n3. Deterministic wiki tooling validates structure, links, provenance, source hashes, review state, human locks, maps, and maintenance signals.\n4. Durable knowledge is written to markdown and preserved by Git.\n\nStatus: inferred\nConfidence: high\nRationale: This follows the vault contract in `AGENTS.md` and the approved improvement direction.\n\n## Current Architecture\n\nThe canonical architecture definition is `docs/LLM-WIKI.md`. `AGENTS.md` is the concise agent entrypoint, `docs/agent/OPERATING-SCHEMA.md` is the detailed reference, and `docs/agent/DRAFTS.md` defines semantic draft handoff. The implemented tools support page validation, wiki linting, raw source hashing, deterministic source registration, transactional JSON draft publication, review queues, merge scans, generated maps, maintenance metrics, release gating, and stdio MCP access.\n\n## Major Areas\n\n- [[concepts/compiled-knowledge]] - The core idea that wiki pages are compiled artifacts, not raw notes.\n- [[concepts/llm-maintained-wiki]] - The agent-maintained operating style for this vault.\n- [[concepts/source-of-truth]] - The boundary between immutable raw input and mutable compiled knowledge.\n- [[workflows/ingest-new-source]] - The main workflow for turning raw input into grounded wiki pages.\n- [[workflows/wiki-linting]] - The workflow for keeping the wiki healthy over time.\n- [[maps/topic-map]] - Generated map of durable wiki pages by type and tag.\n- [[maps/source-map]] - Generated map of raw source registration state.\n- [[maps/review-map]] - Generated map of unresolved human review items.\n- [[maps/lifecycle-map]] - Generated map of stale, contested, deprecated, and source-attention signals.\n\n## Key Decisions\n\n- [[decisions/use-markdown-for-compiled-knowledge]] - Markdown plus Git is the durable knowledge store.\n\n## Open Questions\n\n- What richer semantic extraction prompts should agents use before `publish-draft`?\n- When should `scratch/review/` items be promoted into dedicated claim pages?\n- Which maintenance metrics should become configurable per-vault thresholds?\n\n## Recommended Reading Order\n\n1. [[concepts/source-of-truth]]\n2. [[concepts/compiled-knowledge]]\n3. [[workflows/ingest-new-source]]\n4. [[workflows/wiki-linting]]\n5. [[maps/wiki-operating-map]]\n6. [[maps/topic-map]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| This vault separates immutable raw source material under raw/ from durable synthesized knowledge under wiki/. | stated | Human instruction in `AGENTS.md`. |\n| Durable wiki knowledge is validated by deterministic tooling before it is treated as permanent. | stated | Human instruction in `AGENTS.md`. |\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/index.md",
+      "frontmatter": {
+        "title": "Wiki Index",
+        "type": "index",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Catalog of durable pages in the LLM Wiki.",
+        "source_count": 0,
+        "tags": ["index", "navigation"],
+        "related": ["overview", "maps/wiki-operating-map"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "none",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Wiki Index\n\n## Overview\n\n- [[overview]] - High-level synthesis of the wiki.\n- [[inbox]] - Temporary capture area for unprocessed notes.\n- [[log]] - Chronological operation history.\n\n## Architecture Documents\n\n- `docs/LLM-WIKI.md` - Canonical architecture definition for the quality-gated compiled wiki.\n- `docs/usage.md` - Human-facing usage guide for common workflows and commands.\n- `docs/architecture.md` - Implementation-oriented architecture guide.\n- `docs/agent/OPERATING-SCHEMA.md` - Full agent reference split out from the concise `AGENTS.md` entrypoint.\n- `docs/agent/DRAFTS.md` - Semantic draft rules and the source-to-draft handoff contract.\n\n## Sources\n\n- None yet.\n\n## Concepts\n\n- [[concepts/compiled-knowledge]] - Persistent synthesized knowledge maintained across sources and queries.\n- [[concepts/llm-maintained-wiki]] - A wiki maintained by LLM agents under explicit operating rules.\n- [[concepts/source-of-truth]] - The rule that raw sources and Git-backed markdown preserve durable memory.\n\n## Entities\n\n- None yet.\n\n## Systems\n\n- None yet.\n\n## Workflows\n\n- [[workflows/ingest-new-source]] - The quality-gated workflow for turning raw sources into compiled wiki pages.\n- [[workflows/wiki-linting]] - The workflow for checking schema, links, provenance, contradictions, and navigation health.\n\n## Decisions\n\n- [[decisions/use-markdown-for-compiled-knowledge]] - Decision to use Git-backed markdown as the durable compiled-knowledge store.\n\n## Maps\n\n- [[maps/wiki-operating-map]] - Reading path for the core operating model of this vault.\n- [[maps/topic-map]] - Generated navigation map grouping durable wiki pages by type and tag.\n- [[maps/source-map]] - Generated navigation map for raw source registration and source pages.\n- [[maps/decision-map]] - Generated navigation map for durable decisions.\n- [[maps/review-map]] - Generated navigation map for pending human-review items.\n- [[maps/lifecycle-map]] - Generated navigation map for stale, contested, deprecated, and source-attention signals.\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/maps/README.md",
+      "frontmatter": {
+        "title": "Maps Directory",
+        "type": "map",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Directory note explaining how map pages guide navigation across wiki clusters.",
+        "source_count": 0,
+        "tags": ["maps", "navigation"],
+        "related": ["maps/wiki-operating-map", "maps/topic-map", "maps/source-map", "maps/review-map", "maps/lifecycle-map"],
+        "confidence": "medium",
+        "quality": {
+          "provenance": "partial",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Maps Directory\n\n## Purpose\n\nMap pages connect related concepts, systems, workflows, decisions, sources, review items, and lifecycle signals into guided reading paths.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Core Pages\n\n- [[maps/wiki-operating-map]] - Starting map for this vault's operating model.\n- [[maps/topic-map]] - Generated topic/type/tag navigation.\n- [[maps/source-map]] - Generated raw source and source page registry map.\n- [[maps/decision-map]] - Generated decision navigation.\n- [[maps/review-map]] - Generated pending review navigation.\n- [[maps/lifecycle-map]] - Generated stale, contested, deprecated, and source-attention navigation.\n\n## Reading Path\n\n1. [[maps/wiki-operating-map]]\n2. [[maps/topic-map]]\n3. [[maps/source-map]]\n4. [[maps/review-map]]\n5. [[maps/lifecycle-map]]\n\n## Related Concepts\n\n- [[concepts/compiled-knowledge]]\n- [[workflows/wiki-linting]]\n\n## Open Questions\n\n- None.\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/maps/wiki-operating-map.md",
+      "frontmatter": {
+        "title": "Wiki Operating Map",
+        "type": "map",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Navigation map for understanding the vault's compiled-knowledge operating model.",
+        "source_count": 0,
+        "tags": ["map", "operations", "llm-wiki"],
+        "related": ["overview", "concepts/compiled-knowledge", "workflows/ingest-new-source", "workflows/wiki-linting", "maps/topic-map", "maps/source-map", "maps/review-map", "maps/lifecycle-map"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "section",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        },
+        "primary_sources": [],
+        "derived_from": ["AGENTS.md"]
+      },
+      "body": "# Wiki Operating Map\n\n## Purpose\n\nThis map helps a new human or agent understand how the vault turns raw material into durable compiled knowledge.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Core Pages\n\n- [[overview]] - Executive briefing for the whole wiki.\n- [[concepts/source-of-truth]] - Explains the raw-source and compiled-wiki boundary.\n- [[concepts/compiled-knowledge]] - Explains what durable synthesized knowledge means.\n- [[concepts/llm-maintained-wiki]] - Explains the agent-maintained wiki model.\n- [[workflows/ingest-new-source]] - Explains how new sources become wiki pages.\n- [[workflows/wiki-linting]] - Explains how quality is checked.\n- [[decisions/use-markdown-for-compiled-knowledge]] - Records the durable storage decision.\n- [[maps/topic-map]] - Generated type/tag navigation across durable pages.\n- [[maps/source-map]] - Generated raw source registration map.\n- [[maps/review-map]] - Generated unresolved review map.\n- [[maps/lifecycle-map]] - Generated lifecycle and source-attention map.\n\n## Reading Path\n\n1. [[overview]]\n2. [[concepts/source-of-truth]]\n3. [[concepts/compiled-knowledge]]\n4. [[workflows/ingest-new-source]]\n5. [[workflows/wiki-linting]]\n6. [[decisions/use-markdown-for-compiled-knowledge]]\n7. [[maps/topic-map]]\n8. [[maps/source-map]]\n9. [[maps/review-map]]\n10. [[maps/lifecycle-map]]\n\n## Related Concepts\n\n- [[concepts/llm-maintained-wiki]]\n- [[concepts/compiled-knowledge]]\n\n## Open Questions\n\n- None.\n"
+    }
+  ],
+  "log": {
+    "event_type": "repair",
+    "title": "Align Review Hardening Documentation",
+    "items": [
+      "Updated [[workflows/wiki-linting]] to remove auto-fix overstatement and include review reference validation.",
+      "Updated [[overview]], [[index]], and map entry points to reflect the current tool surface."
+    ]
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "operation": "batch-upsert-pages",
+  "pages": [
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/workflows/ingest-new-source.md",
+      "frontmatter": {
+        "title": "Ingest New Source",
+        "type": "workflow",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Quality-gated workflow for turning immutable raw sources into durable wiki knowledge.",
+        "source_count": 1,
+        "tags": ["ingest", "workflow", "quality-gate"],
+        "related": ["concepts/compiled-knowledge", "concepts/source-of-truth", "workflows/wiki-linting"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        },
+        "primary_sources": [],
+        "derived_from": ["AGENTS.md"]
+      },
+      "body": "# Ingest New Source\n\n## Goal\n\nTurn a raw source into durable, navigable, provenance-backed wiki knowledge.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Trigger\n\nRun this workflow when the human adds a source under `raw/`, references a file, or asks to ingest a URL or document.\n\n## Inputs\n\n- Raw source file or URL.\n- Existing `wiki/index.md`.\n- Related pages found through search.\n- Human instructions that constrain interpretation.\n\n## Procedure\n\n1. Identify the source and avoid mutating `raw/`.\n2. Register the source with `python3 tools/wiki/cli.py ingest-source raw/sources/example.md --report`.\n3. Extract durable concepts, entities, systems, workflows, decisions, claims, contradictions, and open questions into a JSON draft under `scratch/drafts/` using `tools/wiki/templates/draft-upsert-page.json`.\n4. Compare the extraction with existing wiki pages to avoid duplicates.\n5. Publish the draft with `python3 tools/wiki/cli.py publish-draft scratch/drafts/example.json --report`.\n6. Run `python3 tools/wiki/cli.py lint --report`.\n7. Move unresolved judgment items to `scratch/review/`.\n\n## Outputs\n\n- Source page.\n- Source hash.\n- Updated related wiki pages.\n- Ingest report.\n- Index update.\n- Log entry.\n- Optional review items.\n\n## Quality Gates\n\n- [ ] Raw source was not modified.\n- [ ] Source page exists when the source is ingested.\n- [ ] Source page records `canonical_source` and `raw_sha256`.\n- [ ] Relevant existing pages were checked.\n- [ ] New pages are not duplicates.\n- [ ] Claims have provenance.\n- [ ] Contradictions were surfaced.\n- [ ] Index and log were updated.\n\n## Failure Handling\n\nIf provenance, duplicate detection, or contradiction handling cannot be completed, do not silently publish the result as stable knowledge. Record the unresolved item in `scratch/review/` or `scratch/reports/`.\n\n## Related Pages\n\n- [[concepts/compiled-knowledge]]\n- [[concepts/source-of-truth]]\n- [[workflows/wiki-linting]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| Ingesting a source should register the raw source, create a semantic draft, publish through validation, and leave reports or review items when needed. | stated | Human instruction in `AGENTS.md`. |\n| The ingest workflow must avoid mutating raw sources. | stated | Human instruction in `AGENTS.md`. |\n"
+    },
+    {
+      "version": 1,
+      "operation": "upsert-page",
+      "path": "wiki/overview.md",
+      "frontmatter": {
+        "title": "Overview",
+        "type": "overview",
+        "status": "active",
+        "created": "2026-05-26",
+        "updated": "2026-05-31",
+        "owner": "agent",
+        "summary": "Executive briefing for the LLM Wiki and its quality-gated operating model.",
+        "source_count": 1,
+        "tags": ["overview", "llm-wiki", "quality"],
+        "related": ["index", "maps/wiki-operating-map", "workflows/ingest-new-source"],
+        "confidence": "high",
+        "quality": {
+          "provenance": "claim",
+          "links": "unchecked",
+          "contradictions": "none",
+          "review_required": false
+        }
+      },
+      "body": "# Overview\n\n## Scope\n\nThis vault is an LLM-managed compiled knowledge system. Raw source material lives under `raw/`, while durable synthesized knowledge lives under `wiki/`.\n\nThe wiki is designed to improve through ingestion, querying, linting, mapping, and explicit human review.\n\nSource: Human instruction in `AGENTS.md`.\n\n## Current Synthesis\n\nThe central operating model is a quality-gated compiled wiki:\n\n1. Humans provide or reference source material.\n2. LLM agents extract durable knowledge and propose updates.\n3. Deterministic wiki tooling validates structure, links, provenance, source hashes, and review state.\n4. Durable knowledge is written to markdown and preserved by Git.\n\nStatus: inferred\nConfidence: high\nRationale: This follows the vault contract in `AGENTS.md` and the approved improvement direction.\n\n## Current Architecture\n\nThe canonical architecture definition is `docs/LLM-WIKI.md`. `AGENTS.md` is the concise agent entrypoint, `docs/agent/OPERATING-SCHEMA.md` is the detailed reference, and `docs/agent/DRAFTS.md` defines semantic draft handoff. The implemented tools support page validation, wiki linting, raw source hashing, deterministic source registration, transactional JSON draft publication, and stdio MCP access.\n\n## Major Areas\n\n- [[concepts/compiled-knowledge]] - The core idea that wiki pages are compiled artifacts, not raw notes.\n- [[concepts/llm-maintained-wiki]] - The agent-maintained operating style for this vault.\n- [[concepts/source-of-truth]] - The boundary between immutable raw input and mutable compiled knowledge.\n- [[workflows/ingest-new-source]] - The main workflow for turning raw input into grounded wiki pages.\n- [[workflows/wiki-linting]] - The workflow for keeping the wiki healthy over time.\n\n## Key Decisions\n\n- [[decisions/use-markdown-for-compiled-knowledge]] - Markdown plus Git is the durable knowledge store.\n\n## Open Questions\n\n- What richer semantic extraction prompts should agents use before `publish-draft`?\n- Which merge and contradiction review helpers should be automated next?\n- When should `scratch/review/` items be promoted into dedicated claim pages?\n\n## Recommended Reading Order\n\n1. [[concepts/source-of-truth]]\n2. [[concepts/compiled-knowledge]]\n3. [[workflows/ingest-new-source]]\n4. [[workflows/wiki-linting]]\n5. [[maps/wiki-operating-map]]\n\n## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n| This vault separates immutable raw source material under raw/ from durable synthesized knowledge under wiki/. | stated | Human instruction in `AGENTS.md`. |\n| Durable wiki knowledge is validated by deterministic tooling before it is treated as permanent. | stated | Human instruction in `AGENTS.md`. |\n"
+    }
+  ],
+  "log": {
+    "event_type": "repair",
+    "title": "Align Draft Publication Boundary",
+    "items": [
+      "Updated [[workflows/ingest-new-source]] to publish semantic drafts through `publish-draft`.",
+      "Updated [[overview]] to describe transactional JSON draft publication."
+    ]
+  }
+}

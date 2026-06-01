@@ -1,0 +1,16 @@
+title: "Human-readable title"
+type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview
+status: seed | active | stable | contested | deprecated
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+owner: agent | human
+summary: "One-sentence indexable summary."
+source_count: 0
+tags: []
+related: []
+confidence: low | medium | high
+quality:
+  provenance: none | partial | section | claim
+  links: unchecked | valid | broken
+  contradictions: unchecked | none | present | contested
+  review_required: false

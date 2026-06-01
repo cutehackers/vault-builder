@@ -1,0 +1,585 @@
+{
+  "schemaVersion": 2,
+  "docType": "plan",
+  "id": "plan:2026-05-29-wiki-skill-workflows-implementation",
+  "slug": "2026-05-29-wiki-skill-workflows-implementation",
+  "status": "canonical",
+  "title": "Wiki Skill Workflows Implementation Plan",
+  "description": "wiki-ingest, wiki-update, wiki-query workflow와 publish-draft/health CLI facade를 구현하기 위한 Stenc 실행 계획.",
+  "owner": "agent",
+  "createdAt": "2026-05-29",
+  "updatedAt": "2026-05-29",
+  "links": {
+    "sourceOfTruth": [
+      "docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
+      "docs/usage.md",
+      "docs/architecture.md",
+      "tools/wiki/cli.py",
+      "tools/wiki/mcp_server.py",
+      "tests/test_wiki_tools.py"
+    ],
+    "relatedSpec": "spec:2026-05-29-wiki-skill-workflows"
+  },
+  "page": {
+    "humanSummary": "다음 구현은 사람이 세 요청만 기억하도록 skill/workflow와 CLI facade를 추가한다.",
+    "agentSummary": "Implement repo-local wiki-ingest/wiki-update/wiki-query skill docs, CLI publish-draft and health facade commands, MCP parity, docs alignment, and tests while preserving deterministic validation boundaries.",
+    "styleTemplate": "operator-console"
+  },
+  "body": {
+    "goal": "LLM Wiki의 권장 사용 모델을 실제 repo-local skill/workflow 문서, CLI facade, MCP wrapper, usage/architecture 문서, 테스트로 구현한다.",
+    "architecture": "Repo-local skills encode semantic workflows and produce drafts or reports. tools/wiki CLI owns durable mutation and validation. MCP exposes the same CLI-backed facade for agents.",
+    "techStack": [
+      "Python 3",
+      "unittest",
+      "JSON-RPC style MCP wrapper",
+      "Markdown skill docs",
+      "Stenc JSON docs"
+    ],
+    "workerInstructions": {
+      "requiredSubSkills": [
+        "superpowers:subagent-driven-development",
+        "superpowers:executing-plans",
+        "superpowers:test-driven-development",
+        "superpowers:verification-before-completion"
+      ],
+      "trackingSyntax": "- [ ]",
+      "note": "각 slice는 fail-first 테스트 또는 문서 검증 기준을 먼저 세우고, 구현 후 전체 검증을 실행한다."
+    },
+    "scopeCheck": {
+      "assessment": "단일 workflow facade 작업이다. 실제 LLM 모델 호출이나 OCR/parser engine은 포함하지 않는다.",
+      "decomposition": "CLI facade, MCP parity, repo-local skill docs, human docs alignment, final verification 순서로 나눈다."
+    },
+    "currentState": "현재 tools/wiki에는 ingest-source, apply-draft, publish-draft, health, lint, hash-source, validate-page가 있고, usage.md, architecture.md, LLM-WIKI.md에는 wiki-ingest/wiki-update/wiki-query가 권장 workflow 이름으로 문서화되어 있다. repo-local skill files와 MCP parity도 구현되어 있으며, 남은 작업은 Stenc/final verification으로 수렴한다.",
+    "targetState": "사용자는 wiki-ingest, wiki-update, wiki-query 세 workflow를 사용하고, 내부 durable 변경은 publish-draft 또는 health를 포함한 CLI/MCP 품질 경로를 통과한다.",
+    "scope": {
+      "in": [
+        "tools/wiki/cli.py publish-draft command",
+        "tools/wiki/cli.py health command",
+        "tools/wiki/mcp_server.py wiki_publish_draft and wiki_health tools",
+        "agents/skills/wiki-ingest/SKILL.md",
+        "agents/skills/wiki-update/SKILL.md",
+        "agents/skills/wiki-query/SKILL.md",
+        "AGENTS.md",
+        "init-vault.sh",
+        "docs/usage.md alignment",
+        "docs/architecture.md alignment",
+        "docs/LLM-WIKI.md architecture note alignment",
+        "tests/test_wiki_tools.py coverage for new commands and MCP tools"
+      ],
+      "out": [
+        "automatic LLM extraction runtime",
+        "remote MCP deployment",
+        "OCR/PDF semantic extraction",
+        "automatic claim truth scoring",
+        "automatic Git commit",
+        "Obsidian plugin UI"
+      ]
+    },
+    "fileStructure": [
+      {
+        "action": "Modify",
+        "path": "tools/wiki/cli.py",
+        "responsibility": "Add publish-draft and health command routing."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/lib/draft.py",
+        "responsibility": "Expose reusable publish behavior if CLI needs a shared dry-run/apply helper."
+      },
+      {
+        "action": "Modify",
+        "path": "tools/wiki/mcp_server.py",
+        "responsibility": "Expose wiki_publish_draft and wiki_health tools backed by CLI/lib behavior."
+      },
+      {
+        "action": "Add",
+        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "responsibility": "Document source-to-wiki ingest workflow for agents."
+      },
+      {
+        "action": "Add",
+        "path": "agents/skills/wiki-update/SKILL.md",
+        "responsibility": "Document safe existing-page update workflow for agents."
+      },
+      {
+        "action": "Add",
+        "path": "agents/skills/wiki-query/SKILL.md",
+        "responsibility": "Document query modes and capture behavior for agents."
+      },
+      {
+        "action": "Modify",
+        "path": "AGENTS.md",
+        "responsibility": "Point agents to repo-local skill workflows and publish-draft."
+      },
+      {
+        "action": "Modify",
+        "path": "init-vault.sh",
+        "responsibility": "Copy usage, architecture, Stenc source, and repo-local skill workflow files into new vaults."
+      },
+      {
+        "action": "Modify",
+        "path": "tests/test_wiki_tools.py",
+        "responsibility": "Add tests for CLI facade commands and MCP parity."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/usage.md",
+        "responsibility": "Make simplified workflow the primary human usage path."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/architecture.md",
+        "responsibility": "Explain skill/CLI/MCP responsibility boundary."
+      },
+      {
+        "action": "Modify",
+        "path": "docs/LLM-WIKI.md",
+        "responsibility": "Record final skill workflow architecture."
+      }
+    ],
+    "slices": [
+      {
+        "id": "slice-1",
+        "title": "CLI facade commands",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/cli.py",
+          "tools/wiki/lib/draft.py",
+          "tests/test_wiki_tools.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add fail-first tests for health and publish-draft."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/cli.py",
+            "role": "Add health and publish-draft subcommands."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/lib/draft.py",
+            "role": "Add shared publish helper only if needed to avoid duplicate CLI logic."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write health CLI tests",
+            "status": "done",
+            "instruction": "Add tests proving `python3 tools/wiki/cli.py health` always runs lint, writes scratch/reports/YYYY-MM-DD-lint.md, exits with the same status as lint, and exits 0 on the current vault.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before health exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement health command",
+            "status": "done",
+            "instruction": "Implement health as a human-friendly alias for lint with the default dated report path. Keep output concise and do not mutate wiki pages.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Write publish-draft sequencing tests",
+            "status": "done",
+            "instruction": "Add tests proving publish-draft performs clean pre-lint and dry-run validation before applying, stops on validation failure, applies valid drafts, writes a report, runs lint afterward, and rolls back page/index/log changes when post-apply lint fails.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL before publish-draft exists.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Implement publish-draft command",
+            "status": "done",
+            "instruction": "Implement `publish-draft <path> --report` as clean pre-lint, dry-run apply_draft, real apply_draft, post-lint/report, and rollback on post-apply lint failure. Reuse existing functions instead of shelling out where possible.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Verify CLI facade",
+            "status": "done",
+            "instruction": "Run focused and full tests.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py tests/test_wiki_quality_baseline.py",
+            "expected": "All tests pass.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "health exits 0 on current vault.",
+          "publish-draft stops before mutation on invalid draft.",
+          "publish-draft applies valid draft, runs lint, and rolls back page/index/log changes on post-apply lint failure.",
+          "Tests cover the command behavior."
+        ]
+      },
+      {
+        "id": "slice-2",
+        "title": "MCP parity",
+        "status": "done",
+        "surfaces": [
+          "tools/wiki/mcp_server.py",
+          "tests/test_wiki_tools.py"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_tools.py",
+            "role": "Add MCP list/call tests for wiki_health and wiki_publish_draft."
+          },
+          {
+            "action": "Modify",
+            "path": "tools/wiki/mcp_server.py",
+            "role": "Expose new tools without duplicating business logic."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Add MCP tool listing tests",
+            "status": "done",
+            "instruction": "Extend existing MCP tests to expect wiki_health and wiki_publish_draft in the tool list.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "FAIL until MCP tool list is updated.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Implement MCP tool list and call handlers",
+            "status": "done",
+            "instruction": "Route wiki_health and wiki_publish_draft to the same library behavior used by CLI. Do not introduce separate validation semantics.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Verify MCP parity",
+            "status": "done",
+            "instruction": "Run MCP-focused tests and full tooling tests.",
+            "command": "python3 -m unittest tests/test_wiki_tools.py",
+            "expected": "All tests pass.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "MCP exposes wiki_health and wiki_publish_draft.",
+          "MCP behavior matches CLI validation/report semantics.",
+          "No duplicated business logic is introduced."
+        ]
+      },
+      {
+        "id": "slice-3",
+        "title": "Repo-local skill workflow docs",
+        "status": "done",
+        "surfaces": [
+          "agents/skills/wiki-ingest/SKILL.md",
+          "agents/skills/wiki-update/SKILL.md",
+          "agents/skills/wiki-query/SKILL.md",
+          "tests/test_wiki_quality_baseline.py"
+        ],
+        "files": [
+          {
+            "action": "Add",
+            "path": "agents/skills/wiki-ingest/SKILL.md",
+            "role": "Agent instructions for new source reflection."
+          },
+          {
+            "action": "Add",
+            "path": "agents/skills/wiki-update/SKILL.md",
+            "role": "Agent instructions for safe page updates."
+          },
+          {
+            "action": "Add",
+            "path": "agents/skills/wiki-query/SKILL.md",
+            "role": "Agent instructions for answer-only, answer-with-report, and answer-and-capture."
+          },
+          {
+            "action": "Modify",
+            "path": "tests/test_wiki_quality_baseline.py",
+            "role": "Add lightweight checks that required skill docs exist and mention CLI boundary."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Write skill-doc presence tests",
+            "status": "done",
+            "instruction": "Add tests that require wiki-ingest, wiki-update, and wiki-query skill docs to exist and include the cognition/mutation boundary.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+            "expected": "FAIL until skill docs exist.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Create wiki-ingest skill",
+            "status": "done",
+            "instruction": "Write SKILL.md for source ingestion workflow. Include source registration, duplicate check, draft creation, publish-draft, lint, and result reporting.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Create wiki-update skill",
+            "status": "done",
+            "instruction": "Write SKILL.md for existing page updates. Include human-lock handling, contradiction handling, draft generation, and publish flow.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Create wiki-query skill",
+            "status": "done",
+            "instruction": "Write SKILL.md for query mode selection. Include answer-only, answer-with-report, answer-and-capture, and when to write reports or drafts.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-5",
+            "title": "Verify skill docs",
+            "status": "done",
+            "instruction": "Run baseline tests.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py",
+            "expected": "All tests pass.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "All three skill docs exist.",
+          "Skill docs use wiki-ingest naming.",
+          "Skill docs forbid bypassing CLI validation for durable writes.",
+          "Baseline tests pass."
+        ]
+      },
+      {
+        "id": "slice-4",
+        "title": "Human and architecture docs alignment",
+        "status": "done",
+        "surfaces": [
+          "docs/usage.md",
+          "docs/architecture.md",
+          "docs/LLM-WIKI.md",
+          "README.md"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "docs/usage.md",
+            "role": "Keep simple three-workflow usage as the primary path and move low-level commands to advanced/reference sections if needed."
+          },
+          {
+            "action": "Modify",
+            "path": "docs/architecture.md",
+            "role": "Explain skill, CLI, MCP, Git responsibility boundaries."
+          },
+          {
+            "action": "Modify",
+            "path": "docs/LLM-WIKI.md",
+            "role": "Record final skill workflow architecture as canonical direction."
+          },
+          {
+            "action": "Review",
+            "path": "README.md",
+            "role": "Point readers to simplified usage and architecture docs."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Update usage guide",
+            "status": "done",
+            "instruction": "Ensure docs/usage.md presents wiki-ingest, wiki-update, wiki-query before low-level CLI details and states that publish-draft/health are facade commands once implemented.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Update architecture guide",
+            "status": "done",
+            "instruction": "Add a section explaining that skills handle cognition, CLI handles mutation/validation, MCP wraps CLI semantics, and Git stores durable state.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Update canonical architecture note",
+            "status": "done",
+            "instruction": "Update docs/LLM-WIKI.md to include the final skill names and query modes.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Verify docs",
+            "status": "done",
+            "instruction": "Run wiki lint and diff check.",
+            "command": "python3 tools/wiki/cli.py lint --report scratch/reports/2026-05-29-lint.md && git diff --check",
+            "expected": "Both commands exit 0.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Human docs describe publish-draft and health as implemented facade commands after tests prove availability.",
+          "Architecture docs preserve responsibility boundaries.",
+          "README links remain accurate."
+        ]
+      },
+      {
+        "id": "slice-5",
+        "title": "Stenc and final verification",
+        "status": "done",
+        "surfaces": [
+          "docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
+          "docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+          "docs/stenc/"
+        ],
+        "files": [
+          {
+            "action": "Modify",
+            "path": "docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+            "role": "Mark slices done as they land."
+          }
+        ],
+        "steps": [
+          {
+            "id": "step-1",
+            "title": "Validate Stenc JSON",
+            "status": "done",
+            "instruction": "Run Stenc validation for the spec and plan JSON files.",
+            "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json && node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+            "expected": "Both files validate.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-2",
+            "title": "Regenerate rendered docs",
+            "status": "done",
+            "instruction": "Regenerate Stenc static pages from JSON sources.",
+            "command": "node ~/.codex/skills/stenc/scripts/setup-project.js --project-root \"$(pwd)\" --docs-dir docs/stenc",
+            "expected": "Rendered pages are regenerated under docs/stenc.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-3",
+            "title": "Check rendered pages",
+            "status": "done",
+            "instruction": "Confirm every Stenc JSON source has a rendered page.",
+            "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+            "expected": "All rendered pages exist.",
+            "codeBlocks": []
+          },
+          {
+            "id": "step-4",
+            "title": "Run final repo verification",
+            "status": "done",
+            "instruction": "Run all wiki tooling tests and lint.",
+            "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py && python3 tools/wiki/cli.py lint --report scratch/reports/2026-05-29-lint.md && git diff --check",
+            "expected": "All commands exit 0.",
+            "codeBlocks": []
+          }
+        ],
+        "doneWhen": [
+          "Stenc JSON validates.",
+          "Rendered Stenc pages exist.",
+          "All tests pass.",
+          "Wiki lint passes.",
+          "git diff --check passes."
+        ]
+      }
+    ],
+    "executionOrder": [
+      "slice-1",
+      "slice-2",
+      "slice-3",
+      "slice-4",
+      "slice-5"
+    ],
+    "risks": [
+      {
+        "risk": "Facade command hides validation failures.",
+        "mitigation": "publish-draft must stop on dry-run failure, return non-zero without applying, and rollback page/index/log changes when post-apply lint fails."
+      },
+      {
+        "risk": "Skill docs imply agent can mutate wiki directly.",
+        "mitigation": "Baseline tests and docs require the cognition/mutation boundary to be stated explicitly."
+      },
+      {
+        "risk": "MCP behavior diverges from CLI behavior.",
+        "mitigation": "Route MCP tools to shared functions or CLI-equivalent handlers and test parity."
+      },
+      {
+        "risk": "Usage docs advertise commands before implementation.",
+        "mitigation": "After implementation, keep docs and baseline tests aligned so facade commands are described as available only when tests prove availability."
+      }
+    ],
+    "validation": [
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/validate-stenc-doc.js docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+        "purpose": "Validate this Stenc plan source."
+      },
+      {
+        "command": "node ~/.codex/skills/stenc/scripts/check-rendered-pages.js docs/stenc",
+        "purpose": "Confirm rendered pages exist for Stenc JSON sources."
+      },
+      {
+        "command": "python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py",
+        "purpose": "Confirm implementation behavior and baseline docs."
+      },
+      {
+        "command": "python3 tools/wiki/cli.py lint --report scratch/reports/2026-05-29-lint.md",
+        "purpose": "Confirm wiki quality remains clean."
+      }
+    ],
+    "agentInstructions": [
+      "Follow slices in executionOrder unless new evidence invalidates the plan.",
+      "Use superpowers:test-driven-development for CLI and MCP changes.",
+      "Use superpowers:verification-before-completion before claiming any slice complete.",
+      "Do not implement automatic LLM model invocation in this plan."
+    ],
+    "selfReviewChecks": [
+      {
+        "name": "Spec coverage",
+        "purpose": "Confirm every spec requirement maps to at least one slice."
+      },
+      {
+        "name": "No placeholders",
+        "purpose": "Confirm no TBD or vague step remains."
+      },
+      {
+        "name": "Implementation safety",
+        "purpose": "Confirm publish-draft cannot apply invalid drafts."
+      }
+    ],
+    "executionHandoff": {
+      "defaultPath": "docs/stenc/content/plans/2026-05-29-wiki-skill-workflows-implementation.plan.json",
+      "options": [
+        {
+          "label": "Subagent-Driven",
+          "description": "Dispatch a fresh subagent per slice and review between slices.",
+          "requiredSkill": "superpowers:subagent-driven-development"
+        },
+        {
+          "label": "Inline Execution",
+          "description": "Execute slices in this session with checkpointed verification.",
+          "requiredSkill": "superpowers:executing-plans"
+        }
+      ]
+    },
+    "supportingSections": [
+      {
+        "heading": "Agentic Worker Header",
+        "content": "For agentic workers: REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.",
+        "items": [
+          "Use TDD for CLI and MCP behavior.",
+          "Keep skill docs declarative and operational.",
+          "Run Stenc validation after changing this plan."
+        ],
+        "facts": [],
+        "links": [
+          {
+            "label": "Spec",
+            "target": "docs/stenc/content/specs/2026-05-29-wiki-skill-workflows.spec.json",
+            "purpose": "Canonical behavior contract that this implementation plan executes."
+          }
+        ],
+        "steps": [],
+        "subSections": [],
+        "codeBlocks": []
+      }
+    ],
+    "openQuestions": []
+  }
+}
