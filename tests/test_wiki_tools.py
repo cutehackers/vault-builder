@@ -1652,9 +1652,9 @@ class WikiToolCliTest(unittest.TestCase):
                 target / "docs" / "usage.md",
                 target / "docs" / "architecture.md",
                 target / "docs" / "agent" / "DRAFTS.md",
-                target / "agents" / "skills" / "wiki-ingest" / "SKILL.md",
-                target / "agents" / "skills" / "wiki-update" / "SKILL.md",
-                target / "agents" / "skills" / "wiki-query" / "SKILL.md",
+                target / ".agents" / "skills" / "wiki-ingest" / "SKILL.md",
+                target / ".agents" / "skills" / "wiki-update" / "SKILL.md",
+                target / ".agents" / "skills" / "wiki-query" / "SKILL.md",
                 target / "tools" / "wiki" / "templates" / "draft-upsert-page.json",
                 target / "tools" / "wiki" / "templates" / "draft-batch-upsert-pages.json",
                 target / "tools" / "wiki" / "mcp_server.py",
@@ -1664,6 +1664,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("LLM Wiki Vault initialized", init_result.stdout)
             for path in expected_files:
                 self.assertTrue(path.exists(), str(path))
+            self.assertFalse((target / "agents" / "skills").exists())
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             self.assertTrue((target / "scripts" / "bootstrap.sh").stat().st_mode & 0o111)

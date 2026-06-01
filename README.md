@@ -70,7 +70,7 @@ The important rule: LLM output is only a proposal until validation accepts it.
 | `scratch/drafts/`  | Proposed wiki changes before publication.                              |
 | `scratch/reports/` | Validation, maintenance, ingest, and query reports.                    |
 | `scratch/review/`  | Items that need human judgment.                                        |
-| `agents/skills/`   | User-facing workflows for ingest, update, and query.                   |
+| `.agents/skills/`   | User-facing workflows for ingest, update, and query.                   |
 | `tools/wiki/`      | Validation and publication internals used by the skills.               |
 | `docs/agent/`      | Detailed operating rules for agents.                                   |
 

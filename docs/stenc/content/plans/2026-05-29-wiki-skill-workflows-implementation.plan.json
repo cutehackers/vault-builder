@@ -56,9 +56,9 @@
         "tools/wiki/cli.py publish-draft command",
         "tools/wiki/cli.py health command",
         "tools/wiki/mcp_server.py wiki_publish_draft and wiki_health tools",
-        "agents/skills/wiki-ingest/SKILL.md",
-        "agents/skills/wiki-update/SKILL.md",
-        "agents/skills/wiki-query/SKILL.md",
+        ".agents/skills/wiki-ingest/SKILL.md",
+        ".agents/skills/wiki-update/SKILL.md",
+        ".agents/skills/wiki-query/SKILL.md",
         "AGENTS.md",
         "init-vault.sh",
         "docs/usage.md alignment",
@@ -93,17 +93,17 @@
       },
       {
         "action": "Add",
-        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "path": ".agents/skills/wiki-ingest/SKILL.md",
         "responsibility": "Document source-to-wiki ingest workflow for agents."
       },
       {
         "action": "Add",
-        "path": "agents/skills/wiki-update/SKILL.md",
+        "path": ".agents/skills/wiki-update/SKILL.md",
         "responsibility": "Document safe existing-page update workflow for agents."
       },
       {
         "action": "Add",
-        "path": "agents/skills/wiki-query/SKILL.md",
+        "path": ".agents/skills/wiki-query/SKILL.md",
         "responsibility": "Document query modes and capture behavior for agents."
       },
       {
@@ -272,25 +272,25 @@
         "title": "Repo-local skill workflow docs",
         "status": "done",
         "surfaces": [
-          "agents/skills/wiki-ingest/SKILL.md",
-          "agents/skills/wiki-update/SKILL.md",
-          "agents/skills/wiki-query/SKILL.md",
+          ".agents/skills/wiki-ingest/SKILL.md",
+          ".agents/skills/wiki-update/SKILL.md",
+          ".agents/skills/wiki-query/SKILL.md",
           "tests/test_wiki_quality_baseline.py"
         ],
         "files": [
           {
             "action": "Add",
-            "path": "agents/skills/wiki-ingest/SKILL.md",
+            "path": ".agents/skills/wiki-ingest/SKILL.md",
             "role": "Agent instructions for new source reflection."
           },
           {
             "action": "Add",
-            "path": "agents/skills/wiki-update/SKILL.md",
+            "path": ".agents/skills/wiki-update/SKILL.md",
             "role": "Agent instructions for safe page updates."
           },
           {
             "action": "Add",
-            "path": "agents/skills/wiki-query/SKILL.md",
+            "path": ".agents/skills/wiki-query/SKILL.md",
             "role": "Agent instructions for answer-only, answer-with-report, and answer-and-capture."
           },
           {

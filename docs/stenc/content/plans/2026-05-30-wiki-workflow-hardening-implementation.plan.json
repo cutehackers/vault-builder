@@ -14,9 +14,9 @@
       "docs/stenc/content/specs/2026-05-30-wiki-workflow-hardening.spec.json",
       "AGENTS.md",
       "docs/agent/DRAFTS.md",
-      "agents/skills/wiki-ingest/SKILL.md",
-      "agents/skills/wiki-update/SKILL.md",
-      "agents/skills/wiki-query/SKILL.md",
+      ".agents/skills/wiki-ingest/SKILL.md",
+      ".agents/skills/wiki-update/SKILL.md",
+      ".agents/skills/wiki-query/SKILL.md",
       "tools/wiki/cli.py",
       "tools/wiki/mcp_server.py",
       "tools/wiki/lib/ingest.py",
@@ -62,9 +62,9 @@
     "scope": {
       "in": [
         "docs/agent/DRAFTS.md publish-draft contract",
-        "agents/skills/wiki-ingest/SKILL.md hardening",
-        "agents/skills/wiki-update/SKILL.md hardening",
-        "agents/skills/wiki-query/SKILL.md hardening",
+        ".agents/skills/wiki-ingest/SKILL.md hardening",
+        ".agents/skills/wiki-update/SKILL.md hardening",
+        ".agents/skills/wiki-query/SKILL.md hardening",
         "tools/wiki/lib/ingest.py no-clobber behavior",
         "tools/wiki/lib/draft.py section lock preservation",
         "tools/wiki/lib/workflow.py checkpoint helpers",
@@ -96,17 +96,17 @@
       },
       {
         "action": "Modify",
-        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "path": ".agents/skills/wiki-ingest/SKILL.md",
         "responsibility": "Clarify duplicate handling, source_count/provenance requirements, contradiction handling, and final validation."
       },
       {
         "action": "Modify",
-        "path": "agents/skills/wiki-update/SKILL.md",
+        "path": ".agents/skills/wiki-update/SKILL.md",
         "responsibility": "Clarify section-lock behavior, report versus review routing, draft template, index/log expectations, and final validation."
       },
       {
         "action": "Modify",
-        "path": "agents/skills/wiki-query/SKILL.md",
+        "path": ".agents/skills/wiki-query/SKILL.md",
         "responsibility": "Define query report filename/sections, mandatory citations for substantive answers, and answer-and-capture draft flow."
       },
       {
@@ -168,9 +168,9 @@
         "surfaces": [
           "tests/test_wiki_quality_baseline.py",
           "docs/agent/DRAFTS.md",
-          "agents/skills/wiki-ingest/SKILL.md",
-          "agents/skills/wiki-update/SKILL.md",
-          "agents/skills/wiki-query/SKILL.md"
+          ".agents/skills/wiki-ingest/SKILL.md",
+          ".agents/skills/wiki-update/SKILL.md",
+          ".agents/skills/wiki-query/SKILL.md"
         ],
         "files": [
           {
@@ -185,17 +185,17 @@
           },
           {
             "action": "Modify",
-            "path": "agents/skills/wiki-ingest/SKILL.md",
+            "path": ".agents/skills/wiki-ingest/SKILL.md",
             "role": "Add duplicate, provenance, contradiction, and final validation rules."
           },
           {
             "action": "Modify",
-            "path": "agents/skills/wiki-update/SKILL.md",
+            "path": ".agents/skills/wiki-update/SKILL.md",
             "role": "Add section lock, report/review routing, draft template, index/log, and final validation rules."
           },
           {
             "action": "Modify",
-            "path": "agents/skills/wiki-query/SKILL.md",
+            "path": ".agents/skills/wiki-query/SKILL.md",
             "role": "Add report filename, report sections, mandatory citations, capture draft, and final validation rules."
           }
         ],
@@ -408,7 +408,7 @@
           "tests/test_wiki_tools.py",
           "tools/wiki/lib/workflow.py",
           "tools/wiki/cli.py",
-          "agents/skills/wiki-query/SKILL.md"
+          ".agents/skills/wiki-query/SKILL.md"
         ],
         "files": [
           {

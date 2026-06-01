@@ -70,7 +70,7 @@ raw source
 | `scratch/drafts/`  | 게시되기 전의 wiki 변경 제안입니다.                                    |
 | `scratch/reports/` | 검증, 유지보수, ingest, query report가 남는 곳입니다.                  |
 | `scratch/review/`  | 사람의 판단이 필요한 항목을 모아두는 곳입니다.                         |
-| `agents/skills/`   | ingest, update, query를 위한 사용자-facing workflow입니다.             |
+| `.agents/skills/`   | ingest, update, query를 위한 사용자-facing workflow입니다.             |
 | `tools/wiki/`      | skill이 사용하는 검증 및 게시 내부 구현입니다.                         |
 | `docs/agent/`      | agent를 위한 상세 운영 규칙입니다.                                     |
 

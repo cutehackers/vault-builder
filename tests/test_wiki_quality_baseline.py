@@ -148,7 +148,7 @@ class WikiQualityBaselineTest(unittest.TestCase):
         agents = (ROOT / "AGENTS.md").read_text()
         self.assertLessEqual(len(agents.splitlines()), 180)
         self.assertIn("docs/agent/OPERATING-SCHEMA.md", agents)
-        self.assertIn("agents/skills/", agents)
+        self.assertIn(".agents/skills/", agents)
         self.assertIn("wiki-ingest", agents)
         self.assertIn("wiki-update", agents)
         self.assertIn("wiki-query", agents)
@@ -200,9 +200,9 @@ class WikiQualityBaselineTest(unittest.TestCase):
 
     def test_repo_local_wiki_skill_docs_exist_and_preserve_boundary(self):
         skill_paths = [
-            ROOT / "agents" / "skills" / "wiki-ingest" / "SKILL.md",
-            ROOT / "agents" / "skills" / "wiki-update" / "SKILL.md",
-            ROOT / "agents" / "skills" / "wiki-query" / "SKILL.md",
+            ROOT / ".agents" / "skills" / "wiki-ingest" / "SKILL.md",
+            ROOT / ".agents" / "skills" / "wiki-update" / "SKILL.md",
+            ROOT / ".agents" / "skills" / "wiki-query" / "SKILL.md",
         ]
 
         missing = [str(path.relative_to(ROOT)) for path in skill_paths if not path.exists()]
@@ -231,9 +231,9 @@ class WikiQualityBaselineTest(unittest.TestCase):
         self.assertNotIn("| draft 적용 | `python3 tools/wiki/cli.py apply-draft", text)
 
     def test_wiki_skill_docs_are_hardened_for_agent_execution(self):
-        ingest = (ROOT / "agents" / "skills" / "wiki-ingest" / "SKILL.md").read_text()
-        update = (ROOT / "agents" / "skills" / "wiki-update" / "SKILL.md").read_text()
-        query = (ROOT / "agents" / "skills" / "wiki-query" / "SKILL.md").read_text()
+        ingest = (ROOT / ".agents" / "skills" / "wiki-ingest" / "SKILL.md").read_text()
+        update = (ROOT / ".agents" / "skills" / "wiki-update" / "SKILL.md").read_text()
+        query = (ROOT / ".agents" / "skills" / "wiki-query" / "SKILL.md").read_text()
 
         for token in [
             "same canonical_source and same raw_sha256",

@@ -223,9 +223,9 @@ Humans should only need to remember three workflow names:
 
 | Workflow | Purpose | Current State |
 |---|---|---|
-| `wiki-ingest` | Reflect a new raw source into the wiki. | Implemented as repo-local skill documentation under `agents/skills/wiki-ingest/`. |
-| `wiki-update` | Update an existing durable wiki page from sources or human instruction. | Implemented as repo-local skill documentation under `agents/skills/wiki-update/`. |
-| `wiki-query` | Answer questions from the wiki and optionally file reusable answers back. | Implemented as repo-local skill documentation under `agents/skills/wiki-query/`. |
+| `wiki-ingest` | Reflect a new raw source into the wiki. | Implemented as repo-local skill documentation under `.agents/skills/wiki-ingest/`. |
+| `wiki-update` | Update an existing durable wiki page from sources or human instruction. | Implemented as repo-local skill documentation under `.agents/skills/wiki-update/`. |
+| `wiki-query` | Answer questions from the wiki and optionally file reusable answers back. | Implemented as repo-local skill documentation under `.agents/skills/wiki-query/`. |
 
 Query modes:
 

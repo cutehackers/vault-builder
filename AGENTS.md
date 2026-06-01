@@ -6,7 +6,7 @@ Read this file first. Read the longer reference only when the task needs detail:
 
 - Full operating schema: `docs/agent/OPERATING-SCHEMA.md`
 - Architecture: `docs/LLM-WIKI.md`
-- Skill workflows: `agents/skills/`
+- Skill workflows: `.agents/skills/`
 - Draft guide: `docs/agent/DRAFTS.md`
 - Human guide: `README.md`
 
@@ -45,7 +45,7 @@ raw source
 | `scratch/reports/` | Lint, ingest, audit, query, and repair reports. |
 | `scratch/review/` | Human-judgment queue. |
 | `tools/wiki/` | Deterministic quality tooling. |
-| `agents/skills/` | Agent workflow guides for `wiki-ingest`, `wiki-update`, and `wiki-query`. |
+| `.agents/skills/` | Agent workflow guides for `wiki-ingest`, `wiki-update`, and `wiki-query`. |
 | `docs/agent/` | Detailed agent reference. |
 
 ## Required Commands
@@ -136,7 +136,7 @@ raw_sha256: "..."
 
 When asked to ingest:
 
-1. Follow `agents/skills/wiki-ingest/SKILL.md` when workflow detail is needed.
+1. Follow `.agents/skills/wiki-ingest/SKILL.md` when workflow detail is needed.
 2. Read `wiki/index.md`.
 3. Hash or register the raw source with `ingest-source` or `workflow ingest`.
 4. Create a semantic draft under `scratch/drafts/` using `tools/wiki/templates/draft-upsert-page.json`.
@@ -145,14 +145,14 @@ When asked to ingest:
 
 When asked to update:
 
-1. Follow `agents/skills/wiki-update/SKILL.md`.
+1. Follow `.agents/skills/wiki-update/SKILL.md`.
 2. Read the target page, related pages, and supporting sources.
 3. Preserve human locks and record contradictions. Use `workflow update --preflight` when a deterministic checkpoint helps.
 4. File safe changes through a draft and `publish-draft`.
 
 When asked to query:
 
-1. Follow `agents/skills/wiki-query/SKILL.md` when reusable capture or report output is requested.
+1. Follow `.agents/skills/wiki-query/SKILL.md` when reusable capture or report output is requested.
 2. Read `wiki/index.md`.
 3. Read the relevant wiki pages.
 4. Inspect source pages or raw sources only when needed.

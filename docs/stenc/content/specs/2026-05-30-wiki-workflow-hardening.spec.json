@@ -17,9 +17,9 @@
       "docs/LLM-WIKI.md",
       "docs/usage.md",
       "docs/architecture.md",
-      "agents/skills/wiki-ingest/SKILL.md",
-      "agents/skills/wiki-update/SKILL.md",
-      "agents/skills/wiki-query/SKILL.md",
+      ".agents/skills/wiki-ingest/SKILL.md",
+      ".agents/skills/wiki-update/SKILL.md",
+      ".agents/skills/wiki-query/SKILL.md",
       "tools/wiki/cli.py",
       "tools/wiki/mcp_server.py",
       "tools/wiki/lib/ingest.py",
@@ -212,7 +212,7 @@
         ]
       },
       {
-        "name": "agents/skills/wiki-ingest/SKILL.md",
+        "name": ".agents/skills/wiki-ingest/SKILL.md",
         "responsibility": "source registration, semantic extraction, draft publication, final lint gate를 agent-executable workflow로 정의한다.",
         "interfaces": [
           "raw/sources/example.md를 wiki에 반영해주세요.",
@@ -225,7 +225,7 @@
         ]
       },
       {
-        "name": "agents/skills/wiki-update/SKILL.md",
+        "name": ".agents/skills/wiki-update/SKILL.md",
         "responsibility": "기존 page update에서 lock, contradiction, report/review routing, draft publication을 정의한다.",
         "interfaces": [
           "wiki/concepts/example.md를 최신 원본 기준으로 업데이트해주세요.",
@@ -238,7 +238,7 @@
         ]
       },
       {
-        "name": "agents/skills/wiki-query/SKILL.md",
+        "name": ".agents/skills/wiki-query/SKILL.md",
         "responsibility": "wiki 질의의 answer-only, answer-with-report, answer-and-capture 산출물과 citation 규칙을 정의한다.",
         "interfaces": [
           "answer-with-report 방식으로 질문에 답해주세요.",
@@ -389,17 +389,17 @@
         "owner": "agent"
       },
       {
-        "path": "agents/skills/wiki-ingest/SKILL.md",
+        "path": ".agents/skills/wiki-ingest/SKILL.md",
         "role": "Agent ingest workflow.",
         "owner": "agent"
       },
       {
-        "path": "agents/skills/wiki-update/SKILL.md",
+        "path": ".agents/skills/wiki-update/SKILL.md",
         "role": "Agent update workflow.",
         "owner": "agent"
       },
       {
-        "path": "agents/skills/wiki-query/SKILL.md",
+        "path": ".agents/skills/wiki-query/SKILL.md",
         "role": "Agent query workflow.",
         "owner": "agent"
       },

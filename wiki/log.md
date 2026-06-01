@@ -145,3 +145,11 @@ quality:
 - Aligned direct `init-vault.sh` execution with bootstrap so no-argument installs create `vault/` by default.
 - Contradictions found: prior builder output treated Stenc as part of the default install path, while current human instruction defines Stenc as optional.
 - Follow-ups: use `--with-stenc` only for vaults that intentionally keep fixed-format Stenc spec/plan docs.
+
+## [2026-06-01] schema-change | Align Repo-Local Skill Path In Builder
+
+- Moved repo-local wiki skill documentation from `agents/skills/` to `.agents/skills/`.
+- Updated `init-vault.sh` so generated vaults install wiki skills under `.agents/skills/`.
+- Updated agent, README, architecture, usage, and Stenc planning references to the new Codex-compatible path.
+- Contradictions found: prior builder output used `agents/skills/`, while the current agent convention expects `.agents/skills/`.
+- Follow-ups: keep generated vault tests asserting the old `agents/skills/` path is absent.
