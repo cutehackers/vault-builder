@@ -3,7 +3,7 @@ title: "Wiki Log"
 type: log
 status: active
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-06-02
 owner: agent
 summary: "Append-only operation history for the LLM Wiki."
 source_count: 0
@@ -153,3 +153,13 @@ quality:
 - Updated agent, README, architecture, usage, and Stenc planning references to the new Codex-compatible path.
 - Contradictions found: prior builder output used `agents/skills/`, while the current agent convention expects `.agents/skills/`.
 - Follow-ups: keep generated vault tests asserting the old `agents/skills/` path is absent.
+
+## [2026-06-02] schema-change | Consolidate Builder Architecture Source
+
+- Retired `docs/architecture.md` from the generated vault template.
+- Updated `docs/LLM-WIKI.md` as the canonical architecture and current vault-structure source.
+- Added `docs/USER_PROMPTS.md` and `docs/VAULT_PROMPTS.md` to the builder template and generated vault output.
+- Updated root README files, usage docs, init-vault, tests, and index entries to use `docs/LLM-WIKI.md`.
+- Clarified that Stenc remains an optional user-selected workflow and is not required for ordinary LLM Wiki documentation management.
+- Contradictions found: older builder docs and tests treated `docs/architecture.md` as an active generated-vault surface while the current vault contract makes `docs/LLM-WIKI.md` the source.
+- Follow-ups: optional historical Stenc JSON may continue to mention old planning documents unless the user explicitly opts into refreshing Stenc artifacts.

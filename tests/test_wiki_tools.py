@@ -1649,8 +1649,10 @@ class WikiToolCliTest(unittest.TestCase):
                 target / ".github" / "workflows" / "release-gate.yml",
                 target / "scripts" / "bootstrap.sh",
                 target / "scripts" / "release_gate.sh",
+                target / "docs" / "LLM-WIKI.md",
                 target / "docs" / "usage.md",
-                target / "docs" / "architecture.md",
+                target / "docs" / "USER_PROMPTS.md",
+                target / "docs" / "VAULT_PROMPTS.md",
                 target / "docs" / "agent" / "DRAFTS.md",
                 target / ".agents" / "skills" / "wiki-ingest" / "SKILL.md",
                 target / ".agents" / "skills" / "wiki-update" / "SKILL.md",
@@ -1664,6 +1666,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("LLM Wiki Vault initialized", init_result.stdout)
             for path in expected_files:
                 self.assertTrue(path.exists(), str(path))
+            self.assertFalse((target / "docs" / "architecture.md").exists())
             self.assertFalse((target / "agents" / "skills").exists())
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())

@@ -3,7 +3,7 @@ title: Wiki Index
 type: index
 status: active
 created: "2026-05-26"
-updated: "2026-05-31"
+updated: "2026-06-02"
 owner: agent
 summary: Catalog of durable pages in the LLM Wiki.
 source_count: 0
@@ -33,7 +33,8 @@ quality:
 
 - `docs/LLM-WIKI.md` - Canonical architecture definition for the quality-gated compiled wiki.
 - `docs/usage.md` - Human-facing usage guide for common workflows and commands.
-- `docs/architecture.md` - Implementation-oriented architecture guide.
+- `docs/USER_PROMPTS.md` - User-facing prompt collection for LLM Wiki work.
+- `docs/VAULT_PROMPTS.md` - Vault operation and maintenance prompt collection.
 - `docs/agent/OPERATING-SCHEMA.md` - Full agent reference split out from the concise `AGENTS.md` entrypoint.
 - `docs/agent/DRAFTS.md` - Semantic draft rules and the source-to-draft handoff contract.
 

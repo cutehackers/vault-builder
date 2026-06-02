@@ -88,7 +88,9 @@ raw source
 ## 더 자세한 문서
 
 - [docs/usage.md](docs/usage.md) - 한국어 사용 가이드.
-- [docs/architecture.md](docs/architecture.md) - 한국어 아키텍처 가이드.
+- [docs/LLM-WIKI.md](docs/LLM-WIKI.md) - canonical architecture와 vault 구조.
+- [docs/USER_PROMPTS.md](docs/USER_PROMPTS.md) - 일반 사용자를 위한 LLM Wiki 활용 프롬프트.
+- [docs/VAULT_PROMPTS.md](docs/VAULT_PROMPTS.md) - vault 운영과 유지보수용 프롬프트.
 - [docs/agent/OPERATING-SCHEMA.md](docs/agent/OPERATING-SCHEMA.md) - 상세 agent
   운영 계약.
 

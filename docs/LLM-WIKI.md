@@ -1,10 +1,12 @@
-# LLM Wiki Final Architecture
+# LLM Wiki Architecture
 
 ## Purpose
 
-This document defines the final improved shape of this vault as a quality-gated LLM Wiki.
+This document is the canonical architecture source for this vault as a quality-gated LLM Wiki.
 
 The goal is not to build a passive RAG folder. The goal is to maintain a durable, compounding, human-browsable markdown wiki where raw sources stay immutable, LLM agents propose semantic knowledge, deterministic tooling enforces structural quality, and humans resolve judgment-heavy questions.
+
+`docs/architecture.md` is retired. Do not maintain a parallel architecture guide; update this file when the active vault structure, command contract, or completion gate changes.
 
 ## Root Cause
 
@@ -43,11 +45,24 @@ raw source
 
 ## Topology
 
+The default generated vault is intentionally compact. This repository may also contain optional or historical implementation artifacts, but the core operating contract is the structure below.
+
 ```text
 .
 ├── AGENTS.md
+├── README.md
+├── init-vault.sh
+├── .agents/
+│   └── skills/
+│       ├── wiki-ingest/
+│       ├── wiki-update/
+│       └── wiki-query/
+├── .github/
+│   └── workflows/
 ├── docs/
-│   └── LLM-WIKI.md
+│   ├── LLM-WIKI.md
+│   ├── usage.md
+│   └── agent/
 ├── raw/
 │   ├── sources/
 │   ├── assets/
@@ -63,14 +78,27 @@ raw source
 │   ├── systems/
 │   ├── workflows/
 │   ├── decisions/
+│   ├── comparisons/
+│   ├── timelines/
 │   └── maps/
 ├── scratch/
 │   ├── drafts/
 │   ├── reports/
 │   └── review/
+├── scripts/
+├── tests/
 └── tools/
     └── wiki/
 ```
+
+Optional Stenc artifacts may exist in the template repository or in an opt-in generated vault:
+
+```text
+docs/stenc/
+tools/stenc/
+```
+
+They are not part of the default vault topology and are not required for ordinary wiki documentation management.
 
 ## Layer Responsibilities
 
@@ -82,7 +110,12 @@ raw source
 | `scratch/review/` | Pending human-judgment items | No |
 | `wiki/` | Compiled, linked, provenance-backed knowledge | Yes |
 | `tools/wiki/` | Deterministic validation, mutation gates, workflow checkpoints, MCP wrappers, maps, and metrics tooling | Yes |
-| `docs/stenc/` | Optional fixed-format specs and plans for implementation work when Stenc is enabled | Yes |
+| `.agents/skills/` | Repo-local workflow guides for ingest, update, and query work | Yes |
+| `docs/` | Human and agent-facing operating documentation; `docs/LLM-WIKI.md` is the architecture source | Yes |
+| `scripts/` | Repo-level completion and release-gate wrappers | Yes |
+| `tests/` | Deterministic regression coverage for the wiki tool contract | Yes |
+| `.github/workflows/` | CI wiring for the same release gate | Yes |
+| `docs/stenc/`, `tools/stenc/` | Optional Stenc docs/tools only when the user explicitly opts in | Optional |
 
 ## Non-Negotiable Boundaries
 
@@ -109,6 +142,14 @@ Every substantive claim should be traceable to raw sources, source pages, prior 
 `tools/wiki/` owns deterministic quality checks.
 
 The validator does not decide whether a claim is true. It checks whether the page has the required structure, links, provenance signals, log format, and review state.
+
+### Stenc
+
+Stenc is optional. It is available only as a user-selected fixed-format spec/plan workflow.
+
+The default vault does not include Stenc docs or tools. `init-vault.sh --with-stenc` includes the optional bundle when the template has it, and `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` runs optional Stenc validation/render checks.
+
+Do not make Stenc a prerequisite for ordinary wiki maintenance, documentation updates, or completion claims. Active architecture, usage, and agent-operation documentation must remain valid without Stenc. Existing Stenc JSON documents may record historical implementation plans, but they do not override `AGENTS.md`, this file, or the live CLI contract.
 
 ## Frontmatter Contract
 
@@ -214,6 +255,9 @@ A wiki operation is not complete until these conditions are satisfied:
 - `wiki/log.md` is appended for meaningful operations.
 - A report is written under `scratch/reports/` for non-trivial ingest, lint, audit, or repair work.
 - `tools/wiki` validation passes before claiming completion.
+- `scripts/release_gate.sh` passes before claiming repo-level readiness.
+
+Stenc validation is not part of the ordinary completion gate. Run `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` only when the user explicitly chooses the Stenc workflow.
 
 ## Recommended Skill Workflows
 
@@ -264,7 +308,9 @@ python3 tools/wiki/cli.py review resolve scratch/review/example-review.md --stat
 python3 tools/wiki/cli.py merge scan --report --create-review
 python3 tools/wiki/cli.py maps build --report
 python3 tools/wiki/cli.py maps build --check --report
+python3 tools/wiki/cli.py metrics --report
 python3 tools/wiki/cli.py metrics --check --report
+python3 tools/wiki/cli.py metrics --check --policy tools/wiki/metrics-policy.json --report
 python3 tools/wiki/cli.py health
 python3 tools/wiki/cli.py apply-draft scratch/drafts/example.json --dry-run
 python3 tools/wiki/cli.py workflow ingest --source raw/sources/example.md --report
@@ -304,7 +350,7 @@ Current checks:
 - maintenance metrics dashboard for pending reviews, contested claims, stale sources, orphan pages, provenance coverage, deprecated links, and last health report
 - configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`
 - report and generated query-capture draft path confinement under `scratch/reports/` and `scratch/drafts/`
-- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks, and `git diff --check` in a temporary repo copy
+- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks only when explicitly enabled, and `git diff --check` in a temporary repo copy
 
 Intentional limits:
 
@@ -396,7 +442,7 @@ The correct build order is:
 6. Implement deterministic source registration. Done as `ingest-source`.
 7. Add semantic extraction templates for source-to-draft work. Done as `docs/agent/DRAFTS.md` and `tools/wiki/templates/draft-upsert-page.json`.
 8. Wrap stable CLI behavior with MCP. Done as `tools/wiki/mcp_server.py`.
-9. Define simplified skill workflows. Done as Stenc spec `2026-05-29-wiki-skill-workflows`.
+9. Define simplified skill workflows. Done as repo-local skill docs under `.agents/skills/`; older Stenc specs may describe historical planning but do not define the active contract.
 10. Implement `publish-draft` and `health` CLI facade commands. Done.
 11. Add `wiki-ingest`, `wiki-update`, and `wiki-query` repo-local skill docs. Done.
 12. Expose `wiki_publish_draft` and `wiki_health` via MCP. Done.
@@ -421,8 +467,10 @@ For operating behavior, use this hierarchy:
 1. Explicit human instruction in the current task.
 2. `AGENTS.md` operating contract.
 3. `docs/LLM-WIKI.md` architecture definition.
-4. Optional Stenc specs and plans under `docs/stenc/content/`, when the vault opted into Stenc.
-5. Durable wiki pages with provenance.
+4. Durable wiki pages with provenance.
+5. Tool implementation and tests when they reveal the live deterministic contract.
+
+Optional Stenc specs and plans under `docs/stenc/content/` apply only to user-selected Stenc work. They are auxiliary records, not a higher-priority operating source for normal wiki documentation management.
 
 For factual evidence, use this hierarchy:
 
@@ -437,11 +485,14 @@ Contradictions must be recorded before replacing an older view.
 ## Current Canonical Documents
 
 - `AGENTS.md` defines the agent operating contract.
-- `docs/LLM-WIKI.md` defines the final architecture.
-- Optional Stenc documents under `docs/stenc/content/` record fixed-format specs and plans for work that opted into Stenc.
+- `docs/LLM-WIKI.md` defines the architecture and current vault structure.
+- `docs/usage.md` defines the human-facing usage flow.
+- `docs/agent/OPERATING-SCHEMA.md` defines the detailed agent reference.
 - `wiki/overview.md` is the human-readable wiki briefing.
 - `wiki/index.md` is the page catalog.
 - `wiki/log.md` is the chronological operation log.
+
+Optional Stenc documents under `docs/stenc/content/` may record fixed-format specs and plans for work that explicitly opted into Stenc. They are not mandatory documentation sources.
 
 ## Definition Of Done
 
@@ -462,11 +513,13 @@ python3 tools/wiki/cli.py metrics --check --report
 git diff --check
 ```
 
-Stenc validation/render checks are optional and run only when explicitly enabled:
+Stenc validation/render checks are optional and run only when explicitly enabled by the user:
 
 ```bash
 WIKI_ENABLE_STENC=1 scripts/release_gate.sh
 ```
+
+Do not require Stenc validation for ordinary LLM Wiki documentation management.
 
 The same gate is wired into `.github/workflows/release-gate.yml`.
 

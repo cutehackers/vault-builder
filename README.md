@@ -88,7 +88,9 @@ The important rule: LLM output is only a proposal until validation accepts it.
 ## More Detail
 
 - [docs/usage.md](docs/usage.md) - Korean usage guide.
-- [docs/architecture.md](docs/architecture.md) - Korean architecture guide.
+- [docs/LLM-WIKI.md](docs/LLM-WIKI.md) - canonical architecture and vault structure.
+- [docs/USER_PROMPTS.md](docs/USER_PROMPTS.md) - prompts for ordinary LLM Wiki use.
+- [docs/VAULT_PROMPTS.md](docs/VAULT_PROMPTS.md) - prompts for vault operation and maintenance.
 - [docs/agent/OPERATING-SCHEMA.md](docs/agent/OPERATING-SCHEMA.md) - detailed
   agent operating contract.
 
