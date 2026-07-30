@@ -54,7 +54,7 @@
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "3dd9d145e835977419e189a7911e8fe510f332f611a3a03d54f2c94a33962897"
+      "sha256": "e517f16decada8b76491d6ffcd620c7b9f89f2141cba11ca190238d56a287063"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -108,13 +108,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "e27ddee776b34700d5623312741291ceba18bf9eb47c9651ce4e9026eb6862ff"
+      "sha256": "fecbbaa01022d4ba9acaca5c74c2d6f2875123028194d8d406ca85c9d7f48311"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "474f1ac19b10517c596a6869d07d3df46cfcdae59628ab19934f1f3ee7d25ad1"
+      "sha256": "c218ab01b97b77ae4467bf524ccd81a17c5ed658cd46aa70255e8f11ba69943a"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/authority.py",
       "policy": "replace-if-unmodified",
-      "sha256": "8ea3d87db6451f88d988b4be996f977bf20679b92405ad1beb32349a3a55beb6"
+      "sha256": "053658482dc7b5f14317de3d7eeec45344140cfcc0129c40d316162a1204aab7"
     },
     "tools/wiki/lib/draft.py": {
       "mode": "0644",

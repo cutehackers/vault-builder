@@ -911,7 +911,7 @@ class MigrationApplyTest(unittest.TestCase):
                     self.assertNotIn(".vault-builder-migration", lint.stdout)
 
                 if fail_gate:
-                    with self.assertRaises(subprocess.CalledProcessError):
+                    with self.assertRaises(applying.MigrationApplyError):
                         apply_plan(ROOT, target, plan, run_gate=gate)
                     self.assertEqual(before, _tree_digest(target))
                     self.assertFalse((target / ".agents").exists())
@@ -936,7 +936,7 @@ class MigrationApplyTest(unittest.TestCase):
                 original_write(destination, contents, mode)
 
             with mock.patch("tools.vault_migration.applying._atomic_write", side_effect=fail_created_file):
-                with self.assertRaisesRegex(OSError, "injected create failure"):
+                with self.assertRaisesRegex(applying.MigrationApplyError, "injected create failure"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
             self.assertEqual(before, _tree_digest(target))
@@ -957,7 +957,7 @@ class MigrationApplyTest(unittest.TestCase):
                 original_mkdir(path)
 
             with mock.patch("tools.vault_migration.applying._mkdir_directory", side_effect=fail_second_parent):
-                with self.assertRaisesRegex(OSError, "injected parent mkdir failure"):
+                with self.assertRaisesRegex(applying.MigrationApplyError, "injected parent mkdir failure"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
             self.assertEqual(before, _tree_digest(target))
@@ -998,10 +998,143 @@ class MigrationApplyTest(unittest.TestCase):
                     if (load_manifest(root) is not None) == fail_after_manifest:
                         raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
 
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaises(applying.MigrationApplyError):
                     apply_plan(ROOT, target, plan, run_gate=fail_gate)
 
                 self.assertEqual(before, _tree_digest(target))
+
+    def test_transactional_gate_failure_preserves_command_exit_and_rollback_result(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            def fail_gate(_: Path) -> None:
+                raise subprocess.CalledProcessError(7, ["bash", "scripts/release_gate.sh"])
+
+            with self.assertRaises(applying.MigrationApplyError) as raised:
+                apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            failure = raised.exception
+            self.assertTrue(failure.rollback_completed)
+            self.assertEqual("bash scripts/release_gate.sh", failure.failed_command)
+            self.assertEqual(7, failure.exit_code)
+            self.assertEqual(
+                f"python3 tools/vault_migration/cli.py audit --target {target.resolve()}",
+                failure.audit_command,
+            )
+            self.assertIsNone(failure.recover_command)
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_transactional_noncommand_failure_reports_completed_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            with mock.patch.object(applying, "_verify_candidate_files", side_effect=ValueError("validation exploded")):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            failure = raised.exception
+            self.assertTrue(failure.rollback_completed)
+            self.assertIsNone(failure.failed_command)
+            self.assertIsNone(failure.exit_code)
+            self.assertIn("validation exploded", str(failure))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_transactional_rollback_failure_preserves_original_failure_and_recover_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+
+            def fail_gate(_: Path) -> None:
+                raise subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"])
+
+            with mock.patch.object(applying, "_rollback", side_effect=OSError("rollback exploded")):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            failure = raised.exception
+            self.assertFalse(failure.rollback_completed)
+            self.assertEqual("bash scripts/release_gate.sh", failure.failed_command)
+            self.assertEqual(9, failure.exit_code)
+            self.assertEqual(
+                f"python3 tools/vault_migration/cli.py recover --target {target.resolve()} --migration-id {plan.migration_id}",
+                failure.recover_command,
+            )
+            self.assertIsNone(failure.audit_command)
+            self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
+
+    def test_precondition_failure_is_not_reported_as_a_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            (target / "tools" / "wiki" / "cli.py").write_text("changed after audit\n")
+
+            with self.assertRaisesRegex(ValueError, "changed after audit") as raised:
+                apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertNotIsInstance(raised.exception, getattr(applying, "MigrationApplyError", ()))
+            self.assertFalse((target / ".vault-builder" / "recovery").exists())
+
+    def test_journal_preparation_failure_reports_completed_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            with mock.patch.object(
+                applying,
+                "_journal_prepare_step",
+                side_effect=OSError("prepared journal failure"),
+                create=True,
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            failure = raised.exception
+            self.assertTrue(failure.rollback_completed)
+            self.assertIn("prepared journal failure", str(failure))
+            self.assertIn("audit --target", failure.audit_command)
+            self.assertIsNone(failure.recover_command)
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_journal_preparation_cleanup_failure_preserves_original_and_recover_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+
+            with (
+                mock.patch.object(
+                    applying,
+                    "_journal_prepare_step",
+                    side_effect=OSError("prepared journal failure"),
+                    create=True,
+                ),
+                mock.patch.object(
+                    applying,
+                    "_remove_tree_no_symlinks",
+                    side_effect=OSError("journal cleanup failure"),
+                ),
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            failure = raised.exception
+            self.assertFalse(failure.rollback_completed)
+            self.assertIn("prepared journal failure", str(failure))
+            self.assertIn(
+                f"recover --target {target.resolve()} --migration-id {plan.migration_id}",
+                failure.recover_command,
+            )
+            self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
     def test_apply_rejects_changed_builder_bytes_before_journal_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1031,10 +1164,334 @@ class MigrationApplyTest(unittest.TestCase):
             before = _tree_digest(target)
 
             with mock.patch("tools.vault_migration.applying.write_manifest", side_effect=ValueError("manifest write failed")):
-                with self.assertRaisesRegex(ValueError, "manifest write failed"):
+                with self.assertRaisesRegex(applying.MigrationApplyError, "manifest write failed"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
             self.assertEqual(before, _tree_digest(target))
+
+    def test_candidate_manifest_write_ahead_crash_windows_recover_exactly(self):
+        for stop_stage, exit_code in (("before-publication", 31), ("after-publication", 32)):
+            with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+
+                child = os.fork()
+                if child == 0:
+                    def hard_stop(stage: str) -> None:
+                        if stage == stop_stage:
+                            os._exit(exit_code)
+
+                    with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop, create=True):
+                        apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                    os._exit(99)
+
+                _, child_status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(child_status))
+                self.assertEqual(exit_code, os.WEXITSTATUS(child_status))
+                journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+                self.assertTrue((journal_root / "journal.json").is_file())
+                journal = json.loads((journal_root / "journal.json").read_text())
+                manifest_intent = journal["manifest"]
+                self.assertEqual("intent", manifest_intent["publication_state"])
+                self.assertRegex(manifest_intent["candidate_sha256"], r"^[0-9a-f]{64}$")
+                if stop_stage == "before-publication":
+                    self.assertIsNone(load_manifest(target))
+                else:
+                    self.assertEqual(1, load_manifest(target).contract_version)
+                    self.assertEqual(
+                        manifest_intent["candidate_sha256"],
+                        sha256_file(target / ".vault-builder" / "manifest.json"),
+                    )
+
+                recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before, _tree_digest(target))
+                self.assertIsNone(load_manifest(target))
+
+    def test_candidate_manifest_crash_recovery_restores_prior_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            prior = VaultManifest(
+                schema_version=1,
+                contract_version=1,
+                builder_revision="prior",
+                generated_at="2026-07-30T00:00:00Z",
+                managed_files={},
+            )
+            write_manifest(target, prior)
+            prior_bytes = (target / ".vault-builder" / "manifest.json").read_bytes()
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-publication":
+                        os._exit(33)
+
+                with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(33, os.WEXITSTATUS(child_status))
+            self.assertNotEqual(prior_bytes, (target / ".vault-builder" / "manifest.json").read_bytes())
+
+            recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before, _tree_digest(target))
+            self.assertEqual(prior_bytes, (target / ".vault-builder" / "manifest.json").read_bytes())
+
+    def test_prior_manifest_backup_write_ahead_crash_recovers_exactly(self):
+        for stop_stage, exit_code in (("after-intent", 38), ("after-original", 39)):
+            with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                prior = VaultManifest(
+                    schema_version=1,
+                    contract_version=1,
+                    builder_revision="prior",
+                    generated_at="2026-07-30T00:00:00Z",
+                    managed_files={},
+                )
+                write_manifest(target, prior)
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+
+                child = os.fork()
+                if child == 0:
+                    def hard_stop(stage: str) -> None:
+                        if stage == stop_stage:
+                            os._exit(exit_code)
+
+                    with mock.patch.object(applying, "_manifest_backup_step", side_effect=hard_stop):
+                        apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                    os._exit(99)
+
+                _, child_status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(child_status))
+                self.assertEqual(exit_code, os.WEXITSTATUS(child_status))
+                journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+                journal = json.loads((journal_root / "journal.json").read_text())
+                self.assertEqual("intent", journal["manifest"]["backup_state"])
+                backup = journal_root / "originals" / ".vault-builder" / "manifest.json"
+                self.assertEqual(stop_stage == "after-original", backup.is_file())
+
+                recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before, _tree_digest(target))
+                self.assertEqual(prior, load_manifest(target))
+
+    def test_candidate_manifest_recovery_refuses_unknown_current_hash(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-publication":
+                        os._exit(34)
+
+                with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(34, os.WEXITSTATUS(child_status))
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            manifest_path.write_text("unknown manifest bytes\n")
+            before_recovery = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "unknown Vault builder manifest"):
+                recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before_recovery, _tree_digest(target))
+            self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
+
+    def test_recovery_preflights_all_managed_targets_before_restoring_any(self):
+        for mutation in ("unknown-bytes", "unsafe-symlink"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                plan = audit_vault(ROOT, target)
+
+                child = os.fork()
+                if child == 0:
+                    def hard_stop(stage: str) -> None:
+                        if stage == "after-publication":
+                            os._exit(36)
+
+                    with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                        apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                    os._exit(99)
+
+                _, child_status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(child_status))
+                self.assertEqual(36, os.WEXITSTATUS(child_status))
+                journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+                journal = json.loads((journal_root / "journal.json").read_text())
+                victim = next(entry for entry in journal["entries"] if entry["existed"])
+                victim_path = target / victim["path"]
+                if mutation == "unknown-bytes":
+                    victim_path.write_text("unknown concurrent bytes\n")
+                else:
+                    victim_path.unlink()
+                    victim_path.symlink_to(target / "AGENTS.md")
+                before_recovery = _tree_digest(target)
+
+                with self.assertRaisesRegex(ValueError, "unknown|unsafe"):
+                    recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before_recovery, _tree_digest(target))
+                self.assertTrue(journal_root.is_dir())
+
+    def test_automatic_rollback_preflights_all_originals_before_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            shutil.rmtree(target / ".agents")
+            plan = audit_vault(ROOT, target)
+            before_target: dict[str, tuple[str, str, str]] = {}
+            before_journal_artifacts: dict[str, tuple[str, str, str]] = {}
+            before_journal: dict[str, object] = {}
+
+            def snapshot(path: Path) -> tuple[str, str, str]:
+                state = path.lstat()
+                mode = f"{state.st_mode & 0o7777:04o}"
+                if path.is_symlink():
+                    return ("symlink", mode, os.readlink(path))
+                if path.is_file():
+                    return ("file", mode, hashlib.sha256(path.read_bytes()).hexdigest())
+                return ("directory", mode, "")
+
+            def fail_gate(_: Path) -> None:
+                journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+                journal_path = journal_root / "journal.json"
+                journal = json.loads(journal_path.read_text())
+                victim = next(entry for entry in journal["entries"] if entry["existed"])
+                original = journal_root / "originals" / victim["path"]
+                original.write_text("corrupt later original\n")
+
+                before_journal.update(json.loads(journal_path.read_text()))
+                for path in sorted(target.rglob("*")):
+                    if path == journal_root or journal_root in path.parents:
+                        continue
+                    before_target[path.relative_to(target).as_posix()] = snapshot(path)
+                for path in sorted(journal_root.rglob("*")):
+                    if path == journal_path:
+                        continue
+                    before_journal_artifacts[path.relative_to(journal_root).as_posix()] = snapshot(path)
+                raise subprocess.CalledProcessError(12, ["scripts/release_gate.sh"])
+
+            with self.assertRaises(applying.MigrationApplyError) as raised:
+                apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            failure = raised.exception
+            self.assertFalse(failure.rollback_completed)
+            self.assertIn(
+                f"recover --target {target.resolve()} --migration-id {plan.migration_id}",
+                failure.recover_command,
+            )
+            journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+            journal_path = journal_root / "journal.json"
+            after_journal = json.loads(journal_path.read_text())
+            expected_journal = dict(before_journal)
+            expected_journal["state"] = "rollback-failed"
+            self.assertEqual(expected_journal, after_journal)
+            self.assertEqual(
+                before_target,
+                {
+                    path.relative_to(target).as_posix(): snapshot(path)
+                    for path in sorted(target.rglob("*"))
+                    if path != journal_root and journal_root not in path.parents
+                },
+            )
+            self.assertEqual(
+                before_journal_artifacts,
+                {
+                    path.relative_to(journal_root).as_posix(): snapshot(path)
+                    for path in sorted(journal_root.rglob("*"))
+                    if path != journal_path
+                },
+            )
+            self.assertFalse((target / ".vault-builder" / "manifest.json").exists())
+
+    def test_candidate_manifest_requires_prior_backup_before_recovery_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            prior = VaultManifest(
+                schema_version=1,
+                contract_version=1,
+                builder_revision="prior",
+                generated_at="2026-07-30T00:00:00Z",
+                managed_files={},
+            )
+            write_manifest(target, prior)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-publication":
+                        os._exit(40)
+
+                with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(40, os.WEXITSTATUS(child_status))
+            journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+            journal_path = journal_root / "journal.json"
+            journal = json.loads(journal_path.read_text())
+            journal["manifest"]["backup_state"] = "intent"
+            journal_path.write_text(json.dumps(journal, indent=2, sort_keys=True) + "\n")
+            (journal_root / "originals" / ".vault-builder" / "manifest.json").unlink()
+            before_recovery = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "original is invalid"):
+                recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before_recovery, _tree_digest(target))
+            self.assertEqual(1, load_manifest(target).contract_version)
+            self.assertTrue(journal_root.is_dir())
+
+    def test_recovery_restores_manifest_before_managed_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-publication":
+                        os._exit(37)
+
+                with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(37, os.WEXITSTATUS(child_status))
+            self.assertEqual(1, load_manifest(target).contract_version)
+
+            with mock.patch.object(applying, "_restore_entry", side_effect=OSError("stop during managed restore")):
+                with self.assertRaisesRegex(OSError, "stop during managed restore"):
+                    recover_migration(target, plan.migration_id)
+
+            self.assertIsNone(load_manifest(target))
+            self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
     def test_recover_restores_interrupted_journal_and_prior_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1047,7 +1504,8 @@ class MigrationApplyTest(unittest.TestCase):
             original_path = journal_root / "originals" / relative
             original_path.parent.mkdir(parents=True, exist_ok=True)
             original_path.write_bytes(original)
-            (target / relative).write_text("interrupted replacement\n")
+            interrupted = b"interrupted replacement\n"
+            (target / relative).write_bytes(interrupted)
             (journal_root / "journal.json").write_text(
                 json.dumps(
                     {
@@ -1060,8 +1518,17 @@ class MigrationApplyTest(unittest.TestCase):
                             "existed": True,
                             "sha256": hashlib.sha256(original).hexdigest(),
                             "mode": "0644",
+                            "applied_sha256": hashlib.sha256(interrupted).hexdigest(),
+                            "applied_mode": "0644",
                         }],
-                        "manifest": {"existed": False, "sha256": None, "mode": None},
+                        "manifest": {
+                            "existed": False,
+                            "sha256": None,
+                            "mode": None,
+                            "backup_state": "not-required",
+                            "candidate_sha256": "c" * 64,
+                            "publication_state": "intent",
+                        },
                         "directory_nonce": "b" * 64,
                         "directories": [],
                     },
@@ -1120,6 +1587,7 @@ class MigrationApplyTest(unittest.TestCase):
                             "sha256": None,
                             "mode": None,
                             "applied_sha256": hashlib.sha256(desired).hexdigest(),
+                            "applied_mode": "0644",
                         }],
                         "manifest": None,
                         "directory_nonce": nonce,
@@ -1332,7 +1800,7 @@ class MigrationApplyTest(unittest.TestCase):
                     staged_marker.write_text("corrupt staged marker\n")
 
             with mock.patch("tools.vault_migration.applying._directory_step", side_effect=corrupt_staged_marker):
-                with self.assertRaisesRegex(ValueError, "marker is invalid"):
+                with self.assertRaisesRegex(applying.MigrationApplyError, "marker is invalid"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
             self.assertFalse(target_marker.exists())
@@ -1487,7 +1955,14 @@ class MigrationApplyTest(unittest.TestCase):
                             "sha256": "a" * 64,
                             "mode": "0644",
                         }],
-                        "manifest": {"existed": False, "sha256": None, "mode": None},
+                        "manifest": {
+                            "existed": False,
+                            "sha256": None,
+                            "mode": None,
+                            "backup_state": "not-required",
+                            "candidate_sha256": "c" * 64,
+                            "publication_state": "intent",
+                        },
                         "directory_nonce": "b" * 64,
                         "directories": [],
                     }
@@ -1520,7 +1995,14 @@ class MigrationApplyTest(unittest.TestCase):
                     "sha256": "a" * 64,
                     "mode": "0644",
                 }],
-                "manifest": {"existed": False, "sha256": None, "mode": None},
+                "manifest": {
+                    "existed": False,
+                    "sha256": None,
+                    "mode": None,
+                    "backup_state": "not-required",
+                    "candidate_sha256": "c" * 64,
+                    "publication_state": "intent",
+                },
                 "directory_nonce": "b" * 64,
                 "directories": [],
             }
@@ -1574,6 +2056,7 @@ class MigrationApplyTest(unittest.TestCase):
                             "sha256": None,
                             "mode": None,
                             "applied_sha256": "a" * 64,
+                            "applied_mode": "0644",
                         }],
                         "manifest": None,
                         "directory_nonce": "b" * 64,
@@ -1624,6 +2107,7 @@ class MigrationApplyTest(unittest.TestCase):
                                 "sha256": None,
                                 "mode": None,
                                 "applied_sha256": "a" * 64,
+                                "applied_mode": "0644",
                             }],
                             "manifest": None,
                             "directory_nonce": nonce,
@@ -2069,6 +2553,78 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(0, result)
             self.assertIn("Final contract: 1", stdout.getvalue())
 
+    def test_apply_cli_reports_transaction_outcomes_without_guessing_preconditions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan = MigrationPlan(
+                schema_version=1,
+                migration_id="0123456789abcdef",
+                current_contract_version=None,
+                target_contract_version=1,
+                builder_revision="test",
+                target_fingerprint="a" * 64,
+                actions=(),
+                authority_issues=(),
+            )
+            plan_path = root / "plan.json"
+            plan_path.write_text(plan.to_json())
+            cases = (
+                (
+                    "gate",
+                    applying.MigrationApplyError(
+                        subprocess.CalledProcessError(7, ["bash", "scripts/release_gate.sh"]),
+                        target=target,
+                        migration_id=plan.migration_id,
+                        rollback_completed=True,
+                    ),
+                    ("Failed command: bash scripts/release_gate.sh", "Exit code: 7", "Automatic rollback: completed", "audit --target"),
+                ),
+                (
+                    "non-command",
+                    applying.MigrationApplyError(
+                        ValueError("validation exploded"),
+                        target=target,
+                        migration_id=plan.migration_id,
+                        rollback_completed=True,
+                    ),
+                    ("Failure: validation exploded", "Automatic rollback: completed", "audit --target"),
+                ),
+                (
+                    "rollback-failed",
+                    applying.MigrationApplyError(
+                        subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"]),
+                        target=target,
+                        migration_id=plan.migration_id,
+                        rollback_completed=False,
+                        rollback_error=OSError("rollback exploded"),
+                    ),
+                    (
+                        "Failed command: bash scripts/release_gate.sh",
+                        "Exit code: 9",
+                        "Automatic rollback: failed",
+                        f"recover --target {target} --migration-id {plan.migration_id}",
+                    ),
+                ),
+                (
+                    "precondition",
+                    ValueError("Migration target changed after audit; run audit again."),
+                    ("Migration target changed after audit",),
+                ),
+            )
+            for name, failure, expected in cases:
+                with self.subTest(name=name), mock.patch.object(cli, "apply_plan", side_effect=failure):
+                    stderr = io.StringIO()
+                    with mock.patch("sys.stderr", stderr):
+                        result = cli.main(["apply", "--target", str(target), "--plan", str(plan_path)])
+                    rendered = stderr.getvalue()
+                    self.assertEqual(1, result)
+                    for token in expected:
+                        self.assertIn(token, rendered)
+                    if name == "precondition":
+                        self.assertNotIn("Automatic rollback", rendered)
+                        self.assertNotIn("recover --target", rendered)
+
     def test_recover_prints_actionable_failure_for_missing_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2184,7 +2740,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             def fail_gate(_: Path) -> None:
                 raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
 
-            with self.assertRaises(subprocess.CalledProcessError):
+            with self.assertRaises(applying.MigrationApplyError):
                 apply_plan(ROOT, target, plan, run_gate=fail_gate)
 
             self.assertEqual(before, _tree_digest(target))

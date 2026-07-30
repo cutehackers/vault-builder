@@ -42,6 +42,8 @@ def authority_contract_version(root: Path) -> int | None:
     value = manifest.get("contract_version")
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError("Vault builder manifest contract_version must be an integer.")
+    if value != 1:
+        raise ValueError("Vault builder manifest supported contract version is 1.")
     return value
 
 
@@ -80,7 +82,7 @@ def validate_authority_contract(root: Path, pages: list[Page]) -> list[Issue]:
             )
         ]
 
-    if version is None or version < 1:
+    if version is None:
         return []
 
     return scan_authority_issues(root, pages)
@@ -187,15 +189,29 @@ def _validate_registration(
     links_start = section_starts.get("## Durable Knowledge Links")
     if registration_start is None or links_start is None:
         return []
-    expected = {
+    expected = [
         f"- Canonical source: `{frontmatter.get('canonical_source')}`",
         f"- SHA-256: `{frontmatter.get('raw_sha256')}`",
         f"- Source kind: `{frontmatter.get('source_kind')}`",
-    }
-    content = {line for line in _section_content(lines, registration_start, links_start) if line}
-    if not expected <= content:
+    ]
+    content = [
+        line.rstrip()
+        for line in _section_content(lines, registration_start, links_start)
+        if line.strip()
+    ]
+    if content == expected:
+        return []
+    if len(content) < len(expected) and len(content) == len(set(content)) and set(content).issubset(expected):
         return [_issue(page, "source-manifest-registration", "Source manifest registration is incomplete.")]
-    return []
+    if len(content) == len(expected) and set(content) == set(expected):
+        return [_issue(page, "source-manifest-registration", "Source manifest registration lines must use the required order.")]
+    return [
+        _issue(
+            page,
+            "source-manifest-semantic-body",
+            "Registration may contain only the three required registration lines.",
+        )
+    ]
 
 
 def _validate_durable_links(page: Page, lines: list[str], section_starts: dict[str, int]) -> list[Issue]:

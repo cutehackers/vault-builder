@@ -316,6 +316,121 @@ class WikiAuthorityContractTest(unittest.TestCase):
                 {issue.code for issue in lint_repo(root).issues},
             )
 
+    def test_future_contract_version_is_rejected_directly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_contract_manifest(root, version=2)
+
+            with self.assertRaisesRegex(ValueError, "supported contract version is 1"):
+                authority_contract_version(root)
+
+    def test_future_contract_version_is_reported_by_lint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root, version=2)
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_future_contract_version_is_reported_by_validate_page(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root, version=2)
+            page_path = root / "wiki" / "index.md"
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    result = cli.main(["validate-page", str(page_path)])
+            finally:
+                cli.ROOT = original_root
+
+            self.assertEqual(1, result)
+            self.assertIn("invalid-vault-builder-manifest", output.getvalue())
+
+    def test_registration_rejects_any_extra_semantic_content(self):
+        extras = {
+            "paragraph": "Copied explanation.",
+            "bullet": "- Additional note.",
+            "table": "| Field | Value |\n| --- | --- |\n| Note | Copied |",
+            "code": "```text\ncopied\n```",
+            "link": "[Copied context](https://example.com)",
+        }
+        for kind, extra in extras.items():
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _write_contract_manifest(root)
+                path = _write_role_page(root, "wiki/sources/input.md", "source")
+                page = parse_page(path)
+                body = page.body.replace(
+                    "\n## Durable Knowledge Links",
+                    f"\n{extra}\n\n## Durable Knowledge Links",
+                )
+                path.write_text(render_page(page.frontmatter, body))
+
+                issues = validate_authority_contract(root, [parse_page(path)])
+
+                self.assertIn("source-manifest-semantic-body", {issue.code for issue in issues})
+
+    def test_registration_extra_semantics_are_reported_by_lint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            path = _write_role_page(root, "wiki/sources/input.md", "source")
+            page = parse_page(path)
+            path.write_text(
+                render_page(
+                    page.frontmatter,
+                    page.body.replace(
+                        "\n## Durable Knowledge Links",
+                        "\nCopied explanation.\n\n## Durable Knowledge Links",
+                    ),
+                )
+            )
+
+            self.assertIn(
+                "source-manifest-semantic-body",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_registration_extra_semantics_are_reported_by_validate_page(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            path = _write_role_page(root, "wiki/sources/input.md", "source")
+            page = parse_page(path)
+            path.write_text(
+                render_page(
+                    page.frontmatter,
+                    page.body.replace(
+                        "\n## Durable Knowledge Links",
+                        "\nCopied explanation.\n\n## Durable Knowledge Links",
+                    ),
+                )
+            )
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    result = cli.main(["validate-page", str(path)])
+            finally:
+                cli.ROOT = original_root
+
+            self.assertEqual(1, result)
+            self.assertIn("source-manifest-semantic-body", output.getvalue())
+
     def test_non_utf8_manifest_is_reported_by_lint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

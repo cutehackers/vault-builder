@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -28,6 +29,59 @@ _MODE_RE = re.compile(r"^[0-7]{4}$")
 _NONCE_RE = re.compile(r"^[0-9a-f]{64}$")
 _MANIFEST_RELATIVE = ".vault-builder/manifest.json"
 _DIRECTORY_MARKER_FILENAME = ".vault-builder-migration.json"
+
+
+class MigrationApplyError(RuntimeError):
+    """A post-start failure with explicit transaction recovery outcome."""
+
+    def __init__(
+        self,
+        original_error: BaseException,
+        *,
+        target: Path,
+        migration_id: str,
+        rollback_completed: bool,
+        rollback_error: BaseException | None = None,
+    ) -> None:
+        self.original_error = original_error
+        self.rollback_error = rollback_error
+        self.rollback_completed = rollback_completed
+        self.failed_command = _failed_command(original_error)
+        self.exit_code = (
+            original_error.returncode
+            if isinstance(original_error, subprocess.CalledProcessError)
+            else None
+        )
+        self.audit_command = _audit_command(target) if rollback_completed else None
+        self.recover_command = (
+            None
+            if rollback_completed
+            else _recover_command(target, migration_id)
+        )
+        lines = ["Migration failed after transaction start."]
+        if self.failed_command is not None:
+            lines.append(f"Failed command: {self.failed_command}")
+            lines.append(f"Exit code: {self.exit_code}")
+        else:
+            lines.append(f"Failure: {original_error}")
+        if rollback_completed:
+            lines.append("Automatic rollback: completed")
+            lines.append(f"Run read-only audit again: {self.audit_command}")
+        else:
+            lines.append("Automatic rollback: failed")
+            lines.append(f"Recover with: {self.recover_command}")
+        super().__init__("\n".join(lines))
+
+
+class _JournalPreparationFailure(Exception):
+    def __init__(
+        self,
+        original_error: BaseException,
+        cleanup_error: BaseException | None,
+    ) -> None:
+        self.original_error = original_error
+        self.cleanup_error = cleanup_error
+        super().__init__(str(original_error))
 
 
 def _safe_target_path(target: Path, relative: str, *, reject_leaf_symlink: bool = True) -> Path:
@@ -67,7 +121,16 @@ def apply_plan(
     builder = _validate_root(builder_root, "Builder root")
     target = _target_root(target_root)
     checked_plan, actions = _verify_preconditions(builder, target, plan)
-    journal_root, journal = _prepare_journal(target, checked_plan, actions)
+    try:
+        journal_root, journal = _prepare_journal(target, checked_plan, actions)
+    except _JournalPreparationFailure as exc:
+        raise MigrationApplyError(
+            exc.original_error,
+            target=target,
+            migration_id=checked_plan.migration_id,
+            rollback_completed=exc.cleanup_error is None,
+            rollback_error=exc.cleanup_error,
+        ) from (exc.cleanup_error or exc.original_error)
     gate = run_gate or _run_release_gate
     try:
         _write_journal_state(journal_root, journal, "applying")
@@ -97,13 +160,27 @@ def apply_plan(
         gate(target)
         _verify_candidate_files(builder, target, actions)
 
-        _record_prior_manifest(target, journal_root, journal)
         candidate = replace(
             create_manifest(builder, target, checked_plan.builder_revision),
             last_migration_id=checked_plan.migration_id,
         )
+        candidate_bytes = candidate.to_json().encode("utf-8")
+        candidate_sha256 = hashlib.sha256(candidate_bytes).hexdigest()
+        _record_manifest_publication_intent(
+            target,
+            journal_root,
+            journal,
+            candidate_sha256,
+        )
+        _manifest_step("before-publication")
         write_manifest(target, candidate)
-        journal["manifest"]["applied_sha256"] = sha256_file(target / _MANIFEST_RELATIVE)
+        _manifest_step("after-publication")
+        if sha256_file(target / _MANIFEST_RELATIVE) != candidate_sha256:
+            raise ValueError("Candidate Vault builder manifest verification failed.")
+        manifest_state = _journal_manifest(journal, allow_none=False)
+        assert manifest_state is not None
+        manifest_state["publication_state"] = "published"
+        journal["manifest"] = manifest_state
         _write_journal_state(journal_root, journal, "validating")
 
         # Gate two intentionally sees authority-v1 metadata.
@@ -117,9 +194,19 @@ def apply_plan(
             _rollback(target, journal_root, journal)
         except BaseException as rollback_exc:
             _mark_rollback_failed(journal_root, journal)
-            command = _recover_command(target, checked_plan.migration_id)
-            raise RuntimeError(f"Migration rollback failed; run `{command}`.") from rollback_exc
-        raise exc
+            raise MigrationApplyError(
+                exc,
+                target=target,
+                migration_id=checked_plan.migration_id,
+                rollback_completed=False,
+                rollback_error=rollback_exc,
+            ) from rollback_exc
+        raise MigrationApplyError(
+            exc,
+            target=target,
+            migration_id=checked_plan.migration_id,
+            rollback_completed=True,
+        ) from exc
 
 
 def recover_migration(target_root: Path, migration_id: str) -> None:
@@ -219,10 +306,11 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
     if recovery_existed and (recovery_directory.is_symlink() or not recovery_directory.is_dir()):
         raise ValueError("Vault recovery directory must be a regular directory.")
 
-    journal_root = _journal_root(target, plan.migration_id, create=True)
-    originals = _journal_originals(journal_root)
-    entries: list[dict[str, object]] = []
+    journal_root = _journal_root(target, plan.migration_id, create=False)
     try:
+        journal_root = _journal_root(target, plan.migration_id, create=True)
+        originals = _journal_originals(journal_root)
+        entries: list[dict[str, object]] = []
         for action in actions:
             path = _safe_target_path(target, action.path, reject_leaf_symlink=False)
             existed = path.exists()
@@ -232,6 +320,7 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
                 "sha256": action.current_sha256,
                 "mode": action.current_mode,
                 "applied_sha256": action.desired_sha256,
+                "applied_mode": action.desired_mode,
             }
             if existed:
                 if path.is_symlink() or not path.is_file():
@@ -251,29 +340,66 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
             "recovery_directory_existed": recovery_existed,
         }
         _write_journal_state(journal_root, journal, "prepared")
+        _journal_prepare_step("after-prepared")
         return journal_root, journal
-    except BaseException:
-        _remove_tree_no_symlinks(journal_root)
-        if not recovery_existed:
-            _rmdir_if_empty(recovery_directory)
-        if not state_existed:
-            _rmdir_if_empty(state_directory)
-        raise
+    except BaseException as exc:
+        cleanup_error: BaseException | None = None
+        try:
+            if journal_root.exists() or journal_root.is_symlink():
+                _remove_tree_no_symlinks(journal_root)
+            if not recovery_existed:
+                _rmdir_if_empty(recovery_directory)
+            if not state_existed:
+                _rmdir_if_empty(state_directory)
+        except BaseException as cleanup_exc:
+            cleanup_error = cleanup_exc
+        raise _JournalPreparationFailure(exc, cleanup_error) from (cleanup_error or exc)
 
 
-def _record_prior_manifest(target: Path, journal_root: Path, journal: dict[str, object]) -> None:
+def _journal_prepare_step(_stage: str) -> None:
+    """Failure-injection seam after durable journal preparation."""
+
+
+def _record_manifest_publication_intent(
+    target: Path,
+    journal_root: Path,
+    journal: dict[str, object],
+    candidate_sha256: str,
+) -> None:
     manifest_path = _safe_target_path(target, _MANIFEST_RELATIVE, reject_leaf_symlink=False)
     existed = manifest_path.exists()
-    manifest: dict[str, object] = {"existed": existed, "sha256": None, "mode": None, "applied_sha256": None}
+    manifest: dict[str, object] = {
+        "existed": existed,
+        "sha256": None,
+        "mode": None,
+        "backup_state": "not-required",
+        "candidate_sha256": candidate_sha256,
+        "publication_state": "intent",
+    }
     if existed:
         if manifest_path.is_symlink() or not manifest_path.is_file():
             raise ValueError("Vault builder manifest must be a regular file.")
         contents = manifest_path.read_bytes()
         manifest["sha256"] = hashlib.sha256(contents).hexdigest()
         manifest["mode"] = _observed_mode(manifest_path)
-        _write_original(_journal_originals(journal_root), _MANIFEST_RELATIVE, contents, str(manifest["mode"]))
+        manifest["backup_state"] = "intent"
     journal["manifest"] = manifest
     _write_journal_state(journal_root, journal, "validating")
+    if existed:
+        _manifest_backup_step("after-intent")
+        _write_original(_journal_originals(journal_root), _MANIFEST_RELATIVE, contents, str(manifest["mode"]))
+        _manifest_backup_step("after-original")
+        manifest["backup_state"] = "complete"
+        journal["manifest"] = manifest
+        _write_journal_state(journal_root, journal, "validating")
+
+
+def _manifest_backup_step(_stage: str) -> None:
+    """Hard-stop injection seam around prior-manifest backup completion."""
+
+
+def _manifest_step(_stage: str) -> None:
+    """Hard-stop injection seam around candidate manifest publication."""
 
 
 def _replace_from_builder(
@@ -529,14 +655,19 @@ def _write_journal_state(journal_root: Path, journal: dict[str, object], state: 
 
 
 def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> None:
-    _write_journal_state(journal_root, journal, "rolling-back")
     entries = _journal_entries(journal)
     originals = _journal_originals(journal_root, create=False)
-    for entry in reversed(entries):
-        _restore_entry(target, originals, entry)
     manifest = _journal_manifest(journal, allow_none=True)
+    _validate_original_tree(journal_root, entries, manifest)
+    _validate_entry_recovery_targets(target, entries)
     if manifest is not None:
-        _restore_manifest(target, originals, manifest)
+        manifest_state = _validate_manifest_recovery_target(target, manifest)
+        if manifest_state == "candidate" and manifest["existed"]:
+            _require_original(
+                _journal_path(originals, _MANIFEST_RELATIVE),
+                str(manifest["sha256"]),
+                str(manifest["mode"]),
+            )
     directories = _validate_directory_records(
         target,
         journal_root,
@@ -545,6 +676,11 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
         entries,
         journal.get("directories"),
     )
+    _write_journal_state(journal_root, journal, "rolling-back")
+    if manifest is not None:
+        _restore_manifest(target, originals, manifest)
+    for entry in reversed(entries):
+        _restore_entry(target, originals, entry)
     for record in sorted(directories, key=lambda item: len(PurePosixPath(str(item["path"])).parts), reverse=True):
         _recover_directory(target, journal_root, str(journal["migration_id"]), str(journal["directory_nonce"]), record)
     _verify_restored(target, originals, entries, manifest)
@@ -563,15 +699,82 @@ def _restore_entry(target: Path, originals: Path, entry: dict[str, object]) -> N
     _delete_transaction_file(destination, entry.get("applied_sha256"))
 
 
+def _validate_entry_recovery_targets(
+    target: Path,
+    entries: tuple[dict[str, object], ...],
+) -> None:
+    for entry in entries:
+        relative = str(entry["path"])
+        destination = _safe_target_path(target, relative, reject_leaf_symlink=False)
+        try:
+            state = destination.lstat()
+        except FileNotFoundError:
+            if entry["existed"]:
+                raise ValueError(f"Refusing to restore a missing managed recovery file: {relative}")
+            continue
+        if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
+            raise ValueError(f"Refusing to restore an unsafe managed recovery file: {relative}")
+        current_sha256 = sha256_file(destination)
+        current_mode = _observed_mode(destination)
+        prior_matches = (
+            entry["existed"]
+            and current_sha256 == entry["sha256"]
+            and current_mode == entry["mode"]
+        )
+        applied_matches = (
+            current_sha256 == entry.get("applied_sha256")
+            and current_mode == entry.get("applied_mode")
+        )
+        if not prior_matches and not applied_matches:
+            raise ValueError(f"Refusing to overwrite an unknown managed recovery file: {relative}")
+
+
 def _restore_manifest(target: Path, originals: Path, manifest: dict[str, object]) -> None:
+    current_state = _validate_manifest_recovery_target(target, manifest)
     destination = _safe_target_path(target, _MANIFEST_RELATIVE, reject_leaf_symlink=False)
+    candidate_sha256 = str(manifest["candidate_sha256"])
+    try:
+        state = destination.lstat()
+    except FileNotFoundError:
+        state = None
     if manifest["existed"]:
+        if current_state == "prior":
+            return
         source = _journal_path(originals, _MANIFEST_RELATIVE)
         _require_original(source, str(manifest["sha256"]), str(manifest["mode"]))
         _ensure_regular_parent(target, destination)
         _atomic_write(destination, source.read_bytes(), str(manifest["mode"]))
         return
-    _delete_transaction_file(destination, manifest.get("applied_sha256"))
+    if state is not None:
+        _delete_transaction_file(destination, candidate_sha256)
+
+
+def _validate_manifest_recovery_target(target: Path, manifest: dict[str, object]) -> str:
+    destination = _safe_target_path(target, _MANIFEST_RELATIVE, reject_leaf_symlink=False)
+    candidate_sha256 = str(manifest["candidate_sha256"])
+    try:
+        state = destination.lstat()
+    except FileNotFoundError:
+        state = None
+    if state is not None:
+        if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
+            raise ValueError("Refusing to restore an unsafe Vault builder manifest.")
+        current_sha256 = sha256_file(destination)
+        current_mode = _observed_mode(destination)
+        prior_matches = (
+            manifest["existed"]
+            and current_sha256 == manifest["sha256"]
+            and current_mode == manifest["mode"]
+        )
+        candidate_matches = current_sha256 == candidate_sha256
+        if prior_matches:
+            return "prior"
+        if candidate_matches:
+            return "candidate"
+        raise ValueError("Refusing to overwrite an unknown Vault builder manifest.")
+    elif manifest["existed"]:
+        raise ValueError("Refusing to restore a missing prior Vault builder manifest.")
+    return "absent"
 
 
 def _delete_transaction_file(path: Path, applied_sha256: object) -> None:
@@ -662,7 +865,15 @@ def _journal_entries(journal: dict[str, object]) -> tuple[dict[str, object], ...
     parsed: list[dict[str, object]] = []
     paths: set[str] = set()
     for raw in raw_entries:
-        if not isinstance(raw, dict) or set(raw) - {"path", "existed", "sha256", "mode", "applied_sha256"} or not {"path", "existed", "sha256", "mode"} <= set(raw):
+        allowed_keys = {
+            "path",
+            "existed",
+            "sha256",
+            "mode",
+            "applied_sha256",
+            "applied_mode",
+        }
+        if not isinstance(raw, dict) or set(raw) - allowed_keys or not {"path", "existed", "sha256", "mode"} <= set(raw):
             raise ValueError("Migration recovery journal entries are invalid.")
         path = raw.get("path")
         if not isinstance(path, str):
@@ -683,7 +894,21 @@ def _journal_entries(journal: dict[str, object]) -> tuple[dict[str, object], ...
         applied = raw.get("applied_sha256")
         if applied is not None and (not isinstance(applied, str) or not _HEX_RE.fullmatch(applied)):
             raise ValueError("Migration recovery journal applied hash is invalid.")
-        parsed.append({"path": path, "existed": existed, "sha256": digest, "mode": mode, "applied_sha256": applied})
+        applied_mode = raw.get("applied_mode")
+        if applied_mode is not None and (not isinstance(applied_mode, str) or not _MODE_RE.fullmatch(applied_mode)):
+            raise ValueError("Migration recovery journal applied mode is invalid.")
+        if (applied is None) != (applied_mode is None):
+            raise ValueError("Migration recovery journal applied state is invalid.")
+        parsed.append(
+            {
+                "path": path,
+                "existed": existed,
+                "sha256": digest,
+                "mode": mode,
+                "applied_sha256": applied,
+                "applied_mode": applied_mode,
+            }
+        )
     if tuple(item["path"] for item in parsed) != tuple(sorted(str(item["path"]) for item in parsed)):
         raise ValueError("Migration recovery journal entries must be sorted.")
     return tuple(parsed)
@@ -693,7 +918,15 @@ def _journal_manifest(journal: dict[str, object], *, allow_none: bool) -> dict[s
     raw = journal.get("manifest")
     if raw is None and allow_none:
         return None
-    if not isinstance(raw, dict) or set(raw) - {"existed", "sha256", "mode", "applied_sha256"} or not {"existed", "sha256", "mode"} <= set(raw):
+    expected_keys = {
+        "existed",
+        "sha256",
+        "mode",
+        "backup_state",
+        "candidate_sha256",
+        "publication_state",
+    }
+    if not isinstance(raw, dict) or set(raw) != expected_keys:
         raise ValueError("Migration recovery manifest state is invalid.")
     existed, digest, mode = raw.get("existed"), raw.get("sha256"), raw.get("mode")
     if not isinstance(existed, bool):
@@ -703,10 +936,25 @@ def _journal_manifest(journal: dict[str, object], *, allow_none: bool) -> dict[s
             raise ValueError("Migration recovery manifest hash or mode is invalid.")
     elif digest is not None or mode is not None:
         raise ValueError("Migration recovery manifest state is invalid.")
-    applied = raw.get("applied_sha256")
-    if applied is not None and (not isinstance(applied, str) or not _HEX_RE.fullmatch(applied)):
-        raise ValueError("Migration recovery manifest applied hash is invalid.")
-    return {"existed": existed, "sha256": digest, "mode": mode, "applied_sha256": applied}
+    candidate_sha256 = raw.get("candidate_sha256")
+    backup_state = raw.get("backup_state")
+    publication_state = raw.get("publication_state")
+    if not isinstance(candidate_sha256, str) or not _HEX_RE.fullmatch(candidate_sha256):
+        raise ValueError("Migration recovery manifest candidate hash is invalid.")
+    if publication_state not in {"intent", "published"}:
+        raise ValueError("Migration recovery manifest publication state is invalid.")
+    if existed and backup_state not in {"intent", "complete"}:
+        raise ValueError("Migration recovery manifest backup state is invalid.")
+    if not existed and backup_state != "not-required":
+        raise ValueError("Migration recovery manifest backup state is invalid.")
+    return {
+        "existed": existed,
+        "sha256": digest,
+        "mode": mode,
+        "backup_state": backup_state,
+        "candidate_sha256": candidate_sha256,
+        "publication_state": publication_state,
+    }
 
 
 def _validate_original_tree(journal_root: Path, entries: tuple[dict[str, object], ...], manifest: dict[str, object] | None) -> None:
@@ -720,8 +968,10 @@ def _validate_original_tree(journal_root: Path, entries: tuple[dict[str, object]
             expected.add(relative)
             _require_original(_journal_path(originals, relative), str(entry["sha256"]), str(entry["mode"]))
     if manifest is not None and manifest["existed"]:
-        expected.add(_MANIFEST_RELATIVE)
-        _require_original(_journal_path(originals, _MANIFEST_RELATIVE), str(manifest["sha256"]), str(manifest["mode"]))
+        manifest_original = _journal_path(originals, _MANIFEST_RELATIVE)
+        if manifest["backup_state"] == "complete" or manifest_original.exists():
+            expected.add(_MANIFEST_RELATIVE)
+            _require_original(manifest_original, str(manifest["sha256"]), str(manifest["mode"]))
     actual: set[str] = set()
     for path in originals.rglob("*"):
         relative = path.relative_to(originals).as_posix()
@@ -828,7 +1078,41 @@ def _run_release_gate(target_root: Path) -> None:
 
 
 def _recover_command(target: Path, migration_id: str) -> str:
-    return f"python3 tools/vault_migration/cli.py recover --target {target} --migration-id {migration_id}"
+    return shlex.join(
+        [
+            "python3",
+            "tools/vault_migration/cli.py",
+            "recover",
+            "--target",
+            str(target),
+            "--migration-id",
+            migration_id,
+        ]
+    )
+
+
+def _audit_command(target: Path) -> str:
+    return shlex.join(
+        [
+            "python3",
+            "tools/vault_migration/cli.py",
+            "audit",
+            "--target",
+            str(target),
+        ]
+    )
+
+
+def _failed_command(error: BaseException) -> str | None:
+    if not isinstance(error, subprocess.CalledProcessError):
+        return None
+    command = error.cmd
+    if isinstance(command, str):
+        return command
+    try:
+        return shlex.join(str(part) for part in command)
+    except TypeError:
+        return str(command)
 
 
 def _observed_mode(path: Path) -> str:

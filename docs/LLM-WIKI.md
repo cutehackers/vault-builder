@@ -69,7 +69,8 @@ The default generated vault is intentionally compact. This repository may also c
 .
 ├── AGENTS.md
 ├── README.md
-├── init-vault.sh
+├── .vault-builder/
+│   └── manifest.json
 ├── .agents/
 │   └── skills/
 │       ├── wiki-ingest/
@@ -104,10 +105,15 @@ The default generated vault is intentionally compact. This repository may also c
 │   ├── reports/
 │   └── review/
 ├── scripts/
+│   └── release_gate.sh
 ├── tests/
 └── tools/
     └── wiki/
 ```
+
+The manifest and release gate remain in the generated Vault. Creation
+(`init-vault.sh`) and migration (`tools/vault_migration/`) stay builder-only
+and are not part of this generated topology.
 
 Optional Stenc artifacts may exist in the template repository or in an opt-in generated vault:
 
