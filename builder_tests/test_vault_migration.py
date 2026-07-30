@@ -1581,6 +1581,52 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertFalse(plan_path.exists())
 
+    def test_audit_rejects_raw_traversal_for_report_and_plan_output_without_writes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            _copy_legacy_fixture(target)
+            plans = root / "plans"
+            plans.mkdir()
+            plan_path = plans / "migration-plan.json"
+            raw_report = target / "scratch" / "reports" / ".." / "reports" / "migration-audit.md"
+            report_result = _run_cli("audit", "--target", str(target), "--report", str(raw_report))
+            self.assertEqual(1, report_result.returncode)
+            self.assertFalse((target / "scratch" / "reports" / "migration-audit.md").exists())
+
+            raw_plan = plans / ".." / "plans" / "migration-plan.json"
+            plan_result = _run_cli("audit", "--target", str(target), "--plan-out", str(raw_plan))
+            self.assertEqual(1, plan_result.returncode)
+            self.assertFalse(plan_path.exists())
+
+    def test_audit_creates_safe_external_plan_parent_with_mode_0644_under_restrictive_umask(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan_path = root / "new" / "plans" / "migration-plan.json"
+            _copy_legacy_fixture(target)
+            previous_umask = os.umask(0o077)
+            try:
+                result = _run_cli("audit", "--target", str(target), "--plan-out", str(plan_path))
+            finally:
+                os.umask(previous_umask)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("0644", f"{plan_path.stat().st_mode & 0o7777:04o}")
+
+    def test_audit_rejects_nonregular_report_leaf(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            report = target / "scratch" / "reports" / "migration-audit.md"
+            _copy_legacy_fixture(target)
+            report.mkdir()
+
+            result = _run_cli("audit", "--target", str(target), "--report", str(report))
+
+            self.assertEqual(1, result.returncode)
+            self.assertTrue(report.is_dir())
+
     def test_audit_report_is_an_explicit_safe_target_write(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1644,7 +1690,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             linked.symlink_to(plan)
             result = _run_cli("apply", "--target", str(root / "missing"), "--plan", str(linked))
             self.assertEqual(1, result.returncode)
-            self.assertIn("regular", result.stderr)
+            self.assertRegex(result.stderr, "regular|symlink")
 
     def test_apply_rejects_duplicate_key_plan_before_target_access(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1661,6 +1707,67 @@ class VaultMigrationCliTest(unittest.TestCase):
 
             self.assertEqual(1, result.returncode)
             self.assertIn("duplicate", result.stderr.lower())
+
+    def test_apply_rejects_raw_plan_traversal_before_calling_service(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = MigrationPlan(
+                schema_version=1,
+                migration_id="0123456789abcdef",
+                current_contract_version=None,
+                target_contract_version=1,
+                builder_revision="test",
+                target_fingerprint="a" * 64,
+                actions=(),
+                authority_issues=(),
+            )
+            (root / "plans").mkdir()
+            plan_path = root / "plan.json"
+            plan_path.write_text(plan.to_json())
+            raw_path = root / "plans" / ".." / "plan.json"
+
+            with mock.patch.object(cli, "apply_plan") as apply:
+                result = cli.main(["apply", "--target", str(root / "vault"), "--plan", str(raw_path)])
+
+            self.assertEqual(1, result)
+            apply.assert_not_called()
+
+    def test_plan_reader_rejects_leaf_swap_to_symlink_from_the_open_descriptor(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "plan.json"
+            plan.write_text(
+                MigrationPlan(1, "0123456789abcdef", None, 1, "test", "a" * 64, (), ()).to_json()
+            )
+            outside = root / "outside.json"
+            outside.write_text("{}\n")
+
+            def swap_leaf() -> None:
+                plan.unlink()
+                plan.symlink_to(outside)
+
+            with self.assertRaisesRegex(ValueError, "regular|symlink"):
+                cli._load_plan(str(plan), before_leaf_open=swap_leaf)
+            self.assertEqual("{}\n", outside.read_text())
+
+    def test_atomic_output_keeps_parent_swap_from_redirecting_write(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            parent = root / "output"
+            parent.mkdir()
+            destination = parent / "plan.json"
+            moved_parent = root / "moved-output"
+            outside = root / "outside"
+            outside.mkdir()
+
+            def swap_parent() -> None:
+                parent.rename(moved_parent)
+                parent.symlink_to(outside, target_is_directory=True)
+
+            cli._write_atomic(destination.resolve(), "safe\n", "Migration plan output", before_replace=swap_parent)
+
+            self.assertEqual("safe\n", (moved_parent / "plan.json").read_text())
+            self.assertFalse((outside / "plan.json").exists())
 
     def test_apply_maps_service_and_gate_failures_to_one(self):
         with tempfile.TemporaryDirectory() as tmpdir:

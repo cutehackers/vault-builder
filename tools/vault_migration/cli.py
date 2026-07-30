@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import stat
 import subprocess
 import sys
-import tempfile
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,43 +56,56 @@ def render_plan_summary(
     return "\n".join(lines) + "\n"
 
 
-def _absolute(path: str) -> Path:
-    return Path(path).absolute()
+_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 
 
-def _validate_regular_output(path: Path, label: str) -> None:
-    """Require a safe existing parent and an absent or regular output leaf."""
-    parent = path.parent
+def _canonical_safe_path(path_value: str, label: str) -> Path:
+    """Reject raw traversal and user links before deriving a canonical path."""
+    if not isinstance(path_value, str) or not path_value:
+        raise ValueError(f"{label} must be a non-empty path.")
+    pieces = path_value.split(os.sep)
+    if path_value.startswith(os.sep):
+        pieces = pieces[1:]
+    if not pieces or any(piece in {"", ".", ".."} for piece in pieces):
+        raise ValueError(f"{label} must not contain empty, dot, or traversal components.")
+    raw = Path(path_value).absolute()
+    _reject_user_symlink_components(raw, label)
     try:
-        parent_state = parent.lstat()
-    except FileNotFoundError as exc:
-        raise ValueError(f"{label} parent must already exist: {parent}") from exc
+        return raw.resolve(strict=False)
     except OSError as exc:
-        raise ValueError(f"{label} parent is unreadable: {parent}") from exc
-    if stat.S_ISLNK(parent_state.st_mode) or not stat.S_ISDIR(parent_state.st_mode):
-        raise ValueError(f"{label} parent must be a regular directory: {parent}")
+        raise ValueError(f"{label} is unreadable: {raw}") from exc
+
+
+def _reject_user_symlink_components(path: Path, label: str) -> None:
+    """Keep macOS system aliases compatible while rejecting user path links."""
+    system_aliases = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            state = current.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ValueError(f"{label} is unreadable: {current}") from exc
+        if stat.S_ISLNK(state.st_mode) and current not in system_aliases:
+            raise ValueError(f"{label} contains a symlink: {current}")
+
+
+def _output_leaf_is_safe(path: Path, label: str) -> None:
     try:
-        leaf_state = path.lstat()
+        state = path.lstat()
     except FileNotFoundError:
         return
     except OSError as exc:
         raise ValueError(f"{label} is unreadable: {path}") from exc
-    if stat.S_ISLNK(leaf_state.st_mode) or not stat.S_ISREG(leaf_state.st_mode):
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
         raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
 
 
 def _validate_report_output(target_root: Path, raw_path: str) -> tuple[Path, str]:
-    raw_report = _absolute(raw_path)
-    _reject_symlinked_output_components(raw_report)
-    try:
-        raw_state = raw_report.lstat()
-    except FileNotFoundError:
-        raw_state = None
-    except OSError as exc:
-        raise ValueError(f"Audit report is unreadable: {raw_report}") from exc
-    if raw_state is not None and stat.S_ISLNK(raw_state.st_mode):
-        raise ValueError(f"Audit report must not be a symlink: {raw_report}")
-    report = raw_report.resolve(strict=False)
+    report = _canonical_safe_path(raw_path, "Audit report")
     report_root = target_root / "scratch" / "reports"
     try:
         relative = report.relative_to(report_root)
@@ -99,79 +113,128 @@ def _validate_report_output(target_root: Path, raw_path: str) -> tuple[Path, str
         raise ValueError("Audit report must stay beneath target scratch/reports/.") from exc
     if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
         raise ValueError("Audit report must name a file beneath target scratch/reports/.")
-
-    current = target_root
-    for part in ("scratch", "reports", *relative.parts[:-1]):
-        current = current / part
-        try:
-            state = current.lstat()
-        except FileNotFoundError as exc:
-            raise ValueError(f"Audit report parent must already exist: {current}") from exc
-        except OSError as exc:
-            raise ValueError(f"Audit report parent is unreadable: {current}") from exc
-        if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
-            raise ValueError(f"Audit report path contains an unsafe parent: {current}")
-    _validate_regular_output(report, "Audit report")
+    _output_leaf_is_safe(report, "Audit report")
     return report, relative.as_posix()
 
 
-def _reject_symlinked_output_components(path: Path) -> None:
-    """Reject report-path links while allowing macOS's system /var alias."""
-    system_components = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})
-    current = Path(path.anchor)
-    for part in path.parts[1:]:
-        current = current / part
-        try:
-            state = current.lstat()
-        except FileNotFoundError:
-            break
-        except OSError as exc:
-            raise ValueError(f"Audit report path is unreadable: {current}") from exc
-        if stat.S_ISLNK(state.st_mode) and current not in system_components:
-            raise ValueError(f"Audit report path contains a symlink: {current}")
-
-
-def _write_atomic(path: Path, contents: str, label: str) -> None:
-    """Atomically write a validated text output with a predictable mode."""
-    _validate_regular_output(path, label)
-    temporary: Path | None = None
+def _open_directory(path: Path, *, create: bool) -> int:
+    """Open an absolute directory by no-follow component walk."""
+    if not path.is_absolute() or path == Path(path.anchor):
+        raise ValueError("Output parent must be an absolute non-root directory.")
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(contents)
-            handle.flush()
-            os.fchmod(handle.fileno(), 0o644)
-            os.fsync(handle.fileno())
-        _validate_regular_output(path, label)
-        os.replace(temporary, path)
-        temporary = None
-        _fsync_directory(path.parent)
+        descriptor = os.open(path.anchor, _DIRECTORY_FLAGS)
+    except OSError:
+        raise ValueError(f"Could not open output root: {path.anchor}") from None
+    try:
+        for part in path.parts[1:]:
+            if create:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise ValueError(f"Could not create output parent: {part}") from exc
+            try:
+                next_descriptor = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            except OSError as exc:
+                raise ValueError(f"Output path contains an unsafe parent: {part}") from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _read_regular_file(
+    path: Path,
+    label: str,
+    *,
+    before_leaf_open: Callable[[], None] | None = None,
+) -> str:
+    parent = _open_directory(path.parent, create=False)
+    try:
+        if before_leaf_open is not None:
+            before_leaf_open()
+        try:
+            descriptor = os.open(path.name, _READ_FLAGS, dir_fd=parent)
+        except OSError as exc:
+            raise ValueError(f"{label} must be a regular non-symlink file: {path}") from exc
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError(f"{label} must be a regular non-symlink file: {path}")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks).decode("utf-8")
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(parent)
+
+
+def _write_atomic(
+    path: Path,
+    contents: str,
+    label: str,
+    *,
+    before_replace: Callable[[], None] | None = None,
+) -> None:
+    """Write through a no-follow parent descriptor, never a reopened pathname."""
+    parent = _open_directory(path.parent, create=True)
+    temporary_name: str | None = None
+    try:
+        try:
+            destination = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            destination = None
+        except OSError as exc:
+            raise ValueError(f"{label} is unreadable: {path}") from exc
+        if destination is not None and not stat.S_ISREG(destination.st_mode):
+            raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
+
+        for _ in range(8):
+            candidate = f".{path.name}.{secrets.token_hex(16)}.tmp"
+            try:
+                descriptor = os.open(
+                    candidate,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=parent,
+                )
+            except FileExistsError:
+                continue
+            temporary_name = candidate
+            break
+        else:
+            raise ValueError(f"Could not reserve temporary {label.lower()}: {path}")
+        try:
+            encoded = contents.encode("utf-8")
+            view = memoryview(encoded)
+            while view:
+                written = os.write(descriptor, view)
+                view = view[written:]
+            os.fchmod(descriptor, 0o644)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        if before_replace is not None:
+            before_replace()
+        os.replace(temporary_name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+        temporary_name = None
+        os.fsync(parent)
     except OSError as exc:
         raise ValueError(f"Could not write {label.lower()}: {path}") from exc
     finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
-def _fsync_directory(path: Path) -> None:
-    try:
-        descriptor = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        try:
-            os.fsync(descriptor)
-        except OSError:
-            pass
-    finally:
-        os.close(descriptor)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+        os.close(parent)
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -187,19 +250,15 @@ def _reject_json_constant(value: str) -> object:
     raise ValueError(f"Migration plan JSON contains unsupported numeric constant: {value}.")
 
 
-def _load_plan(path_value: str) -> MigrationPlan:
-    path = _absolute(path_value)
-    try:
-        state = path.lstat()
-    except FileNotFoundError as exc:
-        raise ValueError(f"Migration plan must be a regular non-symlink file: {path}") from exc
-    except OSError as exc:
-        raise ValueError(f"Migration plan is unreadable: {path}") from exc
-    if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
-        raise ValueError(f"Migration plan must be a regular non-symlink file: {path}")
+def _load_plan(
+    path_value: str,
+    *,
+    before_leaf_open: Callable[[], None] | None = None,
+) -> MigrationPlan:
+    path = _canonical_safe_path(path_value, "Migration plan")
     try:
         parsed = json.loads(
-            path.read_text(encoding="utf-8"),
+            _read_regular_file(path, "Migration plan", before_leaf_open=before_leaf_open),
             object_pairs_hook=_reject_duplicate_json_keys,
             parse_constant=_reject_json_constant,
         )
@@ -240,9 +299,9 @@ def _run_audit(args: argparse.Namespace) -> int:
     report_output: Path | None = None
     report_relative: str | None = None
     if args.plan_out:
-        plan_output = _absolute(args.plan_out)
+        plan_output = _canonical_safe_path(args.plan_out, "Migration plan output")
         validate_external_output_path(target, plan_output)
-        _validate_regular_output(plan_output, "Migration plan output")
+        _output_leaf_is_safe(plan_output, "Migration plan output")
     if args.report:
         report_output, report_relative = _validate_report_output(target, args.report)
 
