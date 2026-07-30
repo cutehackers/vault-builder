@@ -1,0 +1,247 @@
+{
+  "builder_revision": "47cbf83",
+  "contract_version": 0,
+  "managed_files": {
+    ".agents/skills/wiki-ingest/SKILL.md": {
+      "mode": "0644",
+      "path": ".agents/skills/wiki-ingest/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "caf12e1545d354100b1cdf5c066fc142a5d21f22bf9fb36ee894aa3454d4ed38"
+    },
+    ".agents/skills/wiki-query/SKILL.md": {
+      "mode": "0644",
+      "path": ".agents/skills/wiki-query/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "0fe1fb6b00ad2a661203499593464eb76eb07d95cf837122ced45b3ce1895b17"
+    },
+    ".agents/skills/wiki-update/SKILL.md": {
+      "mode": "0644",
+      "path": ".agents/skills/wiki-update/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "809ec116fd83ab59de2d81cb4a9302e7e7b1188bf7c6e168e286ae5aa262397a"
+    },
+    ".github/workflows/release-gate.yml": {
+      "mode": "0644",
+      "path": ".github/workflows/release-gate.yml",
+      "policy": "replace-if-unmodified",
+      "sha256": "aa47224e6e7cac000eb09d5b44ed4f74b3cb31718b27d3e8889ee7c689e8b3c9"
+    },
+    ".gitignore": {
+      "mode": "0644",
+      "path": ".gitignore",
+      "policy": "replace-if-unmodified",
+      "sha256": "f7a52536721516a52e0960b161e165c02c3e547846e028d3bf208cbc488e05a9"
+    },
+    "AGENTS.md": {
+      "mode": "0644",
+      "path": "AGENTS.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "6c485b18a262bed7fd626bbb61f5c863e12c84c2d98a957104ce344caef3a953"
+    },
+    "README-kr.md": {
+      "mode": "0644",
+      "path": "README-kr.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "cfffcfe72ab6477c65055f4c9c6c63f4c21d6135257091df80c8e11a56f0795b"
+    },
+    "README.md": {
+      "mode": "0644",
+      "path": "README.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "28ee529bf90aaf1ab840b4ebe6118b9720acd3c2c3f521601c05bb7f22b4f239"
+    },
+    "docs/LLM-WIKI.md": {
+      "mode": "0644",
+      "path": "docs/LLM-WIKI.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "94190f0f1a88b4805415f402966a594c262a71b023af77ca6185b0057bc339fc"
+    },
+    "docs/USER_PROMPTS.md": {
+      "mode": "0644",
+      "path": "docs/USER_PROMPTS.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "c97fc3ac252fede9c34b8eceda7a04152dfaac0df38171dbb047625fdfa05561"
+    },
+    "docs/VAULT_PROMPTS.md": {
+      "mode": "0644",
+      "path": "docs/VAULT_PROMPTS.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "817ede5fcdb9af91b79f624df5333aed10b25c608e3729973b3d51e6aea5d6b4"
+    },
+    "docs/agent/DRAFTS.md": {
+      "mode": "0644",
+      "path": "docs/agent/DRAFTS.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "2ffad2f38971a83bb64bdbf0c9ca414d9c97d222252335e179e52cfc36523514"
+    },
+    "docs/agent/OPERATING-SCHEMA.md": {
+      "mode": "0644",
+      "path": "docs/agent/OPERATING-SCHEMA.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "7b0ce76550a674524b0eb51a387bb946f40531de6a3ef83a651733bb04e2a33a"
+    },
+    "docs/usage.md": {
+      "mode": "0644",
+      "path": "docs/usage.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "ff69f5e45aba7763c89dcd8ced60bcf9056b7ee25118d1ed9e3c59a1d7b15081"
+    },
+    "scripts/release_gate.sh": {
+      "mode": "0755",
+      "path": "scripts/release_gate.sh",
+      "policy": "replace-if-unmodified",
+      "sha256": "854c050548c4956d4e63644f7e9afe29536b4615055d26218f6c0234f5afc3cf"
+    },
+    "tests/__init__.py": {
+      "mode": "0644",
+      "path": "tests/__init__.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "tests/test_wiki_quality_baseline.py": {
+      "mode": "0644",
+      "path": "tests/test_wiki_quality_baseline.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "c6940faad21c38e110c9fdba57e0ce2f5f9b253097628268d131e172dd772a87"
+    },
+    "tests/test_wiki_tools.py": {
+      "mode": "0644",
+      "path": "tests/test_wiki_tools.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "5785cf5f04d2075b05ca68870f84c487dd8aca0dc11994fbaecddd9358122bea"
+    },
+    "tools/wiki/cli.py": {
+      "mode": "0644",
+      "path": "tools/wiki/cli.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "7f9be9de6a809daf59eed2faef7b6acef2529799fa4b9649ac5995448cb4c348"
+    },
+    "tools/wiki/lib/.gitkeep": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/.gitkeep",
+      "policy": "replace-if-unmodified",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "tools/wiki/lib/draft.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/draft.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "8591c35baf820c9187228592e1f9d5555ba7592974428a550020b00406f71d96"
+    },
+    "tools/wiki/lib/frontmatter.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/frontmatter.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "dfe074543036e4edea23a0cd2265094c69fedefba1e9ad64f8e3b5e74ec19369"
+    },
+    "tools/wiki/lib/hash_source.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/hash_source.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "15801088742a8d11df66598325208cedec00c4cbc786e203e054deeb01437965"
+    },
+    "tools/wiki/lib/ingest.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/ingest.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "ba0f26b70fe39f55367afda528d24f8804fa89d08d99c1caf8bda24bce94f368"
+    },
+    "tools/wiki/lib/links.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/links.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "f1b12c83efa3c1b50648233b398cad14f3e797104568ae59f9ed820eca943532"
+    },
+    "tools/wiki/lib/lint.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/lint.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "628a245fd0042c9c589df76fa4c251c55d0ad387c7188cedcf3b5747251ffa1d"
+    },
+    "tools/wiki/lib/maps.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/maps.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "82cf476ab3db61ec4d6c9412c8a4a8ea3e4f948abee4318d1ba23712add24264"
+    },
+    "tools/wiki/lib/merge.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/merge.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "7369515e6fbff8187d083e3c8a3e158685665fd1638f516c3bb4e2aa44162df4"
+    },
+    "tools/wiki/lib/metrics.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/metrics.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "51e800eeda70806bd77fb12c637f2d3e27dff9cad5ffcc75f8312488ab4704a9"
+    },
+    "tools/wiki/lib/paths.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/paths.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "ba0125570e8b7c70cfe78c59a6146f5ccce9f5fc47ae4e94caad06235f3f07ae"
+    },
+    "tools/wiki/lib/review.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/review.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "67534722fe6a6e9aca0e65920ee60b31d0f06268a729cdcb3b3d98d5057ffdf8"
+    },
+    "tools/wiki/lib/schema.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/schema.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "88eb3f789be5710fd77a4a53650cbb9518cdd1f34b0021701737deca2a90b7f8"
+    },
+    "tools/wiki/lib/source_registry.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/source_registry.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "c3ebd9c6f5ebdebcdee43ab5fd52fb3f247e5e56dcf3e0fafee5c098931b5d20"
+    },
+    "tools/wiki/lib/wiki_update.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/wiki_update.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "404ee4d689e685a71af16bbbecaf9facc16a856fc3de0ecab31ec1da0b69e693"
+    },
+    "tools/wiki/lib/workflow.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/workflow.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "4ff93b21ed83f48df7375cee6ad6e62d5d3748fbf9fcc69797bccb6c3759907a"
+    },
+    "tools/wiki/mcp_server.py": {
+      "mode": "0755",
+      "path": "tools/wiki/mcp_server.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "6310d15733c9859db96bb07a26379ccd6ffb0c461998ed04c85eee134fd7e996"
+    },
+    "tools/wiki/metrics-policy.json": {
+      "mode": "0644",
+      "path": "tools/wiki/metrics-policy.json",
+      "policy": "replace-if-unmodified",
+      "sha256": "3b6af5e623130e9e9d63ba6086e94cd31ba2760255417a6fbd041b72402cbde2"
+    },
+    "tools/wiki/templates/draft-batch-upsert-pages.json": {
+      "mode": "0644",
+      "path": "tools/wiki/templates/draft-batch-upsert-pages.json",
+      "policy": "replace-if-unmodified",
+      "sha256": "bd34d6afcd44614bd35413727e2d9f43cc3ba0355fab9354023b764f1d460fb9"
+    },
+    "tools/wiki/templates/draft-upsert-page.json": {
+      "mode": "0644",
+      "path": "tools/wiki/templates/draft-upsert-page.json",
+      "policy": "replace-if-unmodified",
+      "sha256": "f389c35066899bdd402a05507e132b37adeae78d4da59ca3ed6b2857e02a9e18"
+    },
+    "tools/wiki/templates/frontmatter.yaml": {
+      "mode": "0644",
+      "path": "tools/wiki/templates/frontmatter.yaml",
+      "policy": "replace-if-unmodified",
+      "sha256": "eece3365ad21ae757ba9bec84c4f1b847a92a5d7dd4828c7fdada5a2c803ef81"
+    }
+  },
+  "schema_version": 1
+}
