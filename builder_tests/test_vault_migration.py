@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Callable
 from unittest import mock
 
 from tools.vault_migration import cli
@@ -698,6 +699,39 @@ class MigrationPlanningTest(unittest.TestCase):
 
 
 class MigrationApplyTest(unittest.TestCase):
+    def _prepare_missing_agents_transaction(
+        self,
+        target: Path,
+    ) -> tuple[
+        str,
+        MigrationPlan,
+        Path,
+        Path,
+        dict[str, object],
+        MigrationAction,
+        Callable[[str, str], None],
+    ]:
+        _copy_legacy_fixture(target)
+        shutil.rmtree(target / ".agents")
+        before = _tree_digest(target)
+        plan = audit_vault(ROOT, target)
+        resolved_target = applying._target_root(target)
+        checked, actions = applying._verify_preconditions(ROOT, resolved_target, plan)
+        journal_root, journal = applying._prepare_journal(resolved_target, checked, actions)
+        action = next(item for item in actions if item.path == ".agents/skills/wiki-ingest/SKILL.md")
+
+        def record_directory(relative: str, lifecycle: str) -> None:
+            records = journal["directories"]
+            assert isinstance(records, list)
+            if lifecycle == "intent":
+                records.append({"existed": False, "path": relative, "state": "intent"})
+                records.sort(key=lambda item: item["path"])
+            else:
+                next(item for item in records if item["path"] == relative)["state"] = "created"
+            applying._write_journal_state(journal_root, journal, "applying")
+
+        return before, plan, resolved_target, journal_root, journal, action, record_directory
+
     def test_apply_replaces_only_approved_managed_files_and_runs_two_gates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -932,16 +966,22 @@ class MigrationApplyTest(unittest.TestCase):
             target_path = target / relative
             target_path.parent.mkdir(parents=True)
             target_path.write_bytes(desired)
+            (journal_root / "originals").mkdir(parents=True)
+            marker_sources = journal_root / "directory-markers"
+            marker_sources.mkdir()
             for directory in (target / ".agents", target / ".agents" / "skills", target_path.parent):
                 relative_directory = directory.relative_to(target).as_posix()
-                (directory / ".vault-builder-migration.json").write_text(
+                marker_source = marker_sources / f"{hashlib.sha256(relative_directory.encode()).hexdigest()}.json"
+                marker_source.write_text(
                     json.dumps(
                         {"migration_id": migration_id, "nonce": nonce, "path": relative_directory, "schema_version": 1},
+                        indent=2,
                         sort_keys=True,
                     )
-                    + "\n"
+                    + "\n",
                 )
-            (journal_root / "originals").mkdir(parents=True)
+                marker_source.chmod(0o644)
+                os.link(marker_source, directory / ".vault-builder-migration.json")
             (journal_root / "journal.json").write_text(
                 json.dumps(
                     {
@@ -1150,6 +1190,138 @@ class MigrationApplyTest(unittest.TestCase):
                 os.umask(previous_umask)
 
             self.assertEqual(before, _tree_digest(target))
+
+    def test_directory_marker_revalidates_staged_source_immediately_before_link(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            shutil.rmtree(target / ".agents")
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            marker_name = f"{hashlib.sha256(b'.agents').hexdigest()}.json"
+            staged_marker = target / ".vault-builder" / "recovery" / plan.migration_id / "directory-markers" / marker_name
+            target_marker = target / ".agents" / ".vault-builder-migration.json"
+
+            def corrupt_staged_marker(stage: str, relative: str) -> None:
+                if stage == "after-mkdir" and relative == ".agents":
+                    staged_marker.write_text("corrupt staged marker\n")
+
+            with mock.patch("tools.vault_migration.applying._directory_step", side_effect=corrupt_staged_marker):
+                with self.assertRaisesRegex(ValueError, "marker is invalid"):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertFalse(target_marker.exists())
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
+
+    def test_directory_marker_publish_preserves_hard_link_identity(self):
+        class StopAfterMarkerPublication(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            before, plan, resolved_target, journal_root, journal, action, record_directory = (
+                self._prepare_missing_agents_transaction(target)
+            )
+
+            def stop_after_marker(stage: str, relative: str) -> None:
+                if stage == "after-marker" and relative == ".agents":
+                    raise StopAfterMarkerPublication()
+
+            with mock.patch("tools.vault_migration.applying._directory_step", side_effect=stop_after_marker):
+                with self.assertRaises(StopAfterMarkerPublication):
+                    applying._ensure_managed_parent(
+                        resolved_target,
+                        resolved_target / action.path,
+                        action.path,
+                        migration_id=plan.migration_id,
+                        directory_nonce=journal["directory_nonce"],
+                        record_directory=record_directory,
+                    )
+
+            marker_name = f"{hashlib.sha256(b'.agents').hexdigest()}.json"
+            staged_marker = journal_root / "directory-markers" / marker_name
+            target_marker = target / ".agents" / ".vault-builder-migration.json"
+            staged_state = staged_marker.lstat()
+            target_state = target_marker.lstat()
+            self.assertEqual((staged_state.st_dev, staged_state.st_ino), (target_state.st_dev, target_state.st_ino))
+            self.assertEqual("0644", applying._observed_mode(staged_marker))
+            self.assertEqual(staged_marker.read_bytes(), target_marker.read_bytes())
+
+            recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_recovery_uses_hard_link_identity_after_linked_inode_corruption(self):
+        class StopAfterMarkerCorruption(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            before, plan, resolved_target, _, journal, action, record_directory = self._prepare_missing_agents_transaction(target)
+            target_marker = target / ".agents" / ".vault-builder-migration.json"
+
+            def corrupt_linked_marker(stage: str, relative: str) -> None:
+                if stage == "after-marker" and relative == ".agents":
+                    target_marker.write_text("corrupt linked inode\n")
+                    raise StopAfterMarkerCorruption()
+
+            with mock.patch("tools.vault_migration.applying._directory_step", side_effect=corrupt_linked_marker):
+                with self.assertRaises(StopAfterMarkerCorruption):
+                    applying._ensure_managed_parent(
+                        resolved_target,
+                        resolved_target / action.path,
+                        action.path,
+                        migration_id=plan.migration_id,
+                        directory_nonce=journal["directory_nonce"],
+                        record_directory=record_directory,
+                    )
+
+            recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_recovery_refuses_replaced_directory_marker_inode(self):
+        class StopAfterMarkerPublication(Exception):
+            pass
+
+        for replaced_name in ("staged", "target"):
+            with self.subTest(replaced_name=replaced_name), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _, plan, resolved_target, journal_root, journal, action, record_directory = (
+                    self._prepare_missing_agents_transaction(target)
+                )
+
+                def stop_after_marker(stage: str, relative: str) -> None:
+                    if stage == "after-marker" and relative == ".agents":
+                        raise StopAfterMarkerPublication()
+
+                with mock.patch("tools.vault_migration.applying._directory_step", side_effect=stop_after_marker):
+                    with self.assertRaises(StopAfterMarkerPublication):
+                        applying._ensure_managed_parent(
+                            resolved_target,
+                            resolved_target / action.path,
+                            action.path,
+                            migration_id=plan.migration_id,
+                            directory_nonce=journal["directory_nonce"],
+                            record_directory=record_directory,
+                        )
+
+                marker_name = f"{hashlib.sha256(b'.agents').hexdigest()}.json"
+                staged_marker = journal_root / "directory-markers" / marker_name
+                target_marker = target / ".agents" / ".vault-builder-migration.json"
+                victim = staged_marker if replaced_name == "staged" else target_marker
+                replacement = victim.with_name(f"{victim.name}.replacement")
+                replacement.write_bytes(victim.read_bytes())
+                replacement.chmod(0o644)
+                os.replace(replacement, victim)
+                before_recovery = _tree_digest(target)
+
+                with self.assertRaisesRegex(ValueError, "identity"):
+                    recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before_recovery, _tree_digest(target))
+                self.assertTrue(journal_root.is_dir())
 
     def test_apply_with_restrictive_umask_cleans_up_directory_markers(self):
         with tempfile.TemporaryDirectory() as tmpdir:

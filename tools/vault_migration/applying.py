@@ -337,15 +337,16 @@ def _ensure_managed_parent(
             _directory_step("before-intent", relative)
             record_directory(relative, "intent")
             _directory_step("after-intent", relative)
-            prepared_marker = _prepare_directory_marker(
-                _journal_root(target, migration_id, create=False),
+            journal_root = _journal_root(target, migration_id, create=False)
+            _prepare_directory_marker(
+                journal_root,
                 migration_id,
                 directory_nonce,
                 relative,
             )
             _mkdir_directory(current)
             _directory_step("after-mkdir", relative)
-            _publish_directory_marker(prepared_marker, current, migration_id, directory_nonce, relative)
+            _publish_directory_marker(journal_root, current, migration_id, directory_nonce, relative)
             _directory_step("after-marker", relative)
             record_directory(relative, "created")
             continue
@@ -372,9 +373,8 @@ def _prepare_directory_marker(journal_root: Path, migration_id: str, nonce: str,
     else:
         if stat.S_ISLNK(directory_state.st_mode) or not stat.S_ISDIR(directory_state.st_mode):
             raise ValueError("Migration recovery directory markers are invalid.")
-    marker_name = f"{hashlib.sha256(relative.encode('utf-8')).hexdigest()}.json"
-    marker = _journal_path(marker_directory, marker_name)
-    payload = _canonical_json(_directory_marker(migration_id, nonce, relative)).encode("utf-8")
+    marker = _directory_marker_source(journal_root, relative)
+    payload = _directory_marker_payload(migration_id, nonce, relative)
     try:
         descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
@@ -391,18 +391,12 @@ def _prepare_directory_marker(journal_root: Path, migration_id: str, nonce: str,
         _fsync_directory(marker_directory)
         raise
     _fsync_directory(marker_directory)
-    marker_state = marker.lstat()
-    if (
-        stat.S_ISLNK(marker_state.st_mode)
-        or not stat.S_ISREG(marker_state.st_mode)
-        or _observed_mode(marker) != "0644"
-        or marker.read_bytes() != payload
-    ):
-        raise ValueError(f"Migration recovery directory marker is invalid: {relative}")
+    _validate_staged_directory_marker(journal_root, migration_id, nonce, relative)
     return marker
 
 
-def _publish_directory_marker(prepared_marker: Path, directory: Path, migration_id: str, nonce: str, relative: str) -> None:
+def _publish_directory_marker(journal_root: Path, directory: Path, migration_id: str, nonce: str, relative: str) -> None:
+    prepared_marker = _validate_staged_directory_marker(journal_root, migration_id, nonce, relative)
     marker = directory / _DIRECTORY_MARKER_FILENAME
     try:
         os.link(prepared_marker, marker, follow_symlinks=False)
@@ -410,11 +404,93 @@ def _publish_directory_marker(prepared_marker: Path, directory: Path, migration_
         raise ValueError(f"Migration directory marker already exists: {relative}") from exc
     _fsync_directory(prepared_marker.parent)
     _fsync_directory(directory)
-    _validate_directory_marker(directory, migration_id, nonce, relative)
+    _validate_directory_marker_identity(
+        journal_root,
+        directory,
+        migration_id,
+        nonce,
+        relative,
+        require_expected_contents=True,
+    )
 
 
 def _directory_marker(migration_id: str, nonce: str, relative: str) -> dict[str, object]:
     return {"migration_id": migration_id, "nonce": nonce, "path": relative, "schema_version": 1}
+
+
+def _directory_marker_source(journal_root: Path, relative: str) -> Path:
+    marker_directory = _journal_path(journal_root, "directory-markers")
+    marker_name = f"{hashlib.sha256(relative.encode('utf-8')).hexdigest()}.json"
+    return _journal_path(marker_directory, marker_name)
+
+
+def _directory_marker_payload(migration_id: str, nonce: str, relative: str) -> bytes:
+    return _canonical_json(_directory_marker(migration_id, nonce, relative)).encode("utf-8")
+
+
+def _validate_staged_directory_marker(journal_root: Path, migration_id: str, nonce: str, relative: str) -> Path:
+    try:
+        marker = _directory_marker_source(journal_root, relative)
+        marker_state = marker.lstat()
+        payload = _directory_marker_payload(migration_id, nonce, relative)
+        contents = marker.read_bytes()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Migration recovery directory marker is invalid: {relative}") from exc
+    if (
+        stat.S_ISLNK(marker_state.st_mode)
+        or not stat.S_ISREG(marker_state.st_mode)
+        or f"{marker_state.st_mode & 0o7777:04o}" != "0644"
+        or contents != payload
+        or hashlib.sha256(contents).digest() != hashlib.sha256(payload).digest()
+    ):
+        raise ValueError(f"Migration recovery directory marker is invalid: {relative}")
+    return marker
+
+
+def _validate_directory_marker_identity(
+    journal_root: Path,
+    directory: Path,
+    migration_id: str,
+    nonce: str,
+    relative: str,
+    *,
+    require_expected_contents: bool,
+) -> Path:
+    try:
+        directory_state = directory.lstat()
+        source = _directory_marker_source(journal_root, relative)
+        source_state = source.lstat()
+        marker = directory / _DIRECTORY_MARKER_FILENAME
+        marker_state = marker.lstat()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Migration directory marker identity is invalid: {relative}") from exc
+    if (
+        stat.S_ISLNK(directory_state.st_mode)
+        or not stat.S_ISDIR(directory_state.st_mode)
+        or stat.S_ISLNK(source_state.st_mode)
+        or not stat.S_ISREG(source_state.st_mode)
+        or stat.S_ISLNK(marker_state.st_mode)
+        or not stat.S_ISREG(marker_state.st_mode)
+        or (source_state.st_dev, source_state.st_ino) != (marker_state.st_dev, marker_state.st_ino)
+    ):
+        raise ValueError(f"Migration directory marker identity is invalid: {relative}")
+    if require_expected_contents:
+        payload = _directory_marker_payload(migration_id, nonce, relative)
+        try:
+            source_contents = source.read_bytes()
+            marker_contents = marker.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
+        if (
+            f"{source_state.st_mode & 0o7777:04o}" != "0644"
+            or f"{marker_state.st_mode & 0o7777:04o}" != "0644"
+            or source_contents != payload
+            or marker_contents != payload
+            or hashlib.sha256(source_contents).digest() != hashlib.sha256(payload).digest()
+            or hashlib.sha256(marker_contents).digest() != hashlib.sha256(payload).digest()
+        ):
+            raise ValueError(f"Migration directory marker is invalid: {relative}")
+    return marker
 
 
 def _atomic_write(destination: Path, contents: bytes, mode: str) -> None:
@@ -463,13 +539,14 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
         _restore_manifest(target, originals, manifest)
     directories = _validate_directory_records(
         target,
+        journal_root,
         str(journal["migration_id"]),
         str(journal["directory_nonce"]),
         entries,
         journal.get("directories"),
     )
     for record in sorted(directories, key=lambda item: len(PurePosixPath(str(item["path"])).parts), reverse=True):
-        _recover_directory(target, str(journal["migration_id"]), str(journal["directory_nonce"]), record)
+        _recover_directory(target, journal_root, str(journal["migration_id"]), str(journal["directory_nonce"]), record)
     _verify_restored(target, originals, entries, manifest)
     _remove_journal(target, journal_root, journal)
 
@@ -560,7 +637,7 @@ def _load_journal(target: Path, journal_root: Path, migration_id: str) -> dict[s
     nonce = data.get("directory_nonce")
     if not isinstance(nonce, str) or not _NONCE_RE.fullmatch(nonce):
         raise ValueError("Migration recovery directory nonce is invalid.")
-    _validate_directory_records(target, migration_id, nonce, entries, data.get("directories"))
+    _validate_directory_records(target, journal_root, migration_id, nonce, entries, data.get("directories"))
     for key in ("state_directory_existed", "recovery_directory_existed"):
         if key in data and not isinstance(data[key], bool):
             raise ValueError("Migration recovery journal state is invalid.")
@@ -702,6 +779,7 @@ def _remove_journal(target: Path, journal_root: Path, journal: dict[str, object]
     if journal.get("state") == "complete":
         _remove_created_markers(
             target,
+            journal_root,
             str(journal["migration_id"]),
             str(journal["directory_nonce"]),
             _directory_records(journal),
@@ -788,6 +866,7 @@ def _directory_records(journal: dict[str, object]) -> list[dict[str, object]]:
 
 def _validate_directory_records(
     target: Path,
+    journal_root: Path,
     migration_id: str,
     nonce: str,
     entries: tuple[dict[str, object], ...],
@@ -817,9 +896,23 @@ def _validate_directory_records(
         paths.add(relative)
         directory = _safe_target_path(target, relative, reject_leaf_symlink=False)
         if lifecycle == "created":
-            _validate_directory_marker(directory, migration_id, nonce, relative)
+            _validate_directory_marker_identity(
+                journal_root,
+                directory,
+                migration_id,
+                nonce,
+                relative,
+                require_expected_contents=False,
+            )
         elif directory.exists() and _marker_exists(directory):
-            _validate_directory_marker(directory, migration_id, nonce, relative)
+            _validate_directory_marker_identity(
+                journal_root,
+                directory,
+                migration_id,
+                nonce,
+                relative,
+                require_expected_contents=False,
+            )
         directories.append({"existed": False, "path": relative, "state": lifecycle})
     if tuple(record["path"] for record in directories) != tuple(sorted(str(record["path"]) for record in directories)):
         raise ValueError("Migration recovery directory records must be sorted.")
@@ -828,12 +921,20 @@ def _validate_directory_records(
 
 def _remove_created_markers(
     target: Path,
+    journal_root: Path,
     migration_id: str,
     nonce: str,
     directories: list[dict[str, object]],
 ) -> None:
     markers = [
-        _validate_directory_marker(_safe_target_path(target, str(record["path"]), reject_leaf_symlink=False), migration_id, nonce, str(record["path"]))
+        _validate_directory_marker_identity(
+            journal_root,
+            _safe_target_path(target, str(record["path"]), reject_leaf_symlink=False),
+            migration_id,
+            nonce,
+            str(record["path"]),
+            require_expected_contents=False,
+        )
         for record in directories
         if record["state"] == "created"
     ]
@@ -842,14 +943,31 @@ def _remove_created_markers(
         _fsync_directory(marker.parent)
 
 
-def _recover_directory(target: Path, migration_id: str, nonce: str, record: dict[str, object]) -> None:
+def _recover_directory(
+    target: Path,
+    journal_root: Path,
+    migration_id: str,
+    nonce: str,
+    record: dict[str, object],
+) -> None:
     relative = str(record["path"])
     directory = _safe_target_path(target, relative, reject_leaf_symlink=False)
     if not directory.exists():
         if record["state"] == "created":
             raise ValueError(f"Migration directory marker is invalid: {relative}")
         return
-    marker = _validate_directory_marker(directory, migration_id, nonce, relative) if _marker_exists(directory) else None
+    marker = (
+        _validate_directory_marker_identity(
+            journal_root,
+            directory,
+            migration_id,
+            nonce,
+            relative,
+            require_expected_contents=False,
+        )
+        if _marker_exists(directory)
+        else None
+    )
     if record["state"] == "created" and marker is None:
         raise ValueError(f"Migration directory marker is invalid: {relative}")
     try:
@@ -868,33 +986,6 @@ def _recover_directory(target: Path, migration_id: str, nonce: str, record: dict
     _fsync_directory(directory)
     directory.rmdir()
     _fsync_directory(directory.parent)
-
-
-def _validate_directory_marker(directory: Path, migration_id: str, nonce: str, relative: str) -> Path:
-    try:
-        state = directory.lstat()
-    except OSError as exc:
-        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
-    if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
-        raise ValueError(f"Migration directory marker is invalid: {relative}")
-    marker = directory / _DIRECTORY_MARKER_FILENAME
-    try:
-        marker_state = marker.lstat()
-    except OSError as exc:
-        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
-    if stat.S_ISLNK(marker_state.st_mode) or not stat.S_ISREG(marker_state.st_mode) or _observed_mode(marker) != "0644":
-        raise ValueError(f"Migration directory marker is invalid: {relative}")
-    try:
-        data = json.loads(
-            marker.read_text(encoding="utf-8"),
-            object_pairs_hook=_reject_duplicate_json_keys,
-            parse_constant=_reject_json_constant,
-        )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
-    if data != _directory_marker(migration_id, nonce, relative):
-        raise ValueError(f"Migration directory marker is invalid: {relative}")
-    return marker
 
 
 def _marker_exists(directory: Path) -> bool:
