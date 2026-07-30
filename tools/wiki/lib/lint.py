@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from .authority import validate_authority_contract
 from .frontmatter import Page, parse_page
 from .hash_source import compute_sha256
 from .links import find_wiki_links, resolve_wiki_link, wiki_link_stays_in_root
@@ -113,6 +114,7 @@ def lint_repo(root: Path | str) -> LintResult:
         if page.path.name == "log.md":
             issues.extend(validate_log(page))
 
+    issues.extend(validate_authority_contract(repo_root, pages))
     issues.extend(validate_index_coverage(wiki_root, pages))
     issues.extend(validate_review_queue(repo_root))
     return LintResult(issues=issues)

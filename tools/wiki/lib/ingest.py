@@ -43,9 +43,12 @@ def ingest_source(
     source_hash = compute_sha256(source_path)
     source_title = title or _title_from_path(source_path)
     source_summary = summary or f"Registered source file `{display_path(source_path, root)}`."
+    if "\n" in source_summary or len(source_summary) > 240:
+        raise ValueError("Source summary must be one line of at most 240 characters.")
     slug = _slugify(source_path.stem)
     source_page = root / "wiki" / "sources" / f"{slug}.md"
     canonical_source = display_path(source_path, root)
+    source_kind = _source_kind(source_path)
 
     if source_page.exists():
         existing_page = parse_page(source_page)
@@ -89,19 +92,19 @@ def ingest_source(
         "related": [],
         "confidence": "high",
         "canonical_source": canonical_source,
-        "source_kind": _source_kind(source_path),
+        "source_kind": source_kind,
         "source_date": "",
         "authors": [],
         "url": "",
         "raw_sha256": source_hash,
         "quality": {
-            "provenance": "claim",
+            "provenance": "section",
             "links": "unchecked",
             "contradictions": "unchecked",
             "review_required": False,
         },
     }
-    body = _source_body(source_title, source_summary, canonical_source)
+    body = _source_body(source_title, source_summary, canonical_source, source_hash, source_kind)
     target = f"sources/{slug}"
     index_entry = {
         "section": "Sources",
@@ -146,7 +149,7 @@ def _write_report(
     report_path.write_text(_render_report(source_page, canonical_source, source_hash, outcome))
 
 
-def _source_body(title: str, summary: str, canonical_source: str) -> str:
+def _source_body(title: str, summary: str, canonical_source: str, source_hash: str, source_kind: str) -> str:
     return "\n".join(
         [
             f"# {title}",
@@ -155,33 +158,17 @@ def _source_body(title: str, summary: str, canonical_source: str) -> str:
             "",
             summary,
             "",
-            "Evidence: `" + canonical_source + "`",
+            "Source: `" + canonical_source + "`",
             "",
-            "## Key Takeaways",
+            "## Registration",
             "",
-            "- Not extracted yet.",
+            "- Canonical source: `" + canonical_source + "`",
+            "- SHA-256: `" + source_hash + "`",
+            "- Source kind: `" + source_kind + "`",
             "",
-            "## Extracted Concepts",
+            "## Durable Knowledge Links",
             "",
-            "- None yet.",
-            "",
-            "## Important Claims",
-            "",
-            "| Claim | Status | Evidence |",
-            "|---|---|---|",
-            "| Source registered for future extraction. | stated | `" + canonical_source + "` |",
-            "",
-            "## Contradictions / Tensions",
-            "",
-            "- Unchecked.",
-            "",
-            "## Pages Updated During Ingest",
-            "",
-            "- This source page.",
-            "",
-            "## Follow-up Questions",
-            "",
-            "- Which durable concepts should be extracted from this source?",
+            "- None.",
         ]
     )
 

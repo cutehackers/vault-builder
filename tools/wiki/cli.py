@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.wiki.lib.frontmatter import parse_page
+from tools.wiki.lib.authority import authority_contract_version, validate_page_authority
 from tools.wiki.lib.draft import apply_batch_draft, apply_draft
 from tools.wiki.lib.hash_source import compute_sha256, display_path
 from tools.wiki.lib.ingest import ingest_source
@@ -169,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(validate_source_hash(page, ROOT))
         issues.extend(validate_lifecycle(page, ROOT / "wiki"))
         issues.extend(validate_human_locks(page))
+        contract_version = authority_contract_version(ROOT)
+        if contract_version is not None and contract_version >= 1:
+            issues.extend(validate_page_authority(ROOT, page))
         if page.path.name == "log.md":
             issues.extend(validate_log(page))
         issues.extend(validate_page_links(page, ROOT / "wiki"))

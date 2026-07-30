@@ -12,6 +12,11 @@ from datetime import date
 from pathlib import Path
 
 from tools.wiki.lib.draft import apply_batch_draft, apply_draft
+from tools.wiki.lib.authority import (
+    PageRole,
+    classify_page_role,
+    validate_authority_contract,
+)
 from tools.wiki.lib.frontmatter import parse_page, render_page
 from tools.wiki.lib.ingest import ingest_source
 from tools.wiki.lib.links import find_wiki_links, resolve_wiki_link
@@ -107,6 +112,50 @@ def _frontmatter(title: str, page_type: str = "concept") -> dict:
     }
 
 
+def _write_contract_manifest(root: Path, version: int = 1) -> None:
+    manifest = root / ".vault-builder" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "contract_version": version,
+                "builder_revision": "test",
+                "generated_at": "2026-07-30T00:00:00Z",
+                "managed_files": {},
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _write_role_page(root: Path, relative: str, page_type: str) -> Path:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frontmatter = _frontmatter(path.stem.replace("-", " ").title(), page_type)
+    body = f"# {frontmatter['title']}\n"
+    if page_type == "source":
+        frontmatter.update(
+            {
+                "canonical_source": "raw/sources/input.md",
+                "raw_sha256": "a" * 64,
+                "source_kind": "markdown",
+                "source_count": 1,
+            }
+        )
+        body = (
+            f"# {frontmatter['title']}\n\n## Summary\n\n{frontmatter['summary']}\n\n"
+            "Source: `raw/sources/input.md`\n\n"
+            "## Registration\n\n"
+            "- Canonical source: `raw/sources/input.md`\n"
+            f"- SHA-256: `{'a' * 64}`\n"
+            "- Source kind: `markdown`\n\n"
+            "## Durable Knowledge Links\n\n- None.\n"
+        )
+    path.write_text(render_page(frontmatter, body))
+    return path
+
+
 def _draft(
     path: str,
     title: str,
@@ -151,6 +200,68 @@ def _claim_page_text(source_count: int, body: str) -> str:
         .replace("  provenance: section", "  provenance: claim")
         .replace("# Valid Page\n\nSource: Human instruction in `AGENTS.md`.", f"# Valid Page\n\n{body}")
     )
+
+
+class WikiAuthorityContractTest(unittest.TestCase):
+    def test_classifies_source_generated_and_canonical_pages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = _write_role_page(root, "wiki/sources/input.md", "source")
+            generated = _write_role_page(root, "wiki/maps/topic-map.md", "map")
+            canonical = _write_role_page(root, "wiki/concepts/topic.md", "concept")
+
+            self.assertEqual(PageRole.SOURCE_MANIFEST, classify_page_role(root, parse_page(source)))
+            self.assertEqual(PageRole.GENERATED_VIEW, classify_page_role(root, parse_page(generated)))
+            self.assertEqual(PageRole.CANONICAL_KNOWLEDGE, classify_page_role(root, parse_page(canonical)))
+
+    def test_contract_v1_rejects_semantic_source_page_sections(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            path = _write_role_page(root, "wiki/sources/input.md", "source")
+            page = parse_page(path)
+            path.write_text(
+                render_page(
+                    page.frontmatter,
+                    page.body + "\n## Key Takeaways\n\nCopied explanation.\n",
+                )
+            )
+
+            issues = validate_authority_contract(root, [parse_page(path)])
+
+            self.assertIn("source-manifest-semantic-body", {issue.code for issue in issues})
+
+    def test_legacy_vault_does_not_enable_v1_lint_without_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            path = _write_role_page(root, "wiki/sources/input.md", "source")
+            page = parse_page(path)
+            path.write_text(
+                render_page(
+                    page.frontmatter,
+                    page.body + "\n## Key Takeaways\n\nLegacy text.\n",
+                )
+            )
+
+            self.assertNotIn(
+                "source-manifest-semantic-body",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_malformed_manifest_is_not_treated_as_legacy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{not-json\n")
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
 
 
 class WikiToolSchemaTest(unittest.TestCase):
