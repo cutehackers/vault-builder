@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -707,15 +708,67 @@ class MigrationApplyTest(unittest.TestCase):
 
             def gate(root: Path) -> None:
                 manifest = load_manifest(root)
+                if manifest is None:
+                    journal = root / ".vault-builder" / "recovery" / plan.migration_id
+                    self.assertTrue((journal / "journal.json").is_file())
+                    self.assertTrue((journal / "originals").is_dir())
                 gate_versions.append(None if manifest is None else manifest.contract_version)
 
             manifest = apply_plan(ROOT, target, plan, run_gate=gate)
 
             self.assertEqual(1, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
+            persisted = load_manifest(target)
+            self.assertIsNotNone(persisted)
+            assert persisted is not None
+            self.assertEqual(plan.migration_id, persisted.last_migration_id)
             self.assertEqual([None, 1], gate_versions)
             self.assertEqual(protected_before, _protected_hashes(target))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
+
+    def test_apply_creates_missing_managed_parents_and_rollback_removes_them(self):
+        for fail_gate in (False, True):
+            with self.subTest(fail_gate=fail_gate), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                shutil.rmtree(target / ".agents")
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+
+                def gate(_: Path) -> None:
+                    if fail_gate:
+                        raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+
+                if fail_gate:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        apply_plan(ROOT, target, plan, run_gate=gate)
+                    self.assertEqual(before, _tree_digest(target))
+                    self.assertFalse((target / ".agents").exists())
+                else:
+                    manifest = apply_plan(ROOT, target, plan, run_gate=gate)
+                    self.assertTrue((target / ".agents" / "skills" / "wiki-ingest" / "SKILL.md").is_file())
+                    self.assertEqual(manifest.last_migration_id, load_manifest(target).last_migration_id)
+
+    def test_apply_rolls_back_parents_when_create_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            shutil.rmtree(target / ".agents")
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            original_write = applying._atomic_write
+
+            def fail_created_file(destination: Path, contents: bytes, mode: str) -> None:
+                if destination.as_posix().endswith("/.agents/skills/wiki-ingest/SKILL.md"):
+                    raise OSError("injected create failure")
+                original_write(destination, contents, mode)
+
+            with mock.patch("tools.vault_migration.applying._atomic_write", side_effect=fail_created_file):
+                with self.assertRaisesRegex(OSError, "injected create failure"):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".agents").exists())
 
     def test_apply_aborts_before_writes_for_blocking_or_changed_plan(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -830,6 +883,51 @@ class MigrationApplyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not found"):
                 recover_migration(target, migration_id)
 
+    def test_recover_prepared_journal_at_exact_path_removes_created_parent_chain(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            shutil.rmtree(target / ".agents")
+            relative = ".agents/skills/wiki-ingest/SKILL.md"
+            desired = (ROOT / relative).read_bytes()
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            target_path = target / relative
+            target_path.parent.mkdir(parents=True)
+            target_path.write_bytes(desired)
+            (journal_root / "originals").mkdir(parents=True)
+            (journal_root / "journal.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "migration_id": migration_id,
+                        "target_contract_version": 1,
+                        "state": "prepared",
+                        "entries": [{
+                            "path": relative,
+                            "existed": False,
+                            "sha256": None,
+                            "mode": None,
+                            "applied_sha256": hashlib.sha256(desired).hexdigest(),
+                        }],
+                        "manifest": None,
+                        "created_directories": [
+                            ".agents",
+                            ".agents/skills",
+                            ".agents/skills/wiki-ingest",
+                        ],
+                        "state_directory_existed": False,
+                        "recovery_directory_existed": False,
+                    }
+                )
+            )
+
+            recover_migration(target, migration_id)
+
+            self.assertFalse(target_path.exists())
+            self.assertFalse((target / ".agents").exists())
+            self.assertFalse(journal_root.exists())
+
     def test_recovery_refuses_hostile_journals_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -896,3 +994,50 @@ class MigrationApplyTest(unittest.TestCase):
             (journal_root / "journal.json").write_text(json.dumps(journal))
             with self.assertRaisesRegex(ValueError, "complete"):
                 recover_migration(target, migration_id)
+
+    def test_recovery_rejects_duplicate_json_keys_and_hostile_created_directories(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            (journal_root / "originals").mkdir(parents=True)
+            (journal_root / "journal.json").write_text(
+                "{"
+                '"schema_version":1,"migration_id":"0123456789abcdef",'
+                '"target_contract_version":1,"state":"applying","state":"complete",'
+                '"entries":[],"manifest":null}'
+            )
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                recover_migration(target, migration_id)
+            self.assertEqual(before, _tree_digest(target))
+
+            user_directory = target / "scratch" / "owned-empty"
+            user_directory.mkdir()
+            (journal_root / "journal.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "migration_id": migration_id,
+                        "target_contract_version": 1,
+                        "state": "prepared",
+                        "entries": [{
+                            "path": ".agents/skills/wiki-ingest/SKILL.md",
+                            "existed": False,
+                            "sha256": None,
+                            "mode": None,
+                            "applied_sha256": "a" * 64,
+                        }],
+                        "manifest": None,
+                        "created_directories": ["scratch/owned-empty"],
+                    }
+                )
+            )
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "created directories"):
+                recover_migration(target, migration_id)
+            self.assertEqual(before, _tree_digest(target))
+            self.assertTrue(user_directory.is_dir())

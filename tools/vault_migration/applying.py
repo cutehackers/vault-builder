@@ -16,7 +16,7 @@ from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_
 from .managed_paths import MANAGED_PATHS
 from .manifests import create_manifest, write_manifest
 from .models import MigrationAction, MigrationPlan, VaultManifest
-from .planning import _safe_target_path, _target_root, audit_vault, target_fingerprint
+from .planning import _target_root, audit_vault, target_fingerprint
 
 
 _V1_CATALOG_PATH = "tools/vault_migration/contracts/v1.json"
@@ -25,6 +25,33 @@ _JOURNAL_STATES = frozenset({"prepared", "applying", "validating", "rolling-back
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODE_RE = re.compile(r"^[0-7]{4}$")
 _MANIFEST_RELATIVE = ".vault-builder/manifest.json"
+
+
+def _safe_target_path(target: Path, relative: str, *, reject_leaf_symlink: bool = True) -> Path:
+    """Return the exact safe target leaf, including absent parent components."""
+    if not isinstance(relative, str) or not relative or "\\" in relative:
+        raise ValueError("Vault path must be a safe relative POSIX path.")
+    candidate_relative = PurePosixPath(relative)
+    if candidate_relative.is_absolute() or any(part in {"", ".", ".."} for part in candidate_relative.parts):
+        raise ValueError("Vault path must be a safe relative POSIX path.")
+    candidate = target
+    for index, part in enumerate(candidate_relative.parts):
+        candidate = candidate / part
+        try:
+            state = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ValueError(f"Vault path is unreadable: {relative}") from exc
+        if stat.S_ISLNK(state.st_mode) and (reject_leaf_symlink or index < len(candidate_relative.parts) - 1):
+            raise ValueError(f"Vault path contains a symlink: {relative}")
+        if index < len(candidate_relative.parts) - 1 and not stat.S_ISDIR(state.st_mode):
+            raise ValueError(f"Vault path has a non-directory parent: {relative}")
+    try:
+        candidate.parent.resolve(strict=False).relative_to(target)
+    except ValueError as exc:
+        raise ValueError(f"Vault path escapes the target root: {relative}") from exc
+    return candidate
 
 
 def apply_plan(
@@ -42,9 +69,14 @@ def apply_plan(
     try:
         _write_journal_state(journal_root, journal, "applying")
         created_directories: list[str] = []
+
+        def record_created(directories: list[str]) -> None:
+            created_directories.extend(directories)
+            journal["created_directories"] = sorted(set(created_directories))
+            _write_journal_state(journal_root, journal, "applying")
+
         for action in actions:
-            created_directories.extend(_replace_from_builder(builder, target, action))
-        journal["created_directories"] = sorted(set(created_directories))
+            _replace_from_builder(builder, target, action, record_created=record_created)
         _write_journal_state(journal_root, journal, "validating")
 
         # Gate one deliberately runs before authority-v1 metadata exists.
@@ -229,14 +261,19 @@ def _record_prior_manifest(target: Path, journal_root: Path, journal: dict[str, 
     _write_journal_state(journal_root, journal, "validating")
 
 
-def _replace_from_builder(builder: Path, target: Path, action: MigrationAction) -> list[str]:
+def _replace_from_builder(
+    builder: Path,
+    target: Path,
+    action: MigrationAction,
+    *,
+    record_created: Callable[[list[str]], None],
+) -> None:
     source = _safe_relative_path(builder, action.path)
     destination = _safe_target_path(target, action.path, reject_leaf_symlink=False)
-    created = _ensure_regular_parent(target, destination)
+    record_created(_ensure_regular_parent(target, destination))
     _atomic_write(destination, source.read_bytes(), action.desired_mode or "0644")
     if sha256_file(destination) != action.desired_sha256 or _observed_mode(destination) != action.desired_mode:
         raise ValueError(f"Atomic replacement verification failed: {action.path}")
-    return created
 
 
 def _ensure_regular_parent(target: Path, destination: Path) -> list[str]:
@@ -300,7 +337,8 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
     manifest = _journal_manifest(journal, allow_none=True)
     if manifest is not None:
         _restore_manifest(target, originals, manifest)
-    for relative in sorted(_string_list(journal.get("created_directories")), key=lambda value: len(PurePosixPath(value).parts), reverse=True):
+    created_directories = _validate_created_directories(entries, journal.get("created_directories"))
+    for relative in sorted(created_directories, key=lambda value: len(PurePosixPath(value).parts), reverse=True):
         _rmdir_if_empty(_safe_target_path(target, relative, reject_leaf_symlink=False))
     _verify_restored(target, originals, entries, manifest)
     _remove_journal(target, journal_root, journal)
@@ -372,7 +410,11 @@ def _load_journal(target: Path, journal_root: Path, migration_id: str) -> dict[s
     if journal_path.is_symlink() or not journal_path.is_file():
         raise ValueError("Migration recovery journal is invalid.")
     try:
-        data = json.loads(journal_path.read_text(encoding="utf-8"), parse_constant=_reject_json_constant)
+        data = json.loads(
+            journal_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("Migration recovery journal is invalid.") from exc
     if not isinstance(data, dict) or set(data) - _journal_optional_keys() or not _journal_required_keys() <= set(data):
@@ -385,7 +427,7 @@ def _load_journal(target: Path, journal_root: Path, migration_id: str) -> dict[s
         raise ValueError("Migration recovery journal has an invalid state.")
     entries = _journal_entries(data)
     manifest = _journal_manifest(data, allow_none=True)
-    _string_list(data.get("created_directories"))
+    _validate_created_directories(entries, data.get("created_directories"))
     for key in ("state_directory_existed", "recovery_directory_existed"):
         if key in data and not isinstance(data[key], bool):
             raise ValueError("Migration recovery journal state is invalid.")
@@ -605,3 +647,29 @@ def _string_list(value: object) -> tuple[str, ...]:
         if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
             raise ValueError("Migration recovery created directories are invalid.")
     return tuple(value)
+
+
+def _validate_created_directories(entries: tuple[dict[str, object], ...], value: object) -> tuple[str, ...]:
+    directories = _string_list(value)
+    if directories != tuple(sorted(set(directories))):
+        raise ValueError("Migration recovery created directories are invalid.")
+    allowed: set[str] = set()
+    for entry in entries:
+        if entry["existed"]:
+            continue
+        parent = PurePosixPath(str(entry["path"])).parent
+        while parent.parts:
+            allowed.add(parent.as_posix())
+            parent = parent.parent
+    if not set(directories) <= allowed:
+        raise ValueError("Migration recovery created directories are invalid.")
+    return directories
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON key: {key}")
+        result[key] = value
+    return result
