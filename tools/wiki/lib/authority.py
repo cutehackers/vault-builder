@@ -80,6 +80,11 @@ def validate_authority_contract(root: Path, pages: list[Page]) -> list[Issue]:
     if version is None or version < 1:
         return []
 
+    return scan_authority_issues(root, pages)
+
+
+def scan_authority_issues(root: Path, pages: list[Page]) -> list[Issue]:
+    """Validate authority rules even for legacy Vault audit planning."""
     issues = [issue for page in pages for issue in validate_page_authority(root, page)]
     issues.extend(_validate_duplicate_canonical_bodies(root, pages))
     return issues

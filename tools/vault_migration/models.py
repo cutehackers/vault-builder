@@ -14,6 +14,7 @@ from typing import Literal, Mapping
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _UTC_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_OBSERVED_MODE_RE = re.compile(r"^[0-7]{4}$")
 _MODES = frozenset({"0644", "0755"})
 _POLICIES = frozenset({"replace-if-unmodified"})
 _ACTIONS = frozenset(
@@ -104,6 +105,15 @@ def _validate_optional_mode(value: object, name: str) -> str | None:
     if value is None:
         return None
     return _validate_mode(value, name)
+
+
+def _validate_optional_observed_mode(value: object, name: str) -> str | None:
+    if value is None:
+        return None
+    mode = _require_string(value, name)
+    if not _OBSERVED_MODE_RE.fullmatch(mode):
+        raise ValueError(f"{name} must be a four-digit octal file mode.")
+    return mode
 
 
 def _validate_utc_timestamp(value: object, name: str) -> str:
@@ -286,7 +296,7 @@ class MigrationAction:
             raise ValueError(f"action must be one of {sorted(_ACTIONS)}.")
         object.__setattr__(self, "current_sha256", _validate_optional_sha256(self.current_sha256, "current_sha256"))
         object.__setattr__(self, "desired_sha256", _validate_optional_sha256(self.desired_sha256, "desired_sha256"))
-        object.__setattr__(self, "current_mode", _validate_optional_mode(self.current_mode, "current_mode"))
+        object.__setattr__(self, "current_mode", _validate_optional_observed_mode(self.current_mode, "current_mode"))
         object.__setattr__(self, "desired_mode", _validate_optional_mode(self.desired_mode, "desired_mode"))
         object.__setattr__(self, "reason", _require_string(self.reason, "reason"))
 
@@ -316,7 +326,7 @@ class MigrationAction:
             action=action,  # type: ignore[arg-type]
             current_sha256=_validate_optional_sha256(data["current_sha256"], "current_sha256"),
             desired_sha256=_validate_optional_sha256(data["desired_sha256"], "desired_sha256"),
-            current_mode=_validate_optional_mode(data["current_mode"], "current_mode"),
+            current_mode=_validate_optional_observed_mode(data["current_mode"], "current_mode"),
             desired_mode=_validate_optional_mode(data["desired_mode"], "desired_mode"),
             reason=_require_string(data["reason"], "reason"),
         )

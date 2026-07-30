@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/authority.py",
       "policy": "replace-if-unmodified",
-      "sha256": "6224d52b6c91e3eae8f3e69930de146382080ba31619622a34f298fd8f5b1cef"
+      "sha256": "808db45bf789d2328591ee8b36a4e9a3c30e85f366deb2f29a15094ff96bcd01"
     },
     "tools/wiki/lib/draft.py": {
       "mode": "0644",

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
+import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,9 +17,66 @@ from tools.vault_migration.catalogs import build_catalog, load_catalog, sha256_f
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.managed_paths import MANAGED_PATHS
 from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan, VaultManifest
+from tools.vault_migration.planning import (
+    audit_vault,
+    render_plan_summary,
+    target_fingerprint,
+    validate_external_output_path,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _copy_legacy_fixture(target: Path) -> None:
+    archive = subprocess.run(
+        ["git", "archive", "47cbf83"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as contents:
+        if sys.version_info >= (3, 12):
+            contents.extractall(target, filter="data")
+        else:
+            contents.extractall(target)
+    (target / "raw" / "sources" / "input.md").write_text("Legacy input.\n")
+    (target / "wiki" / "concepts" / "topic.md").write_text(
+        "---\ntitle: Topic\ntype: concept\nstatus: active\ncreated: 2026-07-30\n"
+        "updated: 2026-07-30\nowner: human\nsummary: Topic knowledge.\nsource_count: 0\n"
+        "tags: []\nrelated: []\nconfidence: high\nquality:\n  provenance: none\n"
+        "  links: valid\n  contradictions: none\n  review_required: false\n---\n\n# Topic\n\nOwned knowledge.\n"
+    )
+    (target / "scratch" / "reports" / "audit.md").write_text("Prior audit evidence.\n")
+
+
+def _tree_digest(root: Path) -> str:
+    entries: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        status = path.lstat()
+        mode = f"{status.st_mode & 0o7777:04o}"
+        if path.is_symlink():
+            kind = "symlink"
+            content = os.readlink(path).encode()
+        elif path.is_file():
+            kind = "file"
+            content = path.read_bytes()
+        elif path.is_dir():
+            kind = "directory"
+            content = b""
+        else:
+            kind = "other"
+            content = b""
+        entries.append(
+            {
+                "path": relative,
+                "type": kind,
+                "mode": mode,
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+    return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class VaultManifestTest(unittest.TestCase):
@@ -417,3 +477,134 @@ class ContractCatalogTest(unittest.TestCase):
 
         self.assertEqual(plan, MigrationPlan.from_json(rendered))
         self.assertEqual(rendered, json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n")
+
+
+class MigrationPlanningTest(unittest.TestCase):
+    def test_audit_is_read_only_and_classifies_known_custom_and_owned_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            (target / "tools" / "wiki" / "cli.py").write_text("user customization\n")
+            before = _tree_digest(target)
+
+            plan = audit_vault(ROOT, target)
+
+            self.assertEqual(before, _tree_digest(target))
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual("review-required", actions["tools/wiki/cli.py"].action)
+            self.assertEqual("preserve", actions["raw/sources/input.md"].action)
+            self.assertEqual("preserve", actions["wiki/concepts/topic.md"].action)
+            self.assertEqual("preserve", actions["wiki/log.md"].action)
+            self.assertEqual("preserve", actions["scratch/reports/audit.md"].action)
+            self.assertEqual("rebuild-suggested", actions["wiki/maps/topic-map.md"].action)
+            self.assertEqual("preserve", actions["init-vault.sh"].action)
+            self.assertEqual("preserve", actions["scripts/bootstrap.sh"].action)
+
+    def test_audit_is_deterministic_and_uses_known_legacy_hashes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+
+            first = audit_vault(ROOT, target)
+            second = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in first.actions}
+            self.assertEqual("replace", actions["tools/wiki/cli.py"].action)
+            self.assertEqual("create", actions["tools/wiki/lib/authority.py"].action)
+            self.assertEqual(first, second)
+            self.assertEqual(first.to_json(), second.to_json())
+            self.assertEqual(first.target_fingerprint, target_fingerprint(target, (action.path for action in first.actions)))
+            self.assertIn(first.migration_id, render_plan_summary(target, first))
+
+    def test_audit_uses_manifest_hash_as_safe_replacement_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            managed_path = target / "tools" / "wiki" / "cli.py"
+            managed_path.write_text("known generated variant\n")
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            manifest_path.parent.mkdir()
+            manifest_path.write_text(
+                VaultManifest(
+                    1,
+                    1,
+                    "test",
+                    "2026-07-30T00:00:00Z",
+                    {
+                        "tools/wiki/cli.py": ManagedFile(
+                            "tools/wiki/cli.py",
+                            hashlib.sha256(managed_path.read_bytes()).hexdigest(),
+                            "0644",
+                        )
+                    },
+                ).to_json()
+            )
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual(1, plan.current_contract_version)
+            self.assertEqual("replace", actions["tools/wiki/cli.py"].action)
+
+    def test_audit_marks_non_topology_catalog_leaf_as_invalid_without_writes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            invalid = target / "tools" / "wiki" / "lib" / "authority.py"
+            invalid.mkdir()
+            before = _tree_digest(target)
+
+            plan = audit_vault(ROOT, target)
+
+            self.assertEqual(before, _tree_digest(target))
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual("invalid", actions["tools/wiki/lib/authority.py"].action)
+
+    def test_audit_forces_authority_scan_and_reports_duplicate_canonical_bodies(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            duplicate = target / "wiki" / "concepts" / "duplicate.md"
+            duplicate.write_text((target / "wiki" / "concepts" / "topic.md").read_text())
+            source = target / "wiki" / "sources" / "legacy.md"
+            source.parent.mkdir(exist_ok=True)
+            source.write_text("---\ntitle: Legacy\ntype: source\n---\n\n# Legacy\n\n## Key Takeaways\n\nCopied body.\n")
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual("review-required", actions["wiki/concepts/topic.md"].action)
+            self.assertEqual("review-required", actions["wiki/sources/legacy.md"].action)
+            self.assertIn("duplicate-canonical-body", {issue["code"] for issue in plan.authority_issues})
+            self.assertIn("source-manifest-semantic-body", {issue["code"] for issue in plan.authority_issues})
+
+    def test_audit_rejects_target_symlink_and_unsafe_catalog_leaf(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            alias = root / "vault-link"
+            _copy_legacy_fixture(target)
+            alias.symlink_to(target, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "target root must not be a symlink"):
+                audit_vault(ROOT, alias)
+
+            (target / "tools" / "wiki" / "cli.py").unlink()
+            (target / "tools" / "wiki" / "cli.py").symlink_to(root / "outside.py")
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                audit_vault(ROOT, target)
+
+    def test_external_output_stays_outside_target_and_rejects_symlinked_parent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            outside = root / "outside"
+            _copy_legacy_fixture(target)
+            outside.mkdir()
+            (root / "linked-output").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "must stay outside the target Vault"):
+                validate_external_output_path(target, target / "migration-plan.json")
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                validate_external_output_path(target, root / "linked-output" / "migration-plan.json")
+            validate_external_output_path(target, outside / "migration-plan.json")
