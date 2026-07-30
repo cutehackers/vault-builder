@@ -1648,6 +1648,94 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
             self.assertFalse(list(root.glob(".*.tmp")))
 
+    def test_output_transaction_restores_replaced_outputs_when_either_commit_parent_fsync_fails(self):
+        for failing_call in (1, 2):
+            with self.subTest(failing_call=failing_call), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                plan = root / "migration-plan.json"
+                report = root / "migration-audit.md"
+                plan.write_text("old plan\n")
+                report.write_text("old report\n")
+                plan.chmod(0o600)
+                report.chmod(0o640)
+                real_fsync = cli._fsync_parent
+                calls = 0
+
+                def fail_selected_parent_fsync(descriptor: int) -> None:
+                    nonlocal calls
+                    calls += 1
+                    if calls == failing_call:
+                        raise OSError(f"injected parent fsync {failing_call}")
+                    real_fsync(descriptor)
+
+                with mock.patch.object(cli, "_fsync_parent", side_effect=fail_selected_parent_fsync):
+                    with self.assertRaisesRegex(ValueError, "Could not write"):
+                        cli._write_outputs(
+                            ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report"))
+                        )
+
+                self.assertEqual("old plan\n", plan.read_text())
+                self.assertEqual("old report\n", report.read_text())
+                self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
+                self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
+                self.assertFalse(list(root.glob(".*.tmp")))
+
+    def test_restore_temp_is_cleaned_when_restore_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "migration-plan.json"
+            report = root / "migration-audit.md"
+            plan.write_text("old plan\n")
+            report.write_text("old report\n")
+            real_write = cli._write_temporary
+            calls = 0
+
+            def fail_restore_write(descriptor: int, contents: bytes, mode: int) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise OSError("injected restore write failure")
+                real_write(descriptor, contents, mode)
+
+            with mock.patch.object(cli, "_write_temporary", side_effect=fail_restore_write):
+                with self.assertRaisesRegex(ValueError, "commit failed.*rollback failed"):
+                    cli._write_outputs(
+                        ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
+                        before_replace=lambda index: (_ for _ in ()).throw(OSError("injected second replace")) if index == 1 else None,
+                    )
+
+            self.assertEqual("new plan\n", plan.read_text())
+            self.assertEqual("old report\n", report.read_text())
+            self.assertFalse(list(root.glob(".*.tmp")))
+
+    def test_restore_parent_fsync_failure_reports_commit_and_rollback_failures_without_temp_leak(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "migration-plan.json"
+            report = root / "migration-audit.md"
+            plan.write_text("old plan\n")
+            report.write_text("old report\n")
+            real_fsync = cli._fsync_parent
+            calls = 0
+
+            def fail_restore_fsync(descriptor: int) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("injected restore parent fsync failure")
+                real_fsync(descriptor)
+
+            with mock.patch.object(cli, "_fsync_parent", side_effect=fail_restore_fsync):
+                with self.assertRaisesRegex(ValueError, "injected second replace.*rollback failed"):
+                    cli._write_outputs(
+                        ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
+                        before_replace=lambda index: (_ for _ in ()).throw(OSError("injected second replace")) if index == 1 else None,
+                    )
+
+            self.assertEqual("old plan\n", plan.read_text())
+            self.assertEqual("old report\n", report.read_text())
+            self.assertFalse(list(root.glob(".*.tmp")))
+
     def test_audit_rejects_raw_traversal_for_report_and_plan_output_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

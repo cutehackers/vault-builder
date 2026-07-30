@@ -303,28 +303,50 @@ def _finish_created_directories(created: list[_CreatedDirectory], *, remove: boo
             os.close(directory.parent)
 
 
+def _fsync_parent(parent: int) -> None:
+    os.fsync(parent)
+
+
 def _restore_output(output: _PreparedOutput) -> None:
     if output.prior_bytes is None:
         try:
             os.unlink(output.path.name, dir_fd=output.parent)
         except FileNotFoundError:
             return
-        os.fsync(output.parent)
+        _fsync_parent(output.parent)
         return
-    temporary_name, descriptor = _reserve_temporary(output.parent, output.path, output.label)
+    temporary_name: str | None = None
+    descriptor: int | None = None
     try:
-        _write_temporary(descriptor, output.prior_bytes, output.prior_mode or 0o644)
-    finally:
-        os.close(descriptor)
-    try:
-        os.replace(temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
-    except BaseException:
+        temporary_name, descriptor = _reserve_temporary(output.parent, output.path, output.label)
         try:
-            os.unlink(temporary_name, dir_fd=output.parent)
-        except FileNotFoundError:
-            pass
-        raise
-    os.fsync(output.parent)
+            _write_temporary(descriptor, output.prior_bytes, output.prior_mode or 0o644)
+        finally:
+            os.close(descriptor)
+            descriptor = None
+        os.replace(temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
+        temporary_name = None
+        _fsync_parent(output.parent)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=output.parent)
+            except FileNotFoundError:
+                pass
+
+
+def _rollback_outputs(committed: list[_PreparedOutput], original: BaseException) -> None:
+    failures: list[BaseException] = []
+    for output in reversed(committed):
+        try:
+            _restore_output(output)
+        except BaseException as rollback_exc:
+            failures.append(rollback_exc)
+    if failures:
+        details = "; ".join(str(failure) for failure in failures)
+        raise ValueError(f"Output commit failed: {original}; rollback failed: {details}") from failures[0]
 
 
 def _write_outputs(
@@ -348,15 +370,11 @@ def _write_outputs(
             except OSError as exc:
                 raise ValueError(f"Could not write {output.label.lower()}: {output.path}") from exc
             output.temporary_name = ""
-            os.fsync(output.parent)
             committed.append(output)
+            _fsync_parent(output.parent)
         successful = True
     except BaseException as exc:
-        try:
-            for output in reversed(committed):
-                _restore_output(output)
-        except BaseException as rollback_exc:
-            raise ValueError("Could not restore prepared outputs after a failed write.") from rollback_exc
+        _rollback_outputs(committed, exc)
         if isinstance(exc, ValueError):
             raise
         raise ValueError("Could not write requested outputs.") from exc
