@@ -32,6 +32,16 @@ from tools.vault_migration.planning import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "tools/vault_migration/cli.py", *arguments],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def _copy_legacy_fixture(target: Path) -> None:
     archive = subprocess.run(
         ["git", "archive", "47cbf83"],
@@ -1513,3 +1523,187 @@ class MigrationApplyTest(unittest.TestCase):
 
                 self.assertEqual(before, _tree_digest(target))
                 self.assertTrue(directory.is_dir())
+
+
+class VaultMigrationCliTest(unittest.TestCase):
+    def test_audit_stdout_is_deterministic_and_target_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan_path = root / "migration-plan.json"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+
+            first = _run_cli("audit", "--target", str(target), "--plan-out", str(plan_path))
+            second = _run_cli("audit", "--target", str(target))
+
+            self.assertEqual(0, first.returncode, first.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            self.assertEqual(before, _tree_digest(target))
+            self.assertEqual(MigrationPlan.from_json(plan_path.read_text()).to_json(), plan_path.read_text())
+            self.assertIn("Target writes: none", first.stdout)
+            summary, _, _ = first.stdout.partition("\n\n{")
+            self.assertNotIn("fingerprint", summary.lower())
+
+    def test_audit_returns_two_and_writes_blocking_plan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan_path = root / "migration-plan.json"
+            _copy_legacy_fixture(target)
+            (target / "tools" / "wiki" / "cli.py").write_text("user customization\n")
+
+            result = _run_cli("audit", "--target", str(target), "--plan-out", str(plan_path))
+
+            self.assertEqual(2, result.returncode, result.stderr)
+            self.assertIn("review-required: 1", result.stdout)
+            self.assertTrue(plan_path.is_file())
+            self.assertTrue(MigrationPlan.from_json(plan_path.read_text()).has_blocking_actions)
+            self.assertFalse((target / ".vault-builder").exists())
+
+    def test_audit_validates_all_outputs_before_writing_either_one(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan_path = root / "migration-plan.json"
+            _copy_legacy_fixture(target)
+
+            result = _run_cli(
+                "audit",
+                "--target",
+                str(target),
+                "--plan-out",
+                str(plan_path),
+                "--report",
+                str(root / "outside-report.md"),
+            )
+
+            self.assertEqual(1, result.returncode)
+            self.assertFalse(plan_path.exists())
+
+    def test_audit_report_is_an_explicit_safe_target_write(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            report = target / "scratch" / "reports" / "migration-audit.md"
+            _copy_legacy_fixture(target)
+
+            result = _run_cli("audit", "--target", str(target), "--report", str(report))
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertTrue(report.is_file())
+            self.assertIn("Target writes: scratch/reports/migration-audit.md", result.stdout)
+            self.assertIn('"migration_id"', report.read_text())
+
+    def test_audit_rejects_symlinked_report_parent_and_leaf(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            _copy_legacy_fixture(target)
+            outside = root / "outside"
+            outside.mkdir()
+            linked_parent = target / "scratch" / "reports" / "linked"
+            linked_parent.symlink_to(outside, target_is_directory=True)
+
+            parent_result = _run_cli("audit", "--target", str(target), "--report", str(linked_parent / "report.md"))
+            self.assertEqual(1, parent_result.returncode)
+            self.assertIn("symlink", parent_result.stderr)
+
+            leaf = target / "scratch" / "reports" / "linked-report.md"
+            leaf.symlink_to(outside / "report.md")
+            leaf_result = _run_cli("audit", "--target", str(target), "--report", str(leaf))
+            self.assertEqual(1, leaf_result.returncode)
+            self.assertIn("symlink", leaf_result.stderr)
+
+    def test_audit_rejects_symlinked_plan_output_parent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            outside = root / "outside"
+            outside.mkdir()
+            linked = root / "linked-output"
+            linked.symlink_to(outside, target_is_directory=True)
+            _copy_legacy_fixture(target)
+
+            result = _run_cli("audit", "--target", str(target), "--plan-out", str(linked / "plan.json"))
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("symlink", result.stderr)
+            self.assertFalse((outside / "plan.json").exists())
+
+    def test_apply_requires_a_regular_nonsymlink_plan_before_target_access(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            missing = _run_cli("apply", "--target", str(root / "missing"))
+            self.assertEqual(1, missing.returncode)
+            self.assertIn("--plan", missing.stderr)
+
+            plan = root / "plan.json"
+            plan.write_text("{}\n")
+            linked = root / "linked-plan.json"
+            linked.symlink_to(plan)
+            result = _run_cli("apply", "--target", str(root / "missing"), "--plan", str(linked))
+            self.assertEqual(1, result.returncode)
+            self.assertIn("regular", result.stderr)
+
+    def test_apply_rejects_duplicate_key_plan_before_target_access(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "plan.json"
+            plan.write_text(
+                '{"schema_version":1,"schema_version":1,"migration_id":"0123456789abcdef",'
+                '"current_contract_version":null,"target_contract_version":1,'
+                '"builder_revision":"test","target_fingerprint":"' + "a" * 64 + '",'
+                '"actions":[],"authority_issues":[]}\n'
+            )
+
+            result = _run_cli("apply", "--target", str(root / "missing"), "--plan", str(plan))
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("duplicate", result.stderr.lower())
+
+    def test_apply_maps_service_and_gate_failures_to_one(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = MigrationPlan(
+                schema_version=1,
+                migration_id="0123456789abcdef",
+                current_contract_version=None,
+                target_contract_version=1,
+                builder_revision="test",
+                target_fingerprint="a" * 64,
+                actions=(),
+                authority_issues=(),
+            )
+            plan_path = root / "plan.json"
+            plan_path.write_text(plan.to_json())
+            for failure in (RuntimeError("service failed"), subprocess.CalledProcessError(7, ["gate"])):
+                with self.subTest(failure=type(failure).__name__), mock.patch.object(cli, "apply_plan", side_effect=failure):
+                    stderr = io.StringIO()
+                    with mock.patch("sys.stderr", stderr):
+                        result = cli.main(["apply", "--target", str(root / "vault"), "--plan", str(plan_path)])
+                    self.assertEqual(1, result)
+                    self.assertIn("apply:", stderr.getvalue())
+
+            manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
+            stdout = io.StringIO()
+            with mock.patch.object(cli, "apply_plan", return_value=manifest), mock.patch("sys.stdout", stdout):
+                result = cli.main(["apply", "--target", str(root / "vault"), "--plan", str(plan_path)])
+            self.assertEqual(0, result)
+            self.assertIn("Final contract: 1", stdout.getvalue())
+
+    def test_recover_prints_actionable_failure_for_missing_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+
+            result = _run_cli(
+                "recover",
+                "--target",
+                str(target),
+                "--migration-id",
+                "0123456789abcdef",
+            )
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("Recovery journal not found", result.stderr)
