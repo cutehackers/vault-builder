@@ -337,9 +337,15 @@ def _ensure_managed_parent(
             _directory_step("before-intent", relative)
             record_directory(relative, "intent")
             _directory_step("after-intent", relative)
+            prepared_marker = _prepare_directory_marker(
+                _journal_root(target, migration_id, create=False),
+                migration_id,
+                directory_nonce,
+                relative,
+            )
             _mkdir_directory(current)
             _directory_step("after-mkdir", relative)
-            _write_directory_marker(current, migration_id, directory_nonce, relative)
+            _publish_directory_marker(prepared_marker, current, migration_id, directory_nonce, relative)
             _directory_step("after-marker", relative)
             record_directory(relative, "created")
             continue
@@ -349,28 +355,62 @@ def _ensure_managed_parent(
 
 def _mkdir_directory(path: Path) -> None:
     path.mkdir()
+    _fsync_directory(path.parent)
 
 
 def _directory_step(_stage: str, _relative: str) -> None:
     """Failure-injection seam for directory transaction crash windows."""
 
 
-def _write_directory_marker(directory: Path, migration_id: str, nonce: str, relative: str) -> None:
-    marker = directory / _DIRECTORY_MARKER_FILENAME
+def _prepare_directory_marker(journal_root: Path, migration_id: str, nonce: str, relative: str) -> Path:
+    marker_directory = _journal_path(journal_root, "directory-markers")
+    try:
+        directory_state = marker_directory.lstat()
+    except FileNotFoundError:
+        marker_directory.mkdir()
+        _fsync_directory(journal_root)
+    else:
+        if stat.S_ISLNK(directory_state.st_mode) or not stat.S_ISDIR(directory_state.st_mode):
+            raise ValueError("Migration recovery directory markers are invalid.")
+    marker_name = f"{hashlib.sha256(relative.encode('utf-8')).hexdigest()}.json"
+    marker = _journal_path(marker_directory, marker_name)
     payload = _canonical_json(_directory_marker(migration_id, nonce, relative)).encode("utf-8")
     try:
-        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
-        raise ValueError(f"Migration directory marker already exists: {relative}") from exc
+        raise ValueError(f"Migration recovery directory marker already exists: {relative}") from exc
     try:
         with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
+            if handle.write(payload) != len(payload):
+                raise OSError("Migration recovery directory marker write was incomplete.")
             handle.flush()
+            os.fchmod(handle.fileno(), 0o644)
             os.fsync(handle.fileno())
     except BaseException:
         marker.unlink(missing_ok=True)
+        _fsync_directory(marker_directory)
         raise
+    _fsync_directory(marker_directory)
+    marker_state = marker.lstat()
+    if (
+        stat.S_ISLNK(marker_state.st_mode)
+        or not stat.S_ISREG(marker_state.st_mode)
+        or _observed_mode(marker) != "0644"
+        or marker.read_bytes() != payload
+    ):
+        raise ValueError(f"Migration recovery directory marker is invalid: {relative}")
+    return marker
+
+
+def _publish_directory_marker(prepared_marker: Path, directory: Path, migration_id: str, nonce: str, relative: str) -> None:
+    marker = directory / _DIRECTORY_MARKER_FILENAME
+    try:
+        os.link(prepared_marker, marker, follow_symlinks=False)
+    except FileExistsError as exc:
+        raise ValueError(f"Migration directory marker already exists: {relative}") from exc
+    _fsync_directory(prepared_marker.parent)
     _fsync_directory(directory)
+    _validate_directory_marker(directory, migration_id, nonce, relative)
 
 
 def _directory_marker(migration_id: str, nonce: str, relative: str) -> dict[str, object]:
