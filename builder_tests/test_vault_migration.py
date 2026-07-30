@@ -27,9 +27,20 @@ from tools.vault_migration.planning import (
     target_fingerprint,
     validate_external_output_path,
 )
+from tools.wiki.lib.maps import build_navigation_maps
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        arguments,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -42,23 +53,33 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _copy_legacy_fixture(target: Path) -> None:
+def _extract_git_archive(repository: Path, revision: str, destination: Path) -> Path:
     archive = subprocess.run(
-        ["git", "archive", "47cbf83"],
-        cwd=ROOT,
+        ["git", "archive", revision],
+        cwd=repository,
         capture_output=True,
         check=True,
     ).stdout
+    destination.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as contents:
         if sys.version_info >= (3, 12):
-            contents.extractall(target, filter="data")
+            contents.extractall(destination, filter="data")
         else:
-            contents.extractall(target)
+            contents.extractall(destination)
+    return destination
+
+
+def _normalize_legacy_modes(target: Path) -> None:
     legacy_catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v0.json")
     for relative, managed in legacy_catalog.managed_files.items():
         path = target / relative
-        if path.is_file():
+        if path.is_file() and not path.is_symlink():
             path.chmod(int(managed.mode, 8))
+
+
+def _copy_legacy_fixture(target: Path) -> None:
+    _extract_git_archive(ROOT, "47cbf83", target)
+    _normalize_legacy_modes(target)
     (target / "raw" / "sources" / "input.md").write_text("Legacy input.\n")
     (target / "wiki" / "concepts" / "topic.md").write_text(
         "---\ntitle: Topic\ntype: concept\nstatus: active\ncreated: 2026-07-30\n"
@@ -67,6 +88,95 @@ def _copy_legacy_fixture(target: Path) -> None:
         "  links: valid\n  contradictions: none\n  review_required: false\n---\n\n# Topic\n\nOwned knowledge.\n"
     )
     (target / "scratch" / "reports" / "audit.md").write_text("Prior audit evidence.\n")
+
+
+def _initialize_legacy_vault(root: Path) -> Path:
+    legacy_builder = _extract_git_archive(ROOT, "47cbf83", root / "legacy-builder")
+    target = root / "vault"
+    _run(["bash", "init-vault.sh", str(target)], legacy_builder)
+    _normalize_legacy_modes(target)
+    return target
+
+
+def _add_user_role_content(target: Path) -> dict[str, str]:
+    raw = target / "raw" / "sources" / "user-evidence.md"
+    raw.write_text("Representative user-owned raw evidence.\n")
+    raw_hash = hashlib.sha256(raw.read_bytes()).hexdigest()
+
+    source_manifest = target / "wiki" / "sources" / "user-evidence.md"
+    source_manifest.write_text(
+        "---\n"
+        "title: User Evidence\n"
+        "type: source\n"
+        "status: active\n"
+        "created: 2026-07-30\n"
+        "updated: 2026-07-30\n"
+        "owner: human\n"
+        "summary: Representative user-owned raw evidence.\n"
+        "source_count: 1\n"
+        "tags: []\n"
+        "related: []\n"
+        "confidence: high\n"
+        "quality:\n"
+        "  provenance: section\n"
+        "  links: unchecked\n"
+        "  contradictions: none\n"
+        "  review_required: false\n"
+        "canonical_source: raw/sources/user-evidence.md\n"
+        f"raw_sha256: {raw_hash}\n"
+        "source_kind: markdown\n"
+        "---\n\n"
+        "# User Evidence\n\n"
+        "## Summary\n\n"
+        "Representative user-owned raw evidence.\n\n"
+        "Source: `raw/sources/user-evidence.md`\n\n"
+        "## Registration\n\n"
+        "- Canonical source: `raw/sources/user-evidence.md`\n"
+        f"- SHA-256: `{raw_hash}`\n"
+        "- Source kind: `markdown`\n\n"
+        "## Durable Knowledge Links\n\n"
+        "- None.\n"
+    )
+
+    canonical = target / "wiki" / "concepts" / "compiled-knowledge.md"
+    canonical.write_text(
+        canonical.read_text()
+        + "\n## Human-Owned Migration Note\n\n"
+        "This durable note must remain byte-for-byte unchanged during migration.\n\n"
+        "Source: Explicit human instruction for Task 8 acceptance.\n"
+    )
+
+    log = target / "wiki" / "log.md"
+    log.write_text(
+        log.read_text()
+        + "\n## [2026-07-30] manual-note | Preserve Migration Acceptance Content\n\n"
+        "- Recorded representative user-owned content before migration.\n"
+        "- Contradictions found: none.\n"
+        "- Follow-ups: preserve these bytes and modes through migration.\n"
+    )
+
+    report = target / "scratch" / "reports" / "user-audit.md"
+    report.write_text("# User Audit Evidence\n\nThis report is user-owned and immutable during migration.\n")
+
+    generated_view = target / "wiki" / "maps" / "README.md"
+    generated_view.write_text(
+        generated_view.read_text()
+        + "\n## Human Navigation Note\n\n"
+        "This navigation note must remain byte-for-byte unchanged during migration.\n\n"
+        "Source: Explicit human instruction for Task 8 acceptance.\n"
+    )
+
+    modes = {
+        raw.relative_to(target).as_posix(): "0600",
+        source_manifest.relative_to(target).as_posix(): "0640",
+        canonical.relative_to(target).as_posix(): "0640",
+        log.relative_to(target).as_posix(): "0640",
+        report.relative_to(target).as_posix(): "0600",
+        generated_view.relative_to(target).as_posix(): "0640",
+    }
+    for relative, mode in modes.items():
+        (target / relative).chmod(int(mode, 8))
+    return modes
 
 
 def _tree_digest(root: Path) -> str:
@@ -1974,3 +2084,108 @@ class VaultMigrationCliTest(unittest.TestCase):
 
             self.assertEqual(1, result.returncode)
             self.assertIn("Recovery journal not found", result.stderr)
+
+
+class VaultMigrationAcceptanceTest(unittest.TestCase):
+    def test_fresh_vault_has_v1_manifest_and_passes_its_release_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+
+            _run(["bash", "init-vault.sh", str(target)], ROOT)
+
+            manifest = load_manifest(target)
+            self.assertIsNotNone(manifest)
+            assert manifest is not None
+            self.assertEqual(1, manifest.contract_version)
+            self.assertIsNone(manifest.last_migration_id)
+            self.assertFalse((target / "builder_tests").exists())
+            self.assertFalse((target / "tools" / "vault_migration").exists())
+            self.assertFalse((target / "init-vault.sh").exists())
+            self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
+            _run(["bash", "scripts/release_gate.sh"], target)
+
+    def test_legacy_vault_migrates_without_changing_user_role_bytes_or_modes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = _initialize_legacy_vault(Path(tmpdir))
+            expected_user_modes = _add_user_role_content(target)
+            build_navigation_maps(target)
+            self.assertEqual([], build_navigation_maps(target, check=True).changed_paths)
+            protected_before = _protected_hashes(target)
+
+            plan = audit_vault(ROOT, target)
+
+            self.assertIsNone(plan.current_contract_version)
+            self.assertFalse(plan.has_blocking_actions)
+            self.assertIn("replace", {action.action for action in plan.actions})
+            self.assertIn("create", {action.action for action in plan.actions})
+
+            manifest = apply_plan(ROOT, target, plan)
+
+            protected_after = _protected_hashes(target)
+            self.assertEqual(protected_before, protected_after)
+            for relative, expected_mode in expected_user_modes.items():
+                self.assertIn(relative, protected_after)
+                self.assertEqual(expected_mode, protected_after[relative][1], relative)
+            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(plan.migration_id, manifest.last_migration_id)
+            self.assertEqual(manifest, load_manifest(target))
+            self.assertFalse((target / ".vault-builder" / "recovery").exists())
+            self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
+            _run(["bash", "scripts/release_gate.sh"], target)
+
+    def test_legacy_source_manifest_violation_blocks_without_changing_tree(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = _initialize_legacy_vault(Path(tmpdir))
+            source = target / "wiki" / "sources" / "legacy.md"
+            source.write_text(
+                "---\n"
+                "title: Legacy Source\n"
+                "type: source\n"
+                "status: active\n"
+                "created: 2026-07-30\n"
+                "updated: 2026-07-30\n"
+                "owner: human\n"
+                "summary: Legacy source page with copied semantics.\n"
+                "source_count: 1\n"
+                "tags: []\n"
+                "related: []\n"
+                "confidence: medium\n"
+                "quality:\n"
+                "  provenance: claim\n"
+                "  links: unchecked\n"
+                "  contradictions: none\n"
+                "  review_required: false\n"
+                "canonical_source: raw/sources/legacy.md\n"
+                f"raw_sha256: {'a' * 64}\n"
+                "source_kind: markdown\n"
+                "---\n\n"
+                "# Legacy Source\n\n"
+                "## Key Takeaways\n\n"
+                "Copied semantic explanation.\n"
+            )
+            before = _tree_digest(target)
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            issues = {(str(issue["code"]), str(issue["path"])) for issue in plan.authority_issues}
+            self.assertTrue(plan.has_blocking_actions)
+            self.assertEqual("review-required", actions["wiki/sources/legacy.md"].action)
+            self.assertIn(("source-manifest-semantic-body", "wiki/sources/legacy.md"), issues)
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".vault-builder").exists())
+
+    def test_actual_legacy_gate_failure_restores_the_complete_tree(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = _initialize_legacy_vault(Path(tmpdir))
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            def fail_gate(_: Path) -> None:
+                raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".vault-builder").exists())

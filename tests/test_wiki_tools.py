@@ -92,7 +92,15 @@ def _has_stenc_bundle(root: Path) -> bool:
 
 
 def _has_builder_creation_tools(root: Path) -> bool:
-    return (root / "init-vault.sh").is_file() and (root / "scripts" / "bootstrap.sh").is_file()
+    return all(
+        path.is_file()
+        for path in (
+            root / "init-vault.sh",
+            root / "scripts" / "bootstrap.sh",
+            root / "tools" / "vault_migration" / "cli.py",
+            root / "builder_tests" / "test_vault_migration.py",
+        )
+    )
 
 
 BUILDER_CREATION_TOOLS_AVAILABLE = _has_builder_creation_tools(Path(__file__).resolve().parents[1])
