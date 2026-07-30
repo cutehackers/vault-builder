@@ -81,11 +81,16 @@ choose_python() {
   local candidate
   for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
     if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then
-      echo "${candidate}"
-      return 0
+      if "${candidate}" - <<'PY' >/dev/null 2>&1; then
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+        echo "${candidate}"
+        return 0
+      fi
     fi
   done
-  echo "Missing required command: python3" >&2
+  echo "Missing required command: Python 3.10 or newer" >&2
   exit 1
 }
 

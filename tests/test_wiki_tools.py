@@ -2036,6 +2036,79 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "tools" / "stenc").exists())
             self.assertIn("Ready:", bootstrap_result.stdout)
 
+    def test_bootstrap_skips_python_below_3_10(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            archive_path = tmp / "vault-builder.tar.gz"
+            target = tmp / "llm-wiki"
+            fake_python = tmp / "python3.9"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \"${1:-}\" == \"--version\" ]]; then echo 'Python 3.9.0'; fi\n"
+                "exit 1\n"
+            )
+            fake_python.chmod(0o755)
+            tar_result = subprocess.run(
+                [
+                    "tar",
+                    "-czf",
+                    str(archive_path),
+                    "--exclude",
+                    ".git",
+                    "-C",
+                    str(root.parent),
+                    root.name,
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env = os.environ.copy()
+            env["PYTHON"] = str(fake_python)
+            env["VAULT_BUILDER_ARCHIVE_URL"] = archive_path.as_uri()
+            bootstrap_result = subprocess.run(
+                ["bash", "scripts/bootstrap.sh", str(target)],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
+            self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
+            self.assertTrue((target / ".vault-builder" / "manifest.json").exists())
+
+    def test_bootstrap_fails_when_no_python_3_10_or_newer_is_available(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            commands = tmp / "commands"
+            commands.mkdir()
+            for command in ("curl", "tar"):
+                path = commands / command
+                path.write_text("#!/bin/bash\nexit 0\n")
+                path.chmod(0o755)
+            python_39 = commands / "python3.9"
+            python_39.write_text("#!/bin/bash\nexit 1\n")
+            python_39.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(commands)
+            env["PYTHON"] = str(python_39)
+
+            result = subprocess.run(
+                ["/bin/bash", str(root / "scripts" / "bootstrap.sh")],
+                cwd=tmp,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Python 3.10 or newer", result.stderr)
+
     def test_bootstrap_script_uses_vault_as_default_target_directory(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -5,6 +5,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Literal, Mapping
@@ -12,6 +13,7 @@ from typing import Literal, Mapping
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+_UTC_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _MODES = frozenset({"0644", "0755"})
 _POLICIES = frozenset({"replace-if-unmodified"})
 _ACTIONS = frozenset(
@@ -102,6 +104,17 @@ def _validate_optional_mode(value: object, name: str) -> str | None:
     if value is None:
         return None
     return _validate_mode(value, name)
+
+
+def _validate_utc_timestamp(value: object, name: str) -> str:
+    timestamp = _require_string(value, name)
+    if not _UTC_TIMESTAMP_RE.fullmatch(timestamp):
+        raise ValueError(f"{name} must use UTC format YYYY-MM-DDTHH:MM:SSZ.")
+    try:
+        datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid UTC timestamp.") from exc
+    return timestamp
 
 
 @dataclass(frozen=True)
@@ -213,7 +226,7 @@ class VaultManifest:
         object.__setattr__(self, "schema_version", _require_int(self.schema_version, "schema_version"))
         object.__setattr__(self, "contract_version", _require_int(self.contract_version, "contract_version"))
         object.__setattr__(self, "builder_revision", _require_string(self.builder_revision, "builder_revision"))
-        object.__setattr__(self, "generated_at", _require_string(self.generated_at, "generated_at"))
+        object.__setattr__(self, "generated_at", _validate_utc_timestamp(self.generated_at, "generated_at"))
         object.__setattr__(self, "managed_files", _validate_managed_files(dict(self.managed_files), "managed_files"))
         if self.last_migration_id is not None and not _MIGRATION_ID_RE.fullmatch(self.last_migration_id):
             raise ValueError("last_migration_id must be 16 lowercase hexadecimal characters.")

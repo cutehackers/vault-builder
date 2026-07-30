@@ -20,6 +20,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class VaultManifestTest(unittest.TestCase):
+    def test_manifest_generated_at_requires_a_real_utc_second_timestamp(self):
+        manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
+
+        self.assertEqual(manifest, VaultManifest.from_json(manifest.to_json()))
+        for generated_at in (
+            "2026-07-30T00:00:00+00:00",
+            "2026-07-30T00:00:00.000Z",
+            "2026-02-30T00:00:00Z",
+            "2026-07-30T24:00:00Z",
+            "2026-07-30T00:00:00Z ",
+        ):
+            with self.assertRaisesRegex(ValueError, "generated_at"):
+                VaultManifest(1, 1, "test", generated_at, {})
+
+        for generated_at in (True, None, 1):
+            with self.assertRaisesRegex(ValueError, "generated_at"):
+                VaultManifest.from_dict(
+                    {
+                        "schema_version": 1,
+                        "contract_version": 1,
+                        "builder_revision": "test",
+                        "generated_at": generated_at,
+                        "managed_files": {},
+                        "last_migration_id": None,
+                    }
+                )
+
     def test_manifest_records_only_copied_managed_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -55,6 +82,14 @@ class VaultManifestTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "manifest"):
                 load_manifest(target)
 
+            manifest_path.write_text(
+                VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {}).to_json().replace(
+                    "2026-07-30T00:00:00Z", "2026-02-30T00:00:00Z"
+                )
+            )
+            with self.assertRaisesRegex(ValueError, "manifest"):
+                load_manifest(target)
+
             manifest_path.unlink()
             outside = Path(tmpdir) / "outside.json"
             outside.write_text("{}\n")
@@ -75,6 +110,46 @@ class VaultManifestTest(unittest.TestCase):
                     target,
                     VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {}),
                 )
+
+    def test_manifest_revision_prefers_explicit_then_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            target.mkdir()
+            with mock.patch.dict(os.environ, {"VAULT_BUILDER_REVISION": "environment"}):
+                self.assertEqual("explicit", create_manifest(ROOT, target, "explicit").builder_revision)
+                self.assertEqual("environment", create_manifest(ROOT, target, "").builder_revision)
+
+    def test_manifest_cli_reports_invalid_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "not-a-directory"
+            target.write_text("not a vault directory\n")
+
+            self.assertEqual(
+                1,
+                cli.main(
+                    [
+                        "manifest",
+                        "--builder-root",
+                        str(ROOT),
+                        "--target",
+                        str(target),
+                        "--builder-revision",
+                        "test",
+                    ]
+                ),
+            )
+
+    def test_manifest_write_cleans_temporary_file_when_replace_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            target.mkdir()
+            manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
+
+            with mock.patch("tools.vault_migration.manifests.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(ValueError, "Could not write"):
+                    write_manifest(target, manifest)
+
+            self.assertEqual([], list((target / ".vault-builder").glob(".manifest.json.*.tmp")))
 
 
 class ContractCatalogTest(unittest.TestCase):
