@@ -546,6 +546,39 @@ class MigrationPlanningTest(unittest.TestCase):
             self.assertEqual(1, plan.current_contract_version)
             self.assertEqual("replace", actions["tools/wiki/cli.py"].action)
 
+    def test_audit_blocks_unknown_manifest_contract_without_trusting_its_hashes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            managed_path = target / "tools" / "wiki" / "cli.py"
+            managed_path.write_text("unknown contract generated variant\n")
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            manifest_path.parent.mkdir()
+            manifest_path.write_text(
+                VaultManifest(
+                    1,
+                    2,
+                    "unknown-contract",
+                    "2026-07-30T00:00:00Z",
+                    {
+                        "tools/wiki/cli.py": ManagedFile(
+                            "tools/wiki/cli.py",
+                            hashlib.sha256(managed_path.read_bytes()).hexdigest(),
+                            "0644",
+                        )
+                    },
+                ).to_json()
+            )
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual(2, plan.current_contract_version)
+            self.assertTrue(plan.has_blocking_actions)
+            self.assertEqual("review-required", actions["tools/wiki/cli.py"].action)
+            self.assertEqual("invalid", actions[".vault-builder/manifest.json"].action)
+            self.assertIn("unsupported-vault-builder-manifest-contract", {issue["code"] for issue in plan.authority_issues})
+
     def test_audit_marks_non_topology_catalog_leaf_as_invalid_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -594,6 +627,19 @@ class MigrationPlanningTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink"):
                 audit_vault(ROOT, target)
 
+    def test_audit_rejects_user_symlink_in_target_ancestry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            real_parent = root / "real"
+            real_parent.mkdir()
+            target = real_parent / "vault"
+            _copy_legacy_fixture(target)
+            alias = root / "alias"
+            alias.symlink_to(real_parent, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "target path contains a symlink"):
+                audit_vault(ROOT, alias / "vault")
+
     def test_external_output_stays_outside_target_and_rejects_symlinked_parent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -608,3 +654,29 @@ class MigrationPlanningTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink"):
                 validate_external_output_path(target, root / "linked-output" / "migration-plan.json")
             validate_external_output_path(target, outside / "migration-plan.json")
+
+    def test_external_output_rejects_symlink_before_existing_descendant(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            outside = root / "outside"
+            _copy_legacy_fixture(target)
+            (outside / "nested").mkdir(parents=True)
+            (root / "linked-output").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                validate_external_output_path(target, root / "linked-output" / "nested" / "migration-plan.json")
+
+    def test_audit_rejects_role_directory_without_read_and_search_permission(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            blocked = target / "raw" / "blocked"
+            blocked.mkdir()
+            original_mode = blocked.stat().st_mode
+            blocked.chmod(0)
+            try:
+                with self.assertRaisesRegex(ValueError, "unreadable"):
+                    audit_vault(ROOT, target)
+            finally:
+                blocked.chmod(original_mode)

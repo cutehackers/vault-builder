@@ -27,6 +27,7 @@ _REQUIRED_TOPOLOGY = (
     "scripts/release_gate.sh",
 )
 _LEGACY_BUILDER_COPIES = ("init-vault.sh", "scripts/bootstrap.sh")
+_SYSTEM_SYMLINK_COMPONENTS = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})
 
 
 def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
@@ -38,11 +39,15 @@ def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
     v1_catalog = _load_catalog(builder, _V1_CATALOG_PATH)
     manifest = load_manifest(target)
 
-    catalog_actions = _catalog_actions(target, v0_catalog, v1_catalog, manifest)
+    manifest_is_supported = manifest is None or manifest.contract_version == v1_catalog.contract_version
+    catalog_actions = _catalog_actions(target, v0_catalog, v1_catalog, manifest if manifest_is_supported else None)
     role_actions = _role_actions(target, set(catalog_actions))
     pages = _wiki_pages(target)
     authority_issues = _issue_dicts(target, scan_authority_issues(target, pages))
     _apply_authority_reviews(target, role_actions, authority_issues)
+    if manifest is not None and not manifest_is_supported:
+        _add_unsupported_manifest_review(target, role_actions, authority_issues, manifest.contract_version)
+        authority_issues.sort(key=lambda issue: (str(issue["path"]), str(issue["code"]), str(issue["message"])))
 
     actions = tuple(catalog_actions[path] for path in sorted(catalog_actions)) + tuple(
         role_actions[path] for path in sorted(role_actions)
@@ -126,12 +131,15 @@ def _target_root(target_root: Path) -> Path:
     target = Path(target_root)
     if target.is_symlink():
         raise ValueError("Vault target root must not be a symlink.")
+    _reject_symlinked_target_ancestors(target)
     if not target.is_dir():
         raise ValueError("Vault target root must be a regular directory.")
     try:
-        return target.resolve()
+        resolved = target.resolve()
     except OSError as exc:
         raise ValueError("Vault target root is unreadable.") from exc
+    _require_readable_directory(resolved, "Vault target root")
+    return resolved
 
 
 def _safe_target_path(target: Path, relative: str, *, reject_leaf_symlink: bool = True) -> Path:
@@ -275,6 +283,31 @@ def _role_actions(target: Path, catalog_paths: set[str]) -> dict[str, MigrationA
     return actions
 
 
+def _add_unsupported_manifest_review(
+    target: Path,
+    role_actions: dict[str, MigrationAction],
+    authority_issues: list[dict[str, object]],
+    contract_version: int,
+) -> None:
+    relative = ".vault-builder/manifest.json"
+    role_actions[relative] = _action(
+        relative,
+        "invalid",
+        _file_state(target, relative),
+        None,
+        f"Vault builder manifest contract version {contract_version} is unsupported.",
+    )
+    authority_issues.append(
+        {
+            "code": "unsupported-vault-builder-manifest-contract",
+            "line": None,
+            "message": f"Vault builder manifest contract version {contract_version} is unsupported for migration planning.",
+            "path": relative,
+            "severity": "error",
+        }
+    )
+
+
 def _add_role_action(
     actions: dict[str, MigrationAction],
     target: Path,
@@ -290,20 +323,34 @@ def _add_role_action(
 
 def _regular_files_below(target: Path, directory: str) -> tuple[str, ...]:
     root = _safe_target_path(target, directory)
-    if not root.exists():
+    try:
+        root.lstat()
+    except FileNotFoundError:
         return ()
-    if not root.is_dir():
-        raise ValueError(f"Vault role root must be a directory: {directory}")
+    except OSError as exc:
+        raise ValueError(f"Vault role directory is unreadable: {directory}") from exc
     paths: list[str] = []
-    for path in sorted(root.rglob("*")):
-        relative = path.relative_to(target).as_posix()
-        safe_path = _safe_target_path(target, relative)
-        state = safe_path.lstat()
-        if stat.S_ISREG(state.st_mode):
-            _read_file(safe_path, relative)
-            paths.append(relative)
-        elif not stat.S_ISDIR(state.st_mode):
-            raise ValueError(f"Vault role path must be a regular file or directory: {relative}")
+
+    def visit(current: Path) -> None:
+        relative_directory = current.relative_to(target).as_posix()
+        _require_readable_directory(current, relative_directory)
+        try:
+            children = sorted(current.iterdir())
+        except OSError as exc:
+            raise ValueError(f"Vault role directory is unreadable: {relative_directory}") from exc
+        for path in children:
+            relative = path.relative_to(target).as_posix()
+            safe_path = _safe_target_path(target, relative)
+            state = safe_path.lstat()
+            if stat.S_ISREG(state.st_mode):
+                _read_file(safe_path, relative)
+                paths.append(relative)
+            elif stat.S_ISDIR(state.st_mode):
+                visit(safe_path)
+            else:
+                raise ValueError(f"Vault role path must be a regular file or directory: {relative}")
+
+    visit(root)
     return tuple(paths)
 
 
@@ -427,6 +474,12 @@ def _migration_id(
 
 def _read_file(path: Path, relative: str) -> bytes:
     try:
+        mode = path.lstat().st_mode
+    except OSError as exc:
+        raise ValueError(f"Vault file is unreadable: {relative}") from exc
+    if mode & 0o444 == 0:
+        raise ValueError(f"Vault file is unreadable: {relative}")
+    try:
         return path.read_bytes()
     except OSError as exc:
         raise ValueError(f"Vault file is unreadable: {relative}") from exc
@@ -441,8 +494,39 @@ def _canonical_json(value: object) -> str:
 
 
 def _reject_symlinked_output_parents(path: Path) -> None:
-    current = path.parent
-    while not current.exists() and not current.is_symlink() and current != current.parent:
-        current = current.parent
-    if current.is_symlink():
-        raise ValueError(f"Migration plan output parent contains a symlink: {current}")
+    _reject_symlink_components(path.parent, "Migration plan output parent")
+
+
+def _reject_symlinked_target_ancestors(target: Path) -> None:
+    _reject_symlink_components(target.absolute(), "Vault target path", include_leaf=False)
+
+
+def _reject_symlink_components(path: Path, label: str, *, include_leaf: bool = True) -> None:
+    absolute = path.absolute()
+    current = Path(absolute.anchor)
+    components = absolute.parts[1:]
+    if not include_leaf:
+        components = components[:-1]
+    for part in components:
+        current = current / part
+        try:
+            state = current.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as exc:
+            raise ValueError(f"{label} is unreadable: {current}") from exc
+        if stat.S_ISLNK(state.st_mode) and current not in _SYSTEM_SYMLINK_COMPONENTS:
+            raise ValueError(f"{label} contains a symlink: {current}")
+
+
+def _require_readable_directory(path: Path, label: str) -> None:
+    try:
+        state = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{label} is unreadable.") from exc
+    if not stat.S_ISDIR(state.st_mode):
+        raise ValueError(f"{label} must be a regular directory.")
+    mode = state.st_mode
+    readable_and_searchable = any(mode & bits == bits for bits in (0o500, 0o050, 0o005))
+    if not readable_and_searchable:
+        raise ValueError(f"{label} is unreadable.")
