@@ -13,7 +13,9 @@ from pathlib import Path
 from unittest import mock
 
 from tools.vault_migration import cli
+from tools.vault_migration import applying
 from tools.vault_migration.catalogs import build_catalog, load_catalog, sha256_file, write_catalog
+from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.managed_paths import MANAGED_PATHS
 from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan, VaultManifest
@@ -77,6 +79,18 @@ def _tree_digest(root: Path) -> str:
             }
         )
     return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _protected_hashes(root: Path) -> dict[str, tuple[str, str]]:
+    values: dict[str, tuple[str, str]] = {}
+    for directory in ("raw", "wiki", "scratch"):
+        for path in sorted((root / directory).rglob("*")):
+            if path.is_file() and not path.is_symlink():
+                values[path.relative_to(root).as_posix()] = (
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                    f"{path.stat().st_mode & 0o7777:04o}",
+                )
+    return values
 
 
 class VaultManifestTest(unittest.TestCase):
@@ -680,3 +694,205 @@ class MigrationPlanningTest(unittest.TestCase):
                     audit_vault(ROOT, target)
             finally:
                 blocked.chmod(original_mode)
+
+
+class MigrationApplyTest(unittest.TestCase):
+    def test_apply_replaces_only_approved_managed_files_and_runs_two_gates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            protected_before = _protected_hashes(target)
+            plan = audit_vault(ROOT, target)
+            gate_versions: list[int | None] = []
+
+            def gate(root: Path) -> None:
+                manifest = load_manifest(root)
+                gate_versions.append(None if manifest is None else manifest.contract_version)
+
+            manifest = apply_plan(ROOT, target, plan, run_gate=gate)
+
+            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(plan.migration_id, manifest.last_migration_id)
+            self.assertEqual([None, 1], gate_versions)
+            self.assertEqual(protected_before, _protected_hashes(target))
+            self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
+
+    def test_apply_aborts_before_writes_for_blocking_or_changed_plan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            (target / "tools" / "wiki" / "cli.py").write_text("user customization\n")
+            blocked_plan = audit_vault(ROOT, target)
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "requires human review"):
+                apply_plan(ROOT, target, blocked_plan, run_gate=lambda _: None)
+            self.assertEqual(before, _tree_digest(target))
+
+            target = Path(tmpdir) / "changed-vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            (target / "tools" / "wiki" / "cli.py").write_text("changed after audit\n")
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "changed after audit"):
+                apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".vault-builder" / "recovery").exists())
+
+    def test_apply_rolls_back_on_either_gate_failure_and_restores_manifest(self):
+        for fail_after_manifest in (False, True):
+            with self.subTest(fail_after_manifest=fail_after_manifest), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+
+                def fail_gate(root: Path) -> None:
+                    if (load_manifest(root) is not None) == fail_after_manifest:
+                        raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+
+                with self.assertRaises(subprocess.CalledProcessError):
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+                self.assertEqual(before, _tree_digest(target))
+
+    def test_apply_rejects_changed_builder_bytes_before_journal_creation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            before = _tree_digest(target)
+            original_hash = applying.sha256_file
+
+            def changed_builder_hash(path: Path) -> str:
+                if path == ROOT / "tools/wiki/cli.py":
+                    return "0" * 64
+                return original_hash(path)
+
+            with mock.patch("tools.vault_migration.applying.sha256_file", side_effect=changed_builder_hash):
+                with self.assertRaisesRegex(ValueError, "desired builder files"):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertEqual(before, _tree_digest(target))
+            self.assertFalse((target / ".vault-builder").exists())
+
+    def test_apply_rolls_back_when_candidate_manifest_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            before = _tree_digest(target)
+
+            with mock.patch("tools.vault_migration.applying.write_manifest", side_effect=ValueError("manifest write failed")):
+                with self.assertRaisesRegex(ValueError, "manifest write failed"):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_recover_restores_interrupted_journal_and_prior_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            relative = Path("tools/wiki/cli.py")
+            original = (target / relative).read_bytes()
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            original_path = journal_root / "originals" / relative
+            original_path.parent.mkdir(parents=True, exist_ok=True)
+            original_path.write_bytes(original)
+            (target / relative).write_text("interrupted replacement\n")
+            (journal_root / "journal.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "migration_id": migration_id,
+                        "target_contract_version": 1,
+                        "state": "applying",
+                        "entries": [{
+                            "path": relative.as_posix(),
+                            "existed": True,
+                            "sha256": hashlib.sha256(original).hexdigest(),
+                            "mode": "0644",
+                        }],
+                        "manifest": {"existed": False, "sha256": None, "mode": None},
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+            recover_migration(target, migration_id)
+
+            self.assertEqual(original, (target / relative).read_bytes())
+            self.assertFalse(journal_root.exists())
+            with self.assertRaisesRegex(ValueError, "not found"):
+                recover_migration(target, migration_id)
+
+    def test_recovery_refuses_hostile_journals_without_writes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            journal_root.mkdir(parents=True)
+            (journal_root / "journal.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "migration_id": migration_id,
+                        "target_contract_version": 1,
+                        "state": "applying",
+                        "entries": [{
+                            "path": "../raw/sources/input.md",
+                            "existed": True,
+                            "sha256": "a" * 64,
+                            "mode": "0644",
+                        }],
+                        "manifest": {"existed": False, "sha256": None, "mode": None},
+                    }
+                )
+            )
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "safe relative"):
+                recover_migration(target, migration_id)
+
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_recovery_refuses_corrupt_original_and_complete_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            original = journal_root / "originals" / "tools" / "wiki" / "cli.py"
+            original.parent.mkdir(parents=True)
+            original.write_text("corrupt original\n")
+            journal = {
+                "schema_version": 1,
+                "migration_id": migration_id,
+                "target_contract_version": 1,
+                "state": "applying",
+                "entries": [{
+                    "path": "tools/wiki/cli.py",
+                    "existed": True,
+                    "sha256": "a" * 64,
+                    "mode": "0644",
+                }],
+                "manifest": {"existed": False, "sha256": None, "mode": None},
+            }
+            (journal_root / "journal.json").write_text(json.dumps(journal))
+            before = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "original is invalid"):
+                recover_migration(target, migration_id)
+            self.assertEqual(before, _tree_digest(target))
+
+            original.unlink()
+            journal["entries"] = []
+            journal["state"] = "complete"
+            (journal_root / "journal.json").write_text(json.dumps(journal))
+            with self.assertRaisesRegex(ValueError, "complete"):
+                recover_migration(target, migration_id)
