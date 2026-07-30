@@ -29,14 +29,17 @@ SOURCE_MANIFEST_LEVEL_TWO_HEADINGS = {
 
 def authority_contract_version(root: Path) -> int | None:
     path = root / ".vault-builder" / "manifest.json"
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return None
     if not path.is_file() or path.is_symlink():
         raise ValueError("Vault builder manifest must be a regular file.")
     try:
-        value = json.loads(path.read_text()).get("contract_version")
+        manifest = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("Vault builder manifest is invalid.") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Vault builder manifest must be a JSON object.")
+    value = manifest.get("contract_version")
     if not isinstance(value, int):
         raise ValueError("Vault builder manifest contract_version must be an integer.")
     return value
@@ -237,7 +240,7 @@ def _contains_claim_table(lines: list[str]) -> bool:
 
 def _normalize_body(body: str) -> str:
     normalized = "\n".join(line.rstrip() for line in body.splitlines())
-    return re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    return re.sub(r"\n{3,}", "\n\n", normalized)
 
 
 def _issue(page: Page, code: str, message: str) -> Issue:

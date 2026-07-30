@@ -263,6 +263,68 @@ class WikiAuthorityContractTest(unittest.TestCase):
                 {issue.code for issue in lint_repo(root).issues},
             )
 
+    def test_dangling_manifest_symlink_is_not_treated_as_legacy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.symlink_to(root / "missing-manifest.json")
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_non_object_manifest_is_not_treated_as_legacy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("[]\n")
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_validate_page_reports_malformed_manifest(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{not-json\n")
+            page_path = root / "wiki" / "index.md"
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    result = cli.main(["validate-page", str(page_path)])
+            finally:
+                cli.ROOT = original_root
+
+            self.assertEqual(1, result)
+            self.assertIn("invalid-vault-builder-manifest", output.getvalue())
+
+    def test_duplicate_detection_preserves_body_boundaries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_contract_manifest(root)
+            first = root / "wiki" / "concepts" / "first.md"
+            second = root / "wiki" / "concepts" / "second.md"
+            first.parent.mkdir(parents=True)
+            first.write_text(render_page(_frontmatter("First"), "\n# Shared\n"))
+            second.write_text(render_page(_frontmatter("Second"), "# Shared\n"))
+
+            issues = validate_authority_contract(root, [parse_page(first), parse_page(second)])
+
+            self.assertNotIn("duplicate-canonical-body", {issue.code for issue in issues})
+
 
 class WikiToolSchemaTest(unittest.TestCase):
     def test_parse_page_requires_frontmatter(self):

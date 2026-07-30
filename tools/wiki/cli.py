@@ -170,7 +170,18 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(validate_source_hash(page, ROOT))
         issues.extend(validate_lifecycle(page, ROOT / "wiki"))
         issues.extend(validate_human_locks(page))
-        contract_version = authority_contract_version(ROOT)
+        try:
+            contract_version = authority_contract_version(ROOT)
+        except ValueError as exc:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="invalid-vault-builder-manifest",
+                    path=str(ROOT / ".vault-builder" / "manifest.json"),
+                    message=str(exc),
+                )
+            )
+            contract_version = None
         if contract_version is not None and contract_version >= 1:
             issues.extend(validate_page_authority(ROOT, page))
         if page.path.name == "log.md":
