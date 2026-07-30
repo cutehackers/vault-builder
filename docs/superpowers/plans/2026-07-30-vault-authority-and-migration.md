@@ -1090,7 +1090,7 @@ For each `create` or `replace` action:
 
 Do not touch `unchanged`, `preserve`, or `rebuild-suggested` actions.
 
-- [ ] **Step 6: Validate, write manifest, and roll back on failure**
+- [ ] **Step 6: Run pre-manifest and v1-manifest gates, then roll back on failure**
 
 The default gate runner is:
 
@@ -1104,14 +1104,24 @@ def _run_release_gate(target_root: Path) -> None:
     )
 ```
 
-After file replacement:
+After managed-file replacement:
 
-1. run the release gate, which already runs lint, health, maps check, and metrics;
-2. create the version 1 manifest with `last_migration_id`;
-3. mark the journal complete;
-4. remove only `.vault-builder/recovery/<migration-id>`.
+1. run the release gate without a v1 manifest to verify the upgraded tools
+   against the current target state;
+2. add the current manifest state to the recovery journal;
+3. create and atomically write the candidate version 1 manifest with
+   `last_migration_id`;
+4. run the release gate a second time so contract-version-aware authority
+   validation is active;
+5. mark the journal complete only after both gates pass;
+6. remove only `.vault-builder/recovery/<migration-id>`.
 
-On any exception after journal creation, restore originals in reverse action order, delete files whose entry has `existed: false`, restore modes, verify hashes, and remove the journal only when recovery is verified. If recovery fails, preserve the journal as `rollback-failed` and raise an error containing the exact `recover` command.
+The candidate manifest is transactional state, not a completed migration
+record. On any exception after journal creation, restore the prior manifest
+state and managed files in reverse action order, delete files whose entry has
+`existed: false`, restore modes, verify hashes, and remove the journal only
+when recovery is verified. If recovery fails, preserve the journal as
+`rollback-failed` and raise an error containing the exact `recover` command.
 
 - [ ] **Step 7: Implement explicit interrupted recovery**
 
@@ -1579,7 +1589,8 @@ git commit -m "test: verify vault migration safety"
 - Builder changes after audit: desired hash mismatch; require a fresh audit from one builder revision.
 - Disk/write failure: roll back from the journal.
 - Process interruption: preserve the journal and require `recover`.
-- Release gate failure: restore managed files and do not advance the manifest.
+- Either pre-manifest or v1-manifest release gate failure: restore managed
+  files and the prior manifest, and do not complete the migration.
 - Rollback failure: preserve `rollback-failed` journal and print the exact recovery command.
 - Optional Stenc Vault: preserve current Stenc files; do not catalog, create, replace, or delete them.
 
