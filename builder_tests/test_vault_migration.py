@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from tools.vault_migration.catalogs import load_catalog, sha256_file
+from tools.vault_migration import cli
+from tools.vault_migration.catalogs import build_catalog, load_catalog, sha256_file, write_catalog
 from tools.vault_migration.managed_paths import MANAGED_PATHS
 from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan
 
@@ -14,6 +18,158 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContractCatalogTest(unittest.TestCase):
+    def test_catalog_rejects_symlinked_ancestor_for_an_explicit_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "builder"
+            outside = Path(tmpdir) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (outside / "file.py").write_text("outside\n")
+            (root / "nested").symlink_to(outside, target_is_directory=True)
+
+            with mock.patch("tools.vault_migration.catalogs.MANAGED_EXACT_PATHS", ("nested/file.py",)), mock.patch(
+                "tools.vault_migration.catalogs.MANAGED_TREE_ROOTS", ()
+            ):
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    build_catalog(root, 1, "test")
+
+    def test_catalog_rejects_symlinked_ancestor_during_tree_enumeration(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "builder"
+            outside = Path(tmpdir) / "outside"
+            (root / "tools" / "wiki").mkdir(parents=True)
+            outside.mkdir()
+            (outside / "cli.py").write_text("outside\n")
+            (root / "tools" / "wiki" / "linked").symlink_to(outside, target_is_directory=True)
+
+            with mock.patch("tools.vault_migration.catalogs.MANAGED_EXACT_PATHS", ()), mock.patch(
+                "tools.vault_migration.catalogs.MANAGED_TREE_ROOTS", ("tools/wiki",)
+            ):
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    build_catalog(root, 1, "test")
+
+    def test_catalog_write_rejects_symlinked_output_ancestor_and_cli_outside_root(self):
+        catalog = ContractCatalog(1, 1, "test", {})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "builder"
+            outside = Path(tmpdir) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "output").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                write_catalog(root / "output" / "v1.json", catalog, output_root=root)
+
+            external = Path(tmpdir) / "outside.json"
+            self.assertEqual(
+                1,
+                cli.main(
+                    [
+                        "catalog",
+                        "--contract-version",
+                        "1",
+                        "--revision",
+                        "test",
+                        "--output",
+                        str(external),
+                    ]
+                ),
+            )
+            self.assertFalse(external.exists())
+
+    def test_legacy_catalog_reads_git_bytes_and_mode(self):
+        catalog = build_catalog(ROOT, 0, "47cbf83", source_ref="47cbf83")
+        managed = catalog.managed_files["scripts/release_gate.sh"]
+        contents = subprocess.run(
+            ["git", "show", "47cbf83:scripts/release_gate.sh"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+        self.assertEqual(hashlib.sha256(contents).hexdigest(), managed.sha256)
+        self.assertEqual("0755", managed.mode)
+
+    def test_plan_deeply_freezes_authority_issues(self):
+        plan = MigrationPlan(
+            schema_version=1,
+            migration_id="0123456789abcdef",
+            current_contract_version=None,
+            target_contract_version=1,
+            builder_revision="test",
+            target_fingerprint="c" * 64,
+            actions=(),
+            authority_issues=({"context": {"paths": ["wiki/concepts/topic.md"]}},),
+        )
+
+        with self.assertRaises(TypeError):
+            plan.authority_issues[0]["context"] = {}
+        with self.assertRaises(AttributeError):
+            plan.authority_issues[0]["context"]["paths"].append("wiki/concepts/other.md")
+        self.assertEqual(
+            plan,
+            MigrationPlan.from_json(plan.to_json()),
+        )
+
+    def test_parse_boundaries_reject_representative_invalid_nested_values(self):
+        with self.assertRaisesRegex(ValueError, "path"):
+            ManagedFile.from_dict(
+                {
+                    "path": "/tools/wiki/cli.py",
+                    "sha256": "a" * 64,
+                    "mode": "0644",
+                    "policy": "replace-if-unmodified",
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "integer"):
+            ContractCatalog.from_dict(
+                {
+                    "schema_version": True,
+                    "contract_version": 1,
+                    "builder_revision": "test",
+                    "managed_files": {},
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            ContractCatalog.from_dict(
+                {
+                    "schema_version": 1,
+                    "contract_version": 1,
+                    "builder_revision": "test",
+                    "managed_files": {
+                        "tools/wiki/cli.py": {
+                            "path": "tools/wiki/cli.py",
+                            "sha256": "a" * 64,
+                            "mode": "0644",
+                            "policy": "replace-if-unmodified",
+                            "unexpected": True,
+                        }
+                    },
+                }
+            )
+        for field, value in (("sha256", "A" * 64), ("mode", "0600"), ("policy", "unknown")):
+            data = {
+                "path": "tools/wiki/cli.py",
+                "sha256": "a" * 64,
+                "mode": "0644",
+                "policy": "replace-if-unmodified",
+            }
+            data[field] = value
+            with self.assertRaises(ValueError):
+                ManagedFile.from_dict(data)
+        with self.assertRaisesRegex(ValueError, "action"):
+            MigrationAction.from_dict(
+                {
+                    "path": "tools/wiki/cli.py",
+                    "action": "overwrite",
+                    "current_sha256": None,
+                    "desired_sha256": "b" * 64,
+                    "current_mode": None,
+                    "desired_mode": "0644",
+                    "reason": "unsupported action",
+                }
+            )
+
     def test_model_parsers_reject_unsafe_or_unknown_values(self):
         with self.assertRaisesRegex(ValueError, "path"):
             ManagedFile.from_dict(

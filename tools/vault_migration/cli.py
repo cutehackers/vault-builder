@@ -27,13 +27,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             result = build_catalog(ROOT, args.contract_version, args.revision, args.source_ref)
             output = Path(args.output)
-            if not output.is_absolute():
-                output = ROOT / output
-            write_catalog(output, result)
+            display_output = output if output.is_absolute() else ROOT / output
+            write_catalog(output, result, output_root=ROOT)
         except (OSError, ValueError) as exc:
             print(f"catalog: {exc}", file=sys.stderr)
             return 1
-        print(output)
+        print(display_output)
         return 0
     return 1
 

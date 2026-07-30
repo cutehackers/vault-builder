@@ -12,6 +12,47 @@ from .models import ContractCatalog, ManagedFile
 CATALOG_SCHEMA_VERSION = 1
 
 
+def _validate_root(root: Path, label: str) -> Path:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"{label} must be a regular directory.")
+    return root.resolve()
+
+
+def _safe_relative_path(root: Path, relative: str) -> Path:
+    candidate_relative = Path(relative)
+    if candidate_relative.is_absolute() or any(part in {"", ".", ".."} for part in candidate_relative.parts):
+        raise ValueError(f"Managed path must be a safe relative path: {relative}")
+    candidate = root
+    for part in candidate_relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise ValueError(f"Managed path contains a symlink: {relative}")
+    try:
+        candidate.resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Managed path escapes the builder root: {relative}") from exc
+    return candidate
+
+
+def _safe_output_path(output_root: Path, output: Path) -> Path:
+    root = _validate_root(output_root, "Catalog output root")
+    raw_root = output_root.absolute()
+    candidate = output.absolute() if output.is_absolute() else raw_root / output
+    try:
+        relative = candidate.relative_to(raw_root)
+    except ValueError as exc:
+        raise ValueError("Catalog output must stay inside the output root.") from exc
+    return _safe_relative_path(root, relative.as_posix())
+
+
+def _reject_symlinked_ancestors(path: Path) -> None:
+    current = path.absolute()
+    while current != current.parent:
+        if current.is_symlink():
+            raise ValueError(f"Catalog output contains a symlink: {path}")
+        current = current.parent
+
+
 def sha256_file(path: Path) -> str:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"Expected a regular file: {path}")
@@ -32,18 +73,19 @@ def load_catalog(path: Path) -> ContractCatalog:
 
 
 def _catalog_paths(builder_root: Path) -> tuple[str, ...]:
-    paths = list(MANAGED_EXACT_PATHS)
+    paths: list[str] = []
+    for relative in MANAGED_EXACT_PATHS:
+        _safe_relative_path(builder_root, relative)
+        paths.append(relative)
     for tree_root in MANAGED_TREE_ROOTS:
-        directory = builder_root / tree_root
-        if directory.is_symlink():
-            raise ValueError(f"Managed tree root must not be a symlink: {tree_root}")
+        directory = _safe_relative_path(builder_root, tree_root)
         if not directory.is_dir():
             raise ValueError(f"Managed tree root is missing: {tree_root}")
-        paths.extend(
-            path.relative_to(builder_root).as_posix()
-            for path in directory.rglob("*")
-            if _is_managed_tree_file(path)
-        )
+        for path in sorted(directory.rglob("*")):
+            relative = path.relative_to(builder_root).as_posix()
+            _safe_relative_path(builder_root, relative)
+            if _is_managed_tree_file(path):
+                paths.append(relative)
     return tuple(sorted(set(paths)))
 
 
@@ -81,9 +123,7 @@ def build_catalog(
     revision: str,
     source_ref: str | None = None,
 ) -> ContractCatalog:
-    root = builder_root.resolve()
-    if builder_root.is_symlink() or not root.is_dir():
-        raise ValueError("Builder root must be a regular directory.")
+    root = _validate_root(builder_root, "Builder root")
     files: dict[str, ManagedFile] = {}
     for relative in _catalog_paths(root):
         path = root / relative
@@ -113,8 +153,14 @@ def build_catalog(
     )
 
 
-def write_catalog(path: Path, catalog: ContractCatalog) -> None:
-    if path.is_symlink():
-        raise ValueError(f"Catalog output must not be a symlink: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(catalog.to_json(), encoding="utf-8")
+def write_catalog(path: Path, catalog: ContractCatalog, *, output_root: Path | None = None) -> None:
+    if output_root is not None:
+        output = _safe_output_path(output_root, path)
+    else:
+        output = path.absolute()
+        _reject_symlinked_ancestors(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _reject_symlinked_ancestors(output)
+    if output.is_symlink():
+        raise ValueError(f"Catalog output must not be a symlink: {output}")
+    output.write_text(catalog.to_json(), encoding="utf-8")

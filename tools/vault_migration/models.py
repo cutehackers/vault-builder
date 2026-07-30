@@ -321,10 +321,50 @@ def _validate_actions(value: object) -> tuple[MigrationAction, ...]:
     return tuple(MigrationAction.from_dict(item) for item in value)
 
 
+class _FrozenDict(dict[str, object]):
+    """A JSON mapping that stays immutable after model construction."""
+
+    def __init__(self, values: Mapping[str, object]) -> None:
+        dict.__init__(self, values)
+
+    @staticmethod
+    def _immutable(*_args: object, **_kwargs: object) -> None:
+        raise TypeError("Migration model data is immutable.")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __ior__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+
+
+def _freeze_json(value: object) -> object:
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("authority issue object keys must be strings.")
+        return _FrozenDict({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    raise ValueError("authority issues must contain JSON-compatible values.")
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
 def _validate_authority_issues(value: object) -> tuple[dict[str, object], ...]:
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise ValueError("authority_issues must be a list of objects.")
-    return tuple(dict(item) for item in value)
+    return tuple(_freeze_json(item) for item in value)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -363,7 +403,7 @@ class MigrationPlan:
     def to_dict(self) -> dict[str, object]:
         return {
             "actions": [action.to_dict() for action in self.actions],
-            "authority_issues": [dict(issue) for issue in self.authority_issues],
+            "authority_issues": [_thaw_json(issue) for issue in self.authority_issues],
             "builder_revision": self.builder_revision,
             "current_contract_version": self.current_contract_version,
             "migration_id": self.migration_id,
