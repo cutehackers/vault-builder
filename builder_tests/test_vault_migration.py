@@ -111,6 +111,48 @@ class ContractCatalogTest(unittest.TestCase):
             MigrationPlan.from_json(plan.to_json()),
         )
 
+    def test_plan_rejects_non_finite_authority_issue_floats(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaisesRegex(ValueError, "finite"):
+                MigrationPlan(
+                    schema_version=1,
+                    migration_id="0123456789abcdef",
+                    current_contract_version=None,
+                    target_contract_version=1,
+                    builder_revision="test",
+                    target_fingerprint="c" * 64,
+                    actions=(),
+                    authority_issues=({"score": value},),
+                )
+            with self.assertRaisesRegex(ValueError, "finite"):
+                MigrationPlan.from_dict(
+                    {
+                        "schema_version": 1,
+                        "migration_id": "0123456789abcdef",
+                        "current_contract_version": None,
+                        "target_contract_version": 1,
+                        "builder_revision": "test",
+                        "target_fingerprint": "c" * 64,
+                        "actions": [],
+                        "authority_issues": [{"score": value}],
+                    }
+                )
+
+    def test_plan_round_trips_finite_authority_issue_floats(self):
+        plan = MigrationPlan(
+            schema_version=1,
+            migration_id="0123456789abcdef",
+            current_contract_version=None,
+            target_contract_version=1,
+            builder_revision="test",
+            target_fingerprint="c" * 64,
+            actions=(),
+            authority_issues=({"score": 1.25},),
+        )
+
+        self.assertEqual(plan, MigrationPlan.from_json(plan.to_json()))
+        self.assertIn('"score": 1.25', plan.to_json())
+
     def test_parse_boundaries_reject_representative_invalid_nested_values(self):
         with self.assertRaisesRegex(ValueError, "path"):
             ManagedFile.from_dict(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -37,7 +38,7 @@ MigrationActionName = Literal[
 
 
 def _canonical_json(value: object) -> str:
-    return json.dumps(value, indent=2, sort_keys=True) + "\n"
+    return json.dumps(value, allow_nan=False, indent=2, sort_keys=True) + "\n"
 
 
 def _require_exact_keys(value: object, keys: frozenset[str], name: str) -> dict[str, object]:
@@ -348,6 +349,8 @@ def _freeze_json(value: object) -> object:
         return _FrozenDict({key: _freeze_json(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("authority issue floats must be finite.")
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     raise ValueError("authority issues must contain JSON-compatible values.")
