@@ -91,6 +91,13 @@ def _has_stenc_bundle(root: Path) -> bool:
     )
 
 
+def _has_builder_creation_tools(root: Path) -> bool:
+    return (root / "init-vault.sh").is_file() and (root / "scripts" / "bootstrap.sh").is_file()
+
+
+BUILDER_CREATION_TOOLS_AVAILABLE = _has_builder_creation_tools(Path(__file__).resolve().parents[1])
+
+
 def _frontmatter(title: str, page_type: str = "concept") -> dict:
     return {
         "title": title,
@@ -1835,6 +1842,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "index.md").write_text(original_index)
             (root / "wiki" / "log.md").write_text(original_log)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_creates_usable_environment(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1914,6 +1922,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("wiki_publish_batch", mcp_result.stdout)
             self.assertEqual(0, stenc_optional_test_result.returncode, stenc_optional_test_result.stdout + stenc_optional_test_result.stderr)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_uses_vault_as_default_target_directory(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1938,6 +1947,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((tmp / "wiki").exists())
             self.assertIn(f"cd {resolved_target}", init_result.stdout)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_can_include_stenc_when_requested(self):
         root = Path(__file__).resolve().parents[1]
         if not _has_stenc_bundle(root):
@@ -1958,6 +1968,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertTrue((target / "tools" / "stenc" / "setup-project.js").exists())
             self.assertTrue((target / "tools" / "stenc" / "check-rendered-pages.js").exists())
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_with_stenc_fails_when_bundle_is_unavailable(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1983,6 +1994,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertNotEqual(0, opt_in_result.returncode, opt_in_result.stdout + opt_in_result.stderr)
             self.assertIn("Optional Stenc assets are not available", opt_in_result.stderr)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_script_is_valid_bash(self):
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
@@ -1995,6 +2007,7 @@ class WikiToolCliTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_script_initializes_from_archive_url(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2036,6 +2049,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "tools" / "stenc").exists())
             self.assertIn("Ready:", bootstrap_result.stdout)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_skips_python_below_3_10(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2080,6 +2094,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
             self.assertTrue((target / ".vault-builder" / "manifest.json").exists())
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_fails_when_no_python_3_10_or_newer_is_available(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2109,6 +2124,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Python 3.10 or newer", result.stderr)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_script_uses_vault_as_default_target_directory(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2151,6 +2167,7 @@ PY
             self.assertFalse((tmp / "llm-wiki").exists())
             self.assertIn("cd vault", bootstrap_result.stdout)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_script_can_include_stenc_from_archive_url(self):
         root = Path(__file__).resolve().parents[1]
         if not _has_stenc_bundle(root):
@@ -2190,6 +2207,7 @@ PY
             self.assertTrue((target / "docs" / "stenc" / "content").exists())
             self.assertTrue((target / "tools" / "stenc" / "validate-stenc-doc.js").exists())
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_full_verify_does_not_leak_bootstrap_env_to_release_gate(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2239,6 +2257,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
             self.assertEqual("", (tmp / "release-gate-env.txt").read_text())
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_generated_release_gate_ignores_parent_git_worktree(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2279,6 +2298,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertIn("No Git worktree detected", gate_result.stdout)
             self.assertNotIn("outside.txt", gate_result.stderr)
 
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_release_gate_does_not_require_stenc_by_default(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:

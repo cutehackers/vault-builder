@@ -36,25 +36,25 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "6c485b18a262bed7fd626bbb61f5c863e12c84c2d98a957104ce344caef3a953"
+      "sha256": "14ca567b44efc5775b2b4b0cee22f2ebbc6fc91c1cd0b33733598f53a47150f1"
     },
     "README-kr.md": {
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "cfffcfe72ab6477c65055f4c9c6c63f4c21d6135257091df80c8e11a56f0795b"
+      "sha256": "9b9bd58522cb88890e30bf32379378dd2da9e993fff038a0a19a720790b8a827"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "28ee529bf90aaf1ab840b4ebe6118b9720acd3c2c3f521601c05bb7f22b4f239"
+      "sha256": "88ca73d680cb2bf03d9d93b73df4bd55d263cfb5f399875f1810a00ddfb3ed70"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "94190f0f1a88b4805415f402966a594c262a71b023af77ca6185b0057bc339fc"
+      "sha256": "3dd9d145e835977419e189a7911e8fe510f332f611a3a03d54f2c94a33962897"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -78,19 +78,19 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "7b0ce76550a674524b0eb51a387bb946f40531de6a3ef83a651733bb04e2a33a"
+      "sha256": "5c69840728e606afc5ab82c0f20b73b8b0ac101fc08e0d3b95c587980f4b2333"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "ff69f5e45aba7763c89dcd8ced60bcf9056b7ee25118d1ed9e3c59a1d7b15081"
+      "sha256": "0bf4419fd1b51bda6b5f6012d64d23af95cb5d5537b5033afc43895323b3df51"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
       "path": "scripts/release_gate.sh",
       "policy": "replace-if-unmodified",
-      "sha256": "854c050548c4956d4e63644f7e9afe29536b4615055d26218f6c0234f5afc3cf"
+      "sha256": "7523a885536fa49cb4a2889570a9d64458c06c189227f85f0014c3ab43c4870c"
     },
     "tests/__init__.py": {
       "mode": "0644",
@@ -102,13 +102,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_quality_baseline.py",
       "policy": "replace-if-unmodified",
-      "sha256": "c6940faad21c38e110c9fdba57e0ce2f5f9b253097628268d131e172dd772a87"
+      "sha256": "2547fa2fe828ec225cf4979ef6ccf72c828dbb6ef5e3085c1ab8301dc6dd1182"
     },
     "tests/test_wiki_tools.py": {
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "2c003e7fe32855e226a82296672149056ba02484e422996454bd41dcdeae34b4"
+      "sha256": "d8b7680d98d6719aa4cfdeb44e1294adb49bb8eae68c6fe0a42f0785ab423ffd"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/authority.py",
       "policy": "replace-if-unmodified",
-      "sha256": "808db45bf789d2328591ee8b36a4e9a3c30e85f366deb2f29a15094ff96bcd01"
+      "sha256": "8ea3d87db6451f88d988b4be996f977bf20679b92405ad1beb32349a3a55beb6"
     },
     "tools/wiki/lib/draft.py": {
       "mode": "0644",

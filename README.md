@@ -27,6 +27,32 @@ After setup, open the vault and work through the bundled agent skills:
 Optional Stenc fixed-format specs and plans are skipped by default. Enable them
 only for vaults that intentionally keep that workflow.
 
+## Existing Vault Migration
+
+One Body Owner, Many References: `vault-builder` owns the generated structure,
+managed-file contract, and migration policy; a Vault owns raw evidence and
+durable wiki knowledge. A new Vault records operational metadata in
+`.vault-builder/manifest.json`; it is not durable knowledge. To audit an
+existing Vault, run the latest builder checkout and inspect its external plan
+before applying it:
+
+```bash
+cd /path/to/vault-builder
+
+python3 tools/vault_migration/cli.py audit \
+  --target /path/to/vault \
+  --plan-out /tmp/vault-migration-plan.json
+
+python3 tools/vault_migration/cli.py apply \
+  --target /path/to/vault \
+  --plan /tmp/vault-migration-plan.json
+```
+
+Exit `0` means no blocking actions, `1` means failure, and `2` means the
+read-only audit succeeded but needs human review (`review-required`). Apply
+never merges wiki knowledge or rebuilds indexes/maps. Vault Graph is a
+read-only consumer and never edits or migrates a Vault.
+
 ## Example Prompts
 
 Send these prompts to your agent as-is. Change only the file names to match

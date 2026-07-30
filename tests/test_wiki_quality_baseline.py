@@ -166,7 +166,13 @@ class WikiQualityBaselineTest(unittest.TestCase):
         for token in [
             "set -euo pipefail",
             "PYTHON_BIN=\"$(choose_python)\"",
-            "$PYTHON_BIN -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py",
+            "wiki_tests=(",
+            "tests/test_wiki_quality_baseline.py",
+            "tests/test_wiki_tools.py",
+            'if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then',
+            "wiki_tests+=(builder_tests/test_vault_migration.py)",
+            '"$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"',
+            'run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"',
             "$PYTHON_BIN tools/wiki/cli.py lint --report",
             "$PYTHON_BIN tools/wiki/cli.py health",
             "$PYTHON_BIN tools/wiki/cli.py maps build --check --report",
@@ -197,6 +203,33 @@ class WikiQualityBaselineTest(unittest.TestCase):
             "docs/usage.md",
         ]:
             self.assertIn("scripts/release_gate.sh", (ROOT / doc).read_text())
+
+    def test_authority_and_migration_docs_use_the_public_contract(self):
+        docs = "\n".join(
+            (ROOT / relative).read_text()
+            for relative in [
+                "AGENTS.md",
+                "README.md",
+                "README-kr.md",
+                "docs/LLM-WIKI.md",
+                "docs/agent/OPERATING-SCHEMA.md",
+                "docs/usage.md",
+            ]
+        )
+        for token in [
+            "One Body Owner",
+            ".vault-builder/manifest.json",
+            "tools/vault_migration/cli.py audit",
+            "tools/vault_migration/cli.py apply",
+            "review-required",
+            "Vault Graph",
+        ]:
+            self.assertIn(token, docs)
+
+    def test_release_gate_runs_builder_tests_only_when_available(self):
+        text = (ROOT / "scripts" / "release_gate.sh").read_text()
+        self.assertIn("builder_tests/test_vault_migration.py", text)
+        self.assertIn('if [ -f "builder_tests/test_vault_migration.py" ]', text)
 
     def test_repo_local_wiki_skill_docs_exist_and_preserve_boundary(self):
         skill_paths = [

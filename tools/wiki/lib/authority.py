@@ -46,7 +46,10 @@ def authority_contract_version(root: Path) -> int | None:
 
 
 def classify_page_role(root: Path, page: Page) -> PageRole:
-    relative = page.path.resolve().relative_to(root.resolve())
+    try:
+        relative = page.path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return PageRole.CANONICAL_KNOWLEDGE
     path = relative.as_posix()
     page_type = (page.frontmatter or {}).get("type")
     if path.startswith("raw/"):

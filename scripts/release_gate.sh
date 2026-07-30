@@ -38,6 +38,13 @@ run() {
   "$@"
 }
 
+run_from_root() {
+  (
+    cd "$ROOT"
+    "$@"
+  )
+}
+
 tracked_diff_fingerprint() {
   git -C "$ROOT" diff --no-ext-diff --binary -- . | shasum -a 256
 }
@@ -115,11 +122,22 @@ else
 fi
 
 gate_root="$(mktemp -d "${TMPDIR:-/tmp}/llm-wiki-release-gate.XXXXXX")"
+wiki_tests=(
+  tests/test_wiki_quality_baseline.py
+  tests/test_wiki_tools.py
+)
+if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then
+  wiki_tests+=(builder_tests/test_vault_migration.py)
+fi
 rsync -a --exclude ".git" --exclude "__pycache__" "$ROOT/" "$gate_root/"
 cd "$gate_root"
 
-run "$PYTHON_BIN -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py" \
-  "$PYTHON_BIN" -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
+run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:2}" \
+  "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"
+if [ "${#wiki_tests[@]}" -gt 2 ]; then
+  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:2}" \
+    run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"
+fi
 run "$PYTHON_BIN tools/wiki/cli.py lint --report" \
   "$PYTHON_BIN" tools/wiki/cli.py lint --report
 run "$PYTHON_BIN tools/wiki/cli.py health" \

@@ -59,6 +59,31 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 ./init-vault.sh --with-stenc ~/my-vault
 ```
 
+## 1.1 기존 Vault를 안전하게 audit/migration하기
+
+One Body Owner, Many References: `vault-builder`는 구조와 migration 계약을
+소유하고, 생성된 Vault는 raw 증거와 durable wiki 지식을 소유합니다.
+`.vault-builder/manifest.json`은 운영 metadata이며 durable knowledge가 아닙니다.
+항상 최신 builder checkout에서 audit하고, 외부 plan을 사람이 검토한 뒤에만 apply합니다.
+
+```bash
+cd /path/to/vault-builder
+
+python3 tools/vault_migration/cli.py audit \
+  --target /path/to/vault \
+  --plan-out /tmp/vault-migration-plan.json
+
+python3 tools/vault_migration/cli.py apply \
+  --target /path/to/vault \
+  --plan /tmp/vault-migration-plan.json
+```
+
+종료 코드 `0`은 차단 항목 없음, `1`은 실패, `2`는 읽기 전용 audit 성공이지만
+`review-required` 항목의 사람 검토가 필요함을 뜻합니다. apply는 wiki 지식을
+자동 병합하거나 `wiki/index.md`/`wiki/maps/`를 재생성하지 않습니다. 실패 후
+복구가 필요하다고 도구가 안내할 때만 명시적으로 `recover`를 실행합니다. Vault
+Graph는 읽기 전용 소비자이며 Vault를 수정하거나 migration하지 않습니다.
+
 ## 2. 단순 사용 모델
 
 LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 세 가지 요청만 기억하면 됩니다.

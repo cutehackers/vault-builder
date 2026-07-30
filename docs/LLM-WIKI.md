@@ -43,6 +43,24 @@ raw source
   -> index, links, log, and reports
 ```
 
+## One Body Owner, Many References
+
+`vault-builder` owns generated structure, versioned managed-file contracts,
+creation, release verification, and explicit migration policy. A generated
+Vault owns raw evidence and durable canonical wiki knowledge.
+
+| Role | Owner | Rule |
+|---|---|---|
+| `raw/` and canonical `wiki/` pages | Generated Vault | One canonical page owns a reusable explanation. |
+| `wiki/sources/` | Generated Vault | Registration/provenance manifests link to knowledge; they do not copy it. |
+| `wiki/index.md`, `wiki/maps/`, `wiki/log.md`, `scratch/reports/` | Generated Vault | Generated views, event references, and audit artifacts are not claim authorities. |
+| `.vault-builder/manifest.json` | Migration tool | Operational metadata, never durable knowledge. |
+
+Creation and migration tooling remains builder-only. Generated Vaults keep
+`scripts/release_gate.sh`, but never contain nested builder creation or
+migration machinery. Vault Graph is a read-only, rebuildable consumer: it may
+read roles and provenance, but never becomes a source of truth or edits a Vault.
+
 ## Topology
 
 The default generated vault is intentionally compact. This repository may also contain optional or historical implementation artifacts, but the core operating contract is the structure below.
@@ -108,7 +126,7 @@ They are not part of the default vault topology and are not required for ordinar
 | `scratch/drafts/` | LLM semantic proposals before validation | No |
 | `scratch/reports/` | Operational audit artifacts for ingest, query, lint, audit, and repair work | No |
 | `scratch/review/` | Pending human-judgment items | No |
-| `wiki/` | Compiled, linked, provenance-backed knowledge | Yes |
+| `wiki/` | Canonical compiled knowledge; source pages are registration manifests and maps/indexes are generated views | Yes |
 | `tools/wiki/` | Deterministic validation, mutation gates, workflow checkpoints, MCP wrappers, maps, and metrics tooling | Yes |
 | `.agents/skills/` | Repo-local workflow guides for ingest, update, and query work | Yes |
 | `docs/` | Human and agent-facing operating documentation; `docs/LLM-WIKI.md` is the architecture source | Yes |
@@ -116,6 +134,13 @@ They are not part of the default vault topology and are not required for ordinar
 | `tests/` | Deterministic regression coverage for the wiki tool contract | Yes |
 | `.github/workflows/` | CI wiring for the same release gate | Yes |
 | `docs/stenc/`, `tools/stenc/` | Optional Stenc docs/tools only when the user explicitly opts in | Optional |
+
+### Existing Vault Migration
+
+Run migration only from the latest builder checkout. `audit` is read-only unless
+an explicit report path is supplied, and its plan must remain outside the target
+Vault. Inspect the plan before `apply`; `review-required` blocks automatic
+changes. Apply never merges canonical wiki knowledge or rebuilds indexes/maps.
 
 ## Non-Negotiable Boundaries
 
@@ -502,10 +527,14 @@ For architecture or wiki-maintenance work, done means:
 scripts/release_gate.sh
 ```
 
-The release gate runs unit tests, lint, health, map freshness, and metrics in a temporary repo copy, then checks the working tree diff for whitespace issues:
+The release gate runs wiki tests, lint, health, map freshness, and metrics in a
+temporary repo copy. When builder migration tests exist, it runs them from the
+builder checkout so their historical Git fixtures remain available, then checks
+the working tree diff for whitespace issues:
 
 ```bash
 python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
+python3 -m unittest builder_tests/test_vault_migration.py # builder checkout only
 python3 tools/wiki/cli.py lint --report
 python3 tools/wiki/cli.py health
 python3 tools/wiki/cli.py maps build --check --report

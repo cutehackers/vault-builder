@@ -34,6 +34,8 @@ raw source
 5. Preserve `<!-- human-locked -->` pages and `<!-- human-locked:start -->` sections.
 6. Update `wiki/index.md` and `wiki/log.md` for meaningful durable changes.
 7. Run deterministic validation before claiming wiki work is complete.
+8. One Body Owner, Many References: canonical pages own explanations; source pages are registration/provenance manifests with links, never copied semantic bodies.
+9. `vault-builder` owns contracts and explicit migration; agents never edit `.vault-builder/manifest.json` or run migration `apply` implicitly.
 
 ## Directory Map
 

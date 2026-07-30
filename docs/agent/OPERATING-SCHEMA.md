@@ -93,19 +93,20 @@ The human should not have to manually maintain backlinks, index entries, page pl
 | `wiki/log.md` | Agent | Append-only | Chronological operation history. |
 | `wiki/inbox.md` | Human/Agent | Mutable | Unprocessed notes, loose ideas, and temporary capture. |
 | `wiki/overview.md` | Agent | Mutable | Executive-level synthesis of the whole wiki. |
-| `wiki/sources/` | Agent | Mutable | One page per ingested source. |
+| `wiki/sources/` | Agent | Mutable | Registration/provenance manifest per source; links to durable pages but never copies semantic bodies. |
 | `wiki/concepts/` | Agent | Mutable | Durable ideas, principles, patterns, terms, and abstractions. |
 | `wiki/entities/` | Agent | Mutable | People, organizations, products, repositories, projects, tools, named artifacts. |
 | `wiki/systems/` | Agent | Mutable | Apps, architectures, services, agents, workflows engines, technical systems. |
 | `wiki/workflows/` | Agent | Mutable | Repeatable processes the human or agent follows. |
 | `wiki/decisions/` | Agent | Mutable | Architectural decisions and knowledge-management decisions. |
-| `wiki/maps/` | Agent | Mutable | Reading paths and navigational maps for topic clusters. |
+| `wiki/maps/` | Agent | Mutable | Generated reading paths and navigational maps, not durable claim authorities. |
 | `scratch/drafts/` | Agent | Ephemeral | LLM-generated semantic drafts before deterministic validation. Never cite as durable source truth. |
 | `scratch/reports/` | Agent | Mutable | Ingest reports, query reports, lint reports, audit reports, proposed patches. |
 | `scratch/review/` | Human/Agent | Ephemeral | Pending human-judgment items for contested claims, merges, and unresolved decisions. |
 | `tools/` | Human/Agent | Mutable with care | Optional helper scripts for search, linting, hashing, validation, and automation. |
 | `tools/wiki/` | Agent | Mutable with care | Deterministic wiki quality tooling: validation, linting, hashing, draft application, workflow checkpoints, maps, metrics, and MCP wrappers. |
 | `AGENTS.md` | Human + Agent | Controlled | Operating schema. Update only with explicit or strongly implied approval. |
+| `.vault-builder/manifest.json` | Migration tool | Operational metadata | Versioned managed-file state, never durable knowledge. |
 
 ### 1.3 Expansion Rule
 
@@ -223,6 +224,15 @@ Every important page should contain:
 - Updated metadata.
 
 Avoid pages that are only useful to an embedding system.
+
+### 2.7 One Body Owner, Many References
+
+Canonical wiki pages own reusable explanations. Source pages contain only
+registration metadata, a short matching summary, and durable-page links;
+indexes/maps and reports are generated or audit views, not claim authorities.
+`vault-builder` owns explicit migration. Agents never edit
+`.vault-builder/manifest.json` or run migration `apply` implicitly; Vault Graph
+is read-only and never edits or migrates the Vault.
 
 ---
 
@@ -415,38 +425,19 @@ raw_sha256: "..."
 
 ## Summary
 
-Short summary of the source in 5-10 lines.
+One sentence exactly matching frontmatter `summary`.
 
-## Key Takeaways
+Source: `raw/...`
 
-- ...
-- ...
+## Registration
 
-## Extracted Concepts
+- Canonical source: `raw/...`
+- SHA-256: `...`
+- Source kind: `markdown`
 
-- [[concepts/concept-name]] — why it matters.
+## Durable Knowledge Links
 
-## Extracted Entities
-
-- [[entities/entity-name]] — role in the source.
-
-## Important Claims
-
-| Claim | Status | Evidence |
-|---|---|---|
-| ... | stated | raw/... |
-
-## Contradictions / Tensions
-
-- None found.
-
-## Pages Updated During Ingest
-
-- [[...]]
-
-## Follow-up Questions
-
-- ...
+- [[concepts/concept-name]]
 ```
 
 ### 5.2 Concept Page

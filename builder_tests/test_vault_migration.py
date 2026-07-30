@@ -54,6 +54,11 @@ def _copy_legacy_fixture(target: Path) -> None:
             contents.extractall(target, filter="data")
         else:
             contents.extractall(target)
+    legacy_catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v0.json")
+    for relative, managed in legacy_catalog.managed_files.items():
+        path = target / relative
+        if path.is_file():
+            path.chmod(int(managed.mode, 8))
     (target / "raw" / "sources" / "input.md").write_text("Legacy input.\n")
     (target / "wiki" / "concepts" / "topic.md").write_text(
         "---\ntitle: Topic\ntype: concept\nstatus: active\ncreated: 2026-07-30\n"

@@ -26,6 +26,30 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 Stenc 고정 포맷 spec/plan은 기본 설치에서 제외됩니다. 해당 workflow를
 의도적으로 유지할 vault에서만 활성화하면 됩니다.
 
+## 기존 Vault 마이그레이션
+
+One Body Owner, Many References: `vault-builder`는 생성 구조, 관리 파일 계약,
+마이그레이션 정책을 소유하고, Vault는 raw 증거와 durable wiki 지식을 소유합니다.
+새 Vault의 `.vault-builder/manifest.json`은 운영 metadata일 뿐 지식이 아닙니다.
+기존 Vault는 최신 builder checkout에서 audit한 뒤 외부 plan을 검토하고 적용합니다.
+
+```bash
+cd /path/to/vault-builder
+
+python3 tools/vault_migration/cli.py audit \
+  --target /path/to/vault \
+  --plan-out /tmp/vault-migration-plan.json
+
+python3 tools/vault_migration/cli.py apply \
+  --target /path/to/vault \
+  --plan /tmp/vault-migration-plan.json
+```
+
+종료 코드 `0`은 차단 항목 없음, `1`은 실패, `2`는 읽기 전용 audit 성공이지만
+`review-required` 검토가 필요함을 뜻합니다. apply는 wiki 지식을 병합하거나
+index/map을 재생성하지 않습니다. Vault Graph는 읽기 전용 소비자이며 Vault를
+수정하거나 migration하지 않습니다.
+
 ## 예제 프롬프트
 
 아래 문장을 agent에게 그대로 요청하면 됩니다. 파일 이름만 현재 vault에 맞게
