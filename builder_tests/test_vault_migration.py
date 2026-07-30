@@ -903,6 +903,8 @@ class MigrationApplyTest(unittest.TestCase):
                             "mode": "0644",
                         }],
                         "manifest": {"existed": False, "sha256": None, "mode": None},
+                        "directory_nonce": "b" * 64,
+                        "directories": [],
                     },
                     indent=2,
                     sort_keys=True,
@@ -925,6 +927,7 @@ class MigrationApplyTest(unittest.TestCase):
             relative = ".agents/skills/wiki-ingest/SKILL.md"
             desired = (ROOT / relative).read_bytes()
             migration_id = "0123456789abcdef"
+            nonce = "b" * 64
             journal_root = target / ".vault-builder" / "recovery" / migration_id
             target_path = target / relative
             target_path.parent.mkdir(parents=True)
@@ -933,7 +936,7 @@ class MigrationApplyTest(unittest.TestCase):
                 relative_directory = directory.relative_to(target).as_posix()
                 (directory / ".vault-builder-migration.json").write_text(
                     json.dumps(
-                        {"migration_id": migration_id, "path": relative_directory, "schema_version": 1},
+                        {"migration_id": migration_id, "nonce": nonce, "path": relative_directory, "schema_version": 1},
                         sort_keys=True,
                     )
                     + "\n"
@@ -954,10 +957,11 @@ class MigrationApplyTest(unittest.TestCase):
                             "applied_sha256": hashlib.sha256(desired).hexdigest(),
                         }],
                         "manifest": None,
-                        "created_directories": [
-                            ".agents",
-                            ".agents/skills",
-                            ".agents/skills/wiki-ingest",
+                        "directory_nonce": nonce,
+                        "directories": [
+                            {"existed": False, "path": ".agents", "state": "created"},
+                            {"existed": False, "path": ".agents/skills", "state": "created"},
+                            {"existed": False, "path": ".agents/skills/wiki-ingest", "state": "created"},
                         ],
                         "state_directory_existed": False,
                         "recovery_directory_existed": False,
@@ -983,8 +987,12 @@ class MigrationApplyTest(unittest.TestCase):
             journal_root, journal = applying._prepare_journal(resolved_target, checked, actions)
             action = next(item for item in actions if item.path == ".agents/skills/wiki-ingest/SKILL.md")
 
-            def record_created(relative: str) -> None:
-                journal["created_directories"] = sorted({*journal["created_directories"], relative})
+            def record_directory(relative: str, lifecycle: str) -> None:
+                records = journal["directories"]
+                if lifecycle == "intent":
+                    records.append({"existed": False, "path": relative, "state": "intent"})
+                else:
+                    next(item for item in records if item["path"] == relative)["state"] = "created"
                 applying._write_journal_state(journal_root, journal, "applying")
 
             applying._ensure_managed_parent(
@@ -992,13 +1000,59 @@ class MigrationApplyTest(unittest.TestCase):
                 resolved_target / action.path,
                 action.path,
                 migration_id=plan.migration_id,
-                record_created=record_created,
+                directory_nonce=journal["directory_nonce"],
+                record_directory=record_directory,
             )
             self.assertTrue((target / ".agents" / ".vault-builder-migration.json").is_file())
 
             recover_migration(target, plan.migration_id)
 
             self.assertEqual(before, _tree_digest(target))
+
+    def test_directory_write_ahead_crash_windows_recover_exactly(self):
+        class StopAfterDirectoryStep(Exception):
+            pass
+
+        for stop_stage in ("before-intent", "after-intent", "after-mkdir", "after-marker"):
+            with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                shutil.rmtree(target / ".agents")
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+                resolved_target = applying._target_root(target)
+                checked, actions = applying._verify_preconditions(ROOT, resolved_target, plan)
+                journal_root, journal = applying._prepare_journal(resolved_target, checked, actions)
+                action = next(item for item in actions if item.path == ".agents/skills/wiki-ingest/SKILL.md")
+
+                def record_directory(relative: str, lifecycle: str) -> None:
+                    records = journal["directories"]
+                    if lifecycle == "intent":
+                        records.append({"existed": False, "path": relative, "state": "intent"})
+                        records.sort(key=lambda item: item["path"])
+                    else:
+                        next(item for item in records if item["path"] == relative)["state"] = "created"
+                    applying._write_journal_state(journal_root, journal, "applying")
+
+                def stop(stage: str, relative: str) -> None:
+                    if stage == stop_stage and relative == ".agents":
+                        raise StopAfterDirectoryStep()
+
+                with mock.patch("tools.vault_migration.applying._directory_step", side_effect=stop):
+                    with self.assertRaises(StopAfterDirectoryStep):
+                        applying._ensure_managed_parent(
+                            resolved_target,
+                            resolved_target / action.path,
+                            action.path,
+                            migration_id=plan.migration_id,
+                            directory_nonce=journal["directory_nonce"],
+                            record_directory=record_directory,
+                        )
+
+                recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before, _tree_digest(target))
+                self.assertFalse((target / ".agents" / ".vault-builder-migration.json").exists())
 
     def test_recovery_refuses_hostile_journals_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1021,6 +1075,8 @@ class MigrationApplyTest(unittest.TestCase):
                             "mode": "0644",
                         }],
                         "manifest": {"existed": False, "sha256": None, "mode": None},
+                        "directory_nonce": "b" * 64,
+                        "directories": [],
                     }
                 )
             )
@@ -1052,6 +1108,8 @@ class MigrationApplyTest(unittest.TestCase):
                     "mode": "0644",
                 }],
                 "manifest": {"existed": False, "sha256": None, "mode": None},
+                "directory_nonce": "b" * 64,
+                "directories": [],
             }
             (journal_root / "journal.json").write_text(json.dumps(journal))
             before = _tree_digest(target)
@@ -1078,7 +1136,9 @@ class MigrationApplyTest(unittest.TestCase):
                 "{"
                 '"schema_version":1,"migration_id":"0123456789abcdef",'
                 '"target_contract_version":1,"state":"applying","state":"complete",'
-                '"entries":[],"manifest":null}'
+                '"entries":[],"manifest":null,"directory_nonce":"'
+                + "b" * 64
+                + '","directories":[]}'
             )
             before = _tree_digest(target)
 
@@ -1103,19 +1163,20 @@ class MigrationApplyTest(unittest.TestCase):
                             "applied_sha256": "a" * 64,
                         }],
                         "manifest": None,
-                        "created_directories": ["scratch/owned-empty"],
+                        "directory_nonce": "b" * 64,
+                        "directories": [{"existed": False, "path": "scratch/owned-empty", "state": "intent"}],
                     }
                 )
             )
             before = _tree_digest(target)
 
-            with self.assertRaisesRegex(ValueError, "created directories"):
+            with self.assertRaisesRegex(ValueError, "directory records"):
                 recover_migration(target, migration_id)
             self.assertEqual(before, _tree_digest(target))
             self.assertTrue(user_directory.is_dir())
 
     def test_recovery_preserves_preexisting_directory_without_a_valid_marker(self):
-        for marker_kind in ("missing", "symlink", "directory", "duplicate-json", "wrong-content"):
+        for marker_kind in ("missing", "symlink", "directory", "duplicate-json", "wrong-content", "wrong-nonce"):
             with self.subTest(marker_kind=marker_kind), tempfile.TemporaryDirectory() as tmpdir:
                 target = Path(tmpdir) / "vault"
                 _copy_legacy_fixture(target)
@@ -1123,6 +1184,7 @@ class MigrationApplyTest(unittest.TestCase):
                 shutil.rmtree(directory)
                 directory.mkdir()
                 migration_id = "0123456789abcdef"
+                nonce = "b" * 64
                 journal_root = target / ".vault-builder" / "recovery" / migration_id
                 (journal_root / "originals").mkdir(parents=True)
                 marker = directory / ".vault-builder-migration.json"
@@ -1133,7 +1195,9 @@ class MigrationApplyTest(unittest.TestCase):
                 elif marker_kind == "duplicate-json":
                     marker.write_text('{"migration_id":"x","migration_id":"y"}')
                 elif marker_kind == "wrong-content":
-                    marker.write_text(json.dumps({"migration_id": migration_id, "path": "wrong", "schema_version": 1}))
+                    marker.write_text(json.dumps({"migration_id": migration_id, "nonce": nonce, "path": "wrong", "schema_version": 1}))
+                elif marker_kind == "wrong-nonce":
+                    marker.write_text(json.dumps({"migration_id": migration_id, "nonce": "a" * 64, "path": ".agents", "schema_version": 1}))
                 (journal_root / "journal.json").write_text(
                     json.dumps(
                         {
@@ -1149,7 +1213,8 @@ class MigrationApplyTest(unittest.TestCase):
                                 "applied_sha256": "a" * 64,
                             }],
                             "manifest": None,
-                            "created_directories": [".agents"],
+                            "directory_nonce": nonce,
+                            "directories": [{"existed": False, "path": ".agents", "state": "created"}],
                         }
                     )
                 )
