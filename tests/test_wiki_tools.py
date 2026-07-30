@@ -14,6 +14,7 @@ from pathlib import Path
 from tools.wiki.lib.draft import apply_batch_draft, apply_draft
 from tools.wiki.lib.authority import (
     PageRole,
+    authority_contract_version,
     classify_page_role,
     validate_authority_contract,
 )
@@ -289,6 +290,40 @@ class WikiAuthorityContractTest(unittest.TestCase):
                 {issue.code for issue in lint_repo(root).issues},
             )
 
+    def test_boolean_contract_version_is_not_treated_as_v1(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root, version=True)
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_non_utf8_manifest_is_reported_by_lint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_bytes(b"\xff")
+
+            self.assertIn(
+                "invalid-vault-builder-manifest",
+                {issue.code for issue in lint_repo(root).issues},
+            )
+
+    def test_non_utf8_manifest_raises_invalid_manifest_value_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_bytes(b"\xff")
+
+            with self.assertRaisesRegex(ValueError, "Vault builder manifest is invalid"):
+                authority_contract_version(root)
+
     def test_validate_page_reports_malformed_manifest(self):
         from tools.wiki import cli
 
@@ -298,6 +333,28 @@ class WikiAuthorityContractTest(unittest.TestCase):
             manifest = root / ".vault-builder" / "manifest.json"
             manifest.parent.mkdir(parents=True, exist_ok=True)
             manifest.write_text("{not-json\n")
+            page_path = root / "wiki" / "index.md"
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    result = cli.main(["validate-page", str(page_path)])
+            finally:
+                cli.ROOT = original_root
+
+            self.assertEqual(1, result)
+            self.assertIn("invalid-vault-builder-manifest", output.getvalue())
+
+    def test_validate_page_reports_non_utf8_manifest(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            manifest = root / ".vault-builder" / "manifest.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_bytes(b"\xff")
             page_path = root / "wiki" / "index.md"
             original_root = cli.ROOT
 

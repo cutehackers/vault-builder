@@ -35,12 +35,12 @@ def authority_contract_version(root: Path) -> int | None:
         raise ValueError("Vault builder manifest must be a regular file.")
     try:
         manifest = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Vault builder manifest is invalid.") from exc
     if not isinstance(manifest, dict):
         raise ValueError("Vault builder manifest must be a JSON object.")
     value = manifest.get("contract_version")
-    if not isinstance(value, int):
+    if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError("Vault builder manifest contract_version must be an integer.")
     return value
 
