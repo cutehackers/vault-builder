@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-30 - Final Race Correction
+**Trigger:** Ultimate whole-branch review after final contract correction.
+**Scope:** Managed and manifest publication preconditions plus atomic audit plan/report output publication.
+**Core Values Protected:** External-writer preservation, exact migration authority, transaction consistency, and independent disjoint output progress.
+**Changes Applied:** Bind staged publication to an immediately revalidated absent or exact no-follow file state, including parsed manifest identity and last migration ID; lock unique audit output parent directories in deterministic device/inode order across preparation, commit, rollback, and cleanup; revalidate every output leaf immediately before replacement.
+**Verification:** Focused final-publication and real-process output races; complete builder, wiki, catalog, acceptance, generated-Vault, release, grammar, compilation, shell, JSON, diff, and status gates.
+
 ## 2026-07-30 - Final Migration Contract Correction
 **Trigger:** Final whole-branch contract review after durability correction.
 **Scope:** Global migration serialization, stale-recovery fencing, resumable directory rollback, managed-file mode identity, and generated-Vault manifest validation.

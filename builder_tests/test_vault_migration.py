@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,76 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
         check=False,
+    )
+
+
+def _run_concurrent_output_writes(
+    first_write: Callable[[Callable[[], None]], None],
+    second_write: Callable[[], None],
+    *,
+    timeout: float,
+) -> tuple[bool, int, int]:
+    ready_read, ready_write = os.pipe()
+    release_read, release_write = os.pipe()
+    started_read, started_write = os.pipe()
+    done_read, done_write = os.pipe()
+
+    first = os.fork()
+    if first == 0:
+        os.close(ready_read)
+        os.close(release_write)
+        os.close(started_read)
+        os.close(started_write)
+        os.close(done_read)
+        os.close(done_write)
+
+        def pause() -> None:
+            os.write(ready_write, b"1")
+            os.read(release_read, 1)
+
+        try:
+            first_write(pause)
+        except BaseException:
+            os._exit(71)
+        os._exit(0)
+
+    os.close(ready_write)
+    os.close(release_read)
+    if os.read(ready_read, 1) != b"1":
+        raise AssertionError("First output writer did not reach its pause.")
+
+    second = os.fork()
+    if second == 0:
+        os.close(ready_read)
+        os.close(release_write)
+        os.close(started_read)
+        os.close(done_read)
+        try:
+            os.write(started_write, b"1")
+            second_write()
+            os.write(done_write, b"1")
+        except BaseException:
+            os._exit(72)
+        os._exit(0)
+
+    os.close(started_write)
+    os.close(done_write)
+    if os.read(started_read, 1) != b"1":
+        raise AssertionError("Second output writer did not start.")
+    second_finished_while_first_paused = bool(
+        select.select([done_read], [], [], timeout)[0]
+    )
+    os.write(release_write, b"1")
+    _, first_status = os.waitpid(first, 0)
+    _, second_status = os.waitpid(second, 0)
+    os.close(ready_read)
+    os.close(release_write)
+    os.close(started_read)
+    os.close(done_read)
+    return (
+        second_finished_while_first_paused,
+        first_status,
+        second_status,
     )
 
 
@@ -1527,6 +1598,63 @@ class MigrationApplyTest(unittest.TestCase):
                 (target / ".vault-builder" / "recovery").exists()
             )
 
+    def test_managed_publication_revalidates_destination_inside_publish_boundary(self):
+        cases = (
+            ("replace", "AGENTS.md"),
+            ("create", ".agents/skills/wiki-ingest/SKILL.md"),
+        )
+        for action_name, relative in cases:
+            with self.subTest(action=action_name), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                if action_name == "create":
+                    shutil.rmtree(target / ".agents")
+                plan = audit_vault(ROOT, target)
+                action = next(item for item in plan.actions if item.path == relative)
+                self.assertEqual(action_name, action.action)
+                destination = (target / relative).resolve(strict=False)
+                external_contents = f"external {action_name} writer\n".encode("utf-8")
+                injected = False
+
+                def publish_external_writer(stage: str, path: Path) -> None:
+                    nonlocal injected
+                    if (
+                        not injected
+                        and stage == "before-destination-validation"
+                        and path == destination
+                    ):
+                        injected = True
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(external_contents)
+                        destination.chmod(0o600)
+
+                with mock.patch.object(
+                    applying,
+                    "_publication_step",
+                    side_effect=publish_external_writer,
+                    create=True,
+                ):
+                    with self.assertRaises(applying.MigrationApplyError):
+                        apply_plan(
+                            ROOT,
+                            target,
+                            plan,
+                            run_gate=lambda _: None,
+                        )
+
+                self.assertTrue(injected)
+                self.assertEqual(external_contents, destination.read_bytes())
+                self.assertEqual("0600", applying._observed_mode(destination))
+                self.assertTrue(
+                    (
+                        target
+                        / ".vault-builder"
+                        / "recovery"
+                        / plan.migration_id
+                        / "journal.json"
+                    ).is_file()
+                )
+
     def test_transactional_gate_failure_preserves_command_exit_and_rollback_result(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2116,6 +2244,70 @@ class MigrationApplyTest(unittest.TestCase):
                 / plan.migration_id
             )
             self.assertTrue((journal_root / "journal.json").is_file())
+
+    def test_candidate_publication_revalidates_manifest_inside_publish_boundary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            (target / "AGENTS.md").chmod(0o600)
+            plan = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                schema_version=current.schema_version,
+                contract_version=current.contract_version,
+                builder_revision=current.builder_revision,
+                generated_at=current.generated_at,
+                managed_files=current.managed_files,
+                last_migration_id="d" * 16,
+            )
+            manifest_path = (
+                target / ".vault-builder" / "manifest.json"
+            ).resolve(strict=False)
+            injected = False
+
+            def publish_later_manifest(stage: str, path: Path) -> None:
+                nonlocal injected
+                if (
+                    not injected
+                    and stage == "before-destination-validation"
+                    and path == manifest_path
+                ):
+                    injected = True
+                    write_manifest(target, later)
+
+            with mock.patch.object(
+                applying,
+                "_publication_step",
+                side_effect=publish_later_manifest,
+                create=True,
+            ):
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertTrue(injected)
+            self.assertEqual(later, load_manifest(target))
+            self.assertTrue(
+                (
+                    target
+                    / ".vault-builder"
+                    / "recovery"
+                    / plan.migration_id
+                    / "journal.json"
+                ).is_file()
+            )
 
     def test_candidate_manifest_write_ahead_crash_windows_recover_exactly(self):
         for stop_stage, exit_code in (("before-publication", 31), ("after-publication", 32)):
@@ -3184,6 +3376,7 @@ class MigrationApplyTest(unittest.TestCase):
                     destination,
                     hashlib.sha256(contents).hexdigest(),
                     "0644",
+                    applying._ABSENT_DESTINATION,
                 )
 
             self.assertEqual(
@@ -3789,6 +3982,44 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
             self.assertFalse(list(root.glob(".*.tmp")))
 
+    def test_output_transaction_revalidates_each_leaf_before_replacement(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "migration-plan.json"
+            report = root / "migration-audit.md"
+            plan.write_text("old plan\n")
+            report.write_text("old report\n")
+            plan.chmod(0o600)
+            report.chmod(0o640)
+
+            def publish_external_report(index: int) -> None:
+                if index == 1:
+                    report.write_text("external report\n")
+                    report.chmod(0o600)
+
+            with self.assertRaisesRegex(ValueError, "changed before publication"):
+                cli._write_outputs(
+                    (
+                        (
+                            plan.resolve(),
+                            "new plan\n",
+                            "Migration plan output",
+                        ),
+                        (
+                            report.resolve(),
+                            "new report\n",
+                            "Audit report",
+                        ),
+                    ),
+                    before_replace=publish_external_report,
+                )
+
+            self.assertEqual("old plan\n", plan.read_text())
+            self.assertEqual("external report\n", report.read_text())
+            self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
+            self.assertEqual("0600", f"{report.stat().st_mode & 0o7777:04o}")
+            self.assertFalse(list(root.glob(".*.tmp")))
+
     def test_output_transaction_restores_replaced_outputs_when_either_commit_parent_fsync_fails(self):
         for failing_call in (1, 2):
             with self.subTest(failing_call=failing_call), tempfile.TemporaryDirectory() as tmpdir:
@@ -3820,6 +4051,167 @@ class VaultMigrationCliTest(unittest.TestCase):
                 self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
                 self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
                 self.assertFalse(list(root.glob(".*.tmp")))
+
+    def test_concurrent_writers_cannot_publish_a_mixed_output_pair(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "plans" / "migration-plan.json"
+            report = root / "reports" / "migration-audit.md"
+            plan.parent.mkdir()
+            report.parent.mkdir()
+
+            def first_write(pause: Callable[[], None]) -> None:
+                cli._write_outputs(
+                    (
+                        (plan.resolve(), "first plan\n", "Migration plan output"),
+                        (report.resolve(), "first report\n", "Audit report"),
+                    ),
+                    before_replace=lambda index: pause() if index == 1 else None,
+                )
+
+            def second_write() -> None:
+                cli._write_outputs(
+                    (
+                        (report.resolve(), "second report\n", "Audit report"),
+                        (plan.resolve(), "second plan\n", "Migration plan output"),
+                    )
+                )
+
+            (
+                second_finished_while_first_paused,
+                first_status,
+                second_status,
+            ) = _run_concurrent_output_writes(
+                first_write,
+                second_write,
+                timeout=1.0,
+            )
+
+            self.assertTrue(os.WIFEXITED(first_status))
+            self.assertEqual(0, os.WEXITSTATUS(first_status))
+            self.assertTrue(os.WIFEXITED(second_status))
+            self.assertEqual(0, os.WEXITSTATUS(second_status))
+            self.assertFalse(second_finished_while_first_paused)
+            self.assertEqual("second plan\n", plan.read_text())
+            self.assertEqual("second report\n", report.read_text())
+
+    def test_output_parent_locks_use_deterministic_device_inode_order(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            parents = (root / "first", root / "second")
+            for parent in parents:
+                parent.mkdir()
+            identities = {
+                parent: (parent.stat().st_dev, parent.stat().st_ino)
+                for parent in parents
+            }
+            paths = tuple(
+                parent / "output.json"
+                for parent in sorted(
+                    parents,
+                    key=identities.__getitem__,
+                    reverse=True,
+                )
+            )
+            lock_order: list[tuple[int, int]] = []
+
+            def record_lock(descriptor: int, operation: int) -> None:
+                if operation == cli.fcntl.LOCK_EX:
+                    state = os.fstat(descriptor)
+                    lock_order.append((state.st_dev, state.st_ino))
+
+            created: list[cli._CreatedDirectory] = []
+            with mock.patch.object(cli.fcntl, "flock", side_effect=record_lock):
+                _output_parents, locked = cli._open_and_lock_output_parents(
+                    tuple(
+                        (path.resolve(), "value\n", "Audit output")
+                        for path in paths
+                    ),
+                    created,
+                )
+                cli._release_output_parents(locked)
+
+            self.assertEqual(sorted(identities.values()), lock_order)
+            self.assertEqual([], created)
+
+    def test_overlapping_single_output_transactions_serialize(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "shared" / "migration-plan.json"
+            output.parent.mkdir()
+
+            def first_write(pause: Callable[[], None]) -> None:
+                cli._write_atomic(
+                    output.resolve(),
+                    "first\n",
+                    "Migration plan output",
+                    before_replace=pause,
+                )
+
+            def second_write() -> None:
+                cli._write_atomic(
+                    output.resolve(),
+                    "second\n",
+                    "Migration plan output",
+                )
+
+            (
+                second_finished_while_first_paused,
+                first_status,
+                second_status,
+            ) = _run_concurrent_output_writes(
+                first_write,
+                second_write,
+                timeout=1.0,
+            )
+
+            self.assertTrue(os.WIFEXITED(first_status))
+            self.assertEqual(0, os.WEXITSTATUS(first_status))
+            self.assertTrue(os.WIFEXITED(second_status))
+            self.assertEqual(0, os.WEXITSTATUS(second_status))
+            self.assertFalse(second_finished_while_first_paused)
+            self.assertEqual("second\n", output.read_text())
+
+    def test_disjoint_output_directories_can_publish_independently(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            first_output = root / "first" / "migration-plan.json"
+            second_output = root / "second" / "migration-plan.json"
+            first_output.parent.mkdir()
+            second_output.parent.mkdir()
+
+            def first_write(pause: Callable[[], None]) -> None:
+                cli._write_atomic(
+                    first_output.resolve(),
+                    "first\n",
+                    "Migration plan output",
+                    before_replace=pause,
+                )
+
+            def second_write() -> None:
+                cli._write_atomic(
+                    second_output.resolve(),
+                    "second\n",
+                    "Migration plan output",
+                )
+
+            (
+                second_finished_while_first_paused,
+                first_status,
+                second_status,
+            ) = _run_concurrent_output_writes(
+                first_write,
+                second_write,
+                timeout=3.0,
+            )
+
+            self.assertTrue(os.WIFEXITED(first_status))
+            self.assertEqual(0, os.WEXITSTATUS(first_status))
+            self.assertTrue(os.WIFEXITED(second_status))
+            self.assertEqual(0, os.WEXITSTATUS(second_status))
+            self.assertTrue(second_finished_while_first_paused)
+            self.assertEqual("first\n", first_output.read_text())
+            self.assertEqual("second\n", second_output.read_text())
 
     def test_restore_temp_is_cleaned_when_restore_write_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -10,7 +10,7 @@ import secrets
 import shlex
 import stat
 import subprocess
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Literal
 
@@ -62,6 +62,18 @@ _CLEANUP_ARTIFACT_RE = re.compile(
 _ROLLBACK_CLEANUP_ARTIFACT_RE = re.compile(
     r"^\.rollback-cleanup-([0-9a-f]{16})-(?:keep|remove)-recovery-(?:keep|remove)-state$"
 )
+
+
+@dataclass(frozen=True)
+class _ExpectedDestinationState:
+    existed: bool
+    sha256: str | None
+    mode: str | None
+    manifest: VaultManifest | None = None
+    last_migration_id: str | None = None
+
+
+_ABSENT_DESTINATION = _ExpectedDestinationState(False, None, None)
 
 
 class MigrationApplyError(RuntimeError):
@@ -870,6 +882,7 @@ def _stage_prior_manifest_backup(
         destination,
         expected_sha256,
         expected_mode,
+        _ABSENT_DESTINATION,
     )
     _manifest_backup_step("after-backup-publication")
 
@@ -894,12 +907,28 @@ def _publish_candidate_manifest(
     _create_staged_file(journal_root, staged, contents, _MANIFEST_MODE)
     _manifest_step("after-stage")
     _manifest_step("before-publication")
-    _validate_manifest_precondition(target, journal)
+    current, current_contents = _validate_manifest_precondition(target, journal)
+    current_manifest = (
+        None
+        if current_contents is None
+        else VaultManifest.from_json(current_contents.decode("utf-8"))
+    )
     _publish_staged_file(
         staged,
         destination,
         expected_sha256,
         _MANIFEST_MODE,
+        _ExpectedDestinationState(
+            bool(current["existed"]),
+            current["sha256"] if isinstance(current["sha256"], str) else None,
+            current["mode"] if isinstance(current["mode"], str) else None,
+            current_manifest,
+            (
+                current["last_migration_id"]
+                if isinstance(current["last_migration_id"], str)
+                else None
+            ),
+        ),
     )
     _manifest_step("after-publication")
 
@@ -933,6 +962,11 @@ def _replace_from_builder(
         destination,
         str(action.desired_sha256),
         action.desired_mode or "0644",
+        _ExpectedDestinationState(
+            action.action != "create",
+            action.current_sha256,
+            action.current_mode,
+        ),
     )
     if sha256_file(destination) != action.desired_sha256 or _observed_mode(destination) != action.desired_mode:
         raise ValueError(f"Atomic replacement verification failed: {action.path}")
@@ -1222,9 +1256,8 @@ def _publish_staged_file(
     destination: Path,
     expected_sha256: str,
     expected_mode: str,
+    expected_destination: _ExpectedDestinationState,
 ) -> None:
-    if destination.exists() and (destination.is_symlink() or not destination.is_file()):
-        raise ValueError(f"Migration target must be a regular file: {destination}")
     if (
         staged.is_symlink()
         or not staged.is_file()
@@ -1233,10 +1266,110 @@ def _publish_staged_file(
     ):
         raise ValueError(f"Migration staged file is invalid: {staged}")
     source_parent = staged.parent
+    _publication_step("before-destination-validation", destination)
+    _validate_publication_destination(destination, expected_destination)
     os.replace(staged, destination)
     _fsync_directory(destination.parent)
     if source_parent != destination.parent:
         _fsync_directory(source_parent)
+
+
+def _publication_step(_stage: str, _destination: Path) -> None:
+    """Concurrent-change injection seam immediately before final validation."""
+
+
+def _validate_publication_destination(
+    destination: Path,
+    expected: _ExpectedDestinationState,
+) -> None:
+    current = _capture_destination_state(
+        destination,
+        parse_manifest=expected.manifest is not None,
+    )
+    if current != expected:
+        raise ValueError(
+            f"Migration destination changed before publication: {destination}"
+        )
+
+
+def _capture_destination_state(
+    destination: Path,
+    *,
+    parse_manifest: bool = False,
+) -> _ExpectedDestinationState:
+    try:
+        leaf_before = destination.lstat()
+    except FileNotFoundError:
+        return _ABSENT_DESTINATION
+    except OSError as exc:
+        raise ValueError(
+            f"Migration destination is unreadable: {destination}"
+        ) from exc
+    if stat.S_ISLNK(leaf_before.st_mode) or not stat.S_ISREG(leaf_before.st_mode):
+        raise ValueError(
+            f"Migration destination must be a regular file: {destination}"
+        )
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(destination, flags)
+    except OSError as exc:
+        raise ValueError(
+            f"Migration destination is unreadable: {destination}"
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(
+                f"Migration destination must be a regular file: {destination}"
+            )
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        contents = b"".join(chunks)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise ValueError(
+            f"Migration destination is unreadable: {destination}"
+        ) from exc
+    finally:
+        os.close(descriptor)
+    try:
+        leaf_after = destination.lstat()
+    except OSError as exc:
+        raise ValueError(
+            f"Migration destination changed during validation: {destination}"
+        ) from exc
+    if (
+        _snapshot_identity(before) != _snapshot_identity(after)
+        or not stat.S_ISREG(leaf_after.st_mode)
+        or (leaf_after.st_dev, leaf_after.st_ino)
+        != (after.st_dev, after.st_ino)
+    ):
+        raise ValueError(
+            f"Migration destination changed during validation: {destination}"
+        )
+    manifest: VaultManifest | None = None
+    last_migration_id: str | None = None
+    if parse_manifest:
+        try:
+            manifest = VaultManifest.from_json(contents.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError(
+                f"Migration destination manifest is invalid: {destination}"
+            ) from exc
+        last_migration_id = manifest.last_migration_id
+    return _ExpectedDestinationState(
+        True,
+        hashlib.sha256(contents).hexdigest(),
+        f"{after.st_mode & 0o7777:04o}",
+        manifest,
+        last_migration_id,
+    )
 
 
 def _write_original(originals: Path, relative: str, contents: bytes, mode: str) -> None:
@@ -1251,6 +1384,7 @@ def _write_journal_state(journal_root: Path, journal: dict[str, object], state: 
     payload = _canonical_json(journal).encode("utf-8")
     destination = _journal_path(journal_root, "journal.json")
     temporary = _journal_path(journal_root, ".journal.json.next")
+    expected_destination = _capture_destination_state(destination)
     _create_staged_file(
         journal_root,
         temporary,
@@ -1263,6 +1397,7 @@ def _write_journal_state(journal_root: Path, journal: dict[str, object], state: 
         destination,
         hashlib.sha256(payload).hexdigest(),
         "0644",
+        expected_destination,
     )
 
 
@@ -1331,6 +1466,23 @@ def _restore_entry(
     relative = str(entry["path"])
     destination = _safe_target_path(target, relative, reject_leaf_symlink=False)
     if entry["existed"]:
+        prior_destination = _ExpectedDestinationState(
+            True,
+            str(entry["sha256"]),
+            str(entry["mode"]),
+        )
+        applied_destination = _ExpectedDestinationState(
+            True,
+            str(entry["applied_sha256"]),
+            str(entry["applied_mode"]),
+        )
+        current_destination = _capture_destination_state(destination)
+        if current_destination == prior_destination:
+            return
+        if current_destination != applied_destination:
+            raise ValueError(
+                f"Refusing to overwrite an unknown managed recovery file: {relative}"
+            )
         source = _journal_path(originals, relative)
         _require_original(source, str(entry["sha256"]), str(entry["mode"]))
         _ensure_regular_parent(target, destination)
@@ -1347,6 +1499,7 @@ def _restore_entry(
             destination,
             str(entry["sha256"]),
             str(entry["mode"]),
+            applied_destination,
         )
         return
     _delete_transaction_file(destination, entry.get("applied_sha256"))
@@ -1398,6 +1551,17 @@ def _restore_manifest(
     if manifest["existed"]:
         if current_state == "prior":
             return
+        expected_candidate = _capture_destination_state(
+            destination,
+            parse_manifest=True,
+        )
+        if (
+            expected_candidate.sha256 != candidate_sha256
+            or expected_candidate.mode != _MANIFEST_MODE
+        ):
+            raise ValueError(
+                "Refusing to overwrite an unknown Vault builder manifest."
+            )
         source = _journal_path(originals, _MANIFEST_RELATIVE)
         _require_original(source, str(manifest["sha256"]), str(manifest["mode"]))
         _ensure_regular_parent(target, destination)
@@ -1414,6 +1578,7 @@ def _restore_manifest(
             destination,
             str(manifest["sha256"]),
             str(manifest["mode"]),
+            expected_candidate,
         )
         return
     if state is not None:

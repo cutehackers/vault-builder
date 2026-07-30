@@ -14,6 +14,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - supported migrations are POSIX-only
+    fcntl = None  # type: ignore[assignment]
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -73,8 +78,19 @@ class _PreparedOutput:
     label: str
     parent: int
     temporary_name: str
-    prior_bytes: bytes | None
-    prior_mode: int | None
+    prior: "_OutputLeafState"
+    candidate: "_OutputLeafState"
+
+
+@dataclass(frozen=True)
+class _OutputLeafState:
+    contents: bytes | None
+    mode: int | None
+    device: int | None
+    inode: int | None
+
+
+_ABSENT_OUTPUT = _OutputLeafState(None, None, None, None)
 
 
 def _canonical_safe_path(path_value: str, label: str) -> Path:
@@ -196,18 +212,30 @@ def _read_regular_file(
         os.close(parent)
 
 
-def _read_output_prior(parent: int, path: Path, label: str) -> tuple[bytes | None, int | None]:
+def _output_snapshot_identity(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _read_output_prior(parent: int, path: Path, label: str) -> _OutputLeafState:
     try:
         try:
             state = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
         except FileNotFoundError:
-            return None, None
+            return _ABSENT_OUTPUT
         if not stat.S_ISREG(state.st_mode):
             raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
         descriptor = os.open(path.name, _READ_FLAGS, dir_fd=parent)
         try:
-            opened = os.fstat(descriptor)
-            if not stat.S_ISREG(opened.st_mode):
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode):
                 raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
             chunks: list[bytes] = []
             while True:
@@ -215,9 +243,24 @@ def _read_output_prior(parent: int, path: Path, label: str) -> tuple[bytes | Non
                 if not chunk:
                     break
                 chunks.append(chunk)
-            return b"".join(chunks), stat.S_IMODE(opened.st_mode)
+            contents = b"".join(chunks)
+            after = os.fstat(descriptor)
         finally:
             os.close(descriptor)
+        leaf = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (
+            _output_snapshot_identity(before)
+            != _output_snapshot_identity(after)
+            or not stat.S_ISREG(leaf.st_mode)
+            or (leaf.st_dev, leaf.st_ino) != (after.st_dev, after.st_ino)
+        ):
+            raise ValueError(f"{label} changed while it was being prepared: {path}")
+        return _OutputLeafState(
+            contents,
+            stat.S_IMODE(after.st_mode),
+            after.st_dev,
+            after.st_ino,
+        )
     except OSError as exc:
         raise ValueError(f"Could not prepare {label.lower()}: {path}") from exc
 
@@ -255,18 +298,32 @@ def _prepare_output(
     path: Path,
     contents: str,
     label: str,
-    created: list[_CreatedDirectory],
+    parent: int,
 ) -> _PreparedOutput:
-    parent = _open_directory(path.parent, create=True, created=created)
     temporary_name: str | None = None
     descriptor: int | None = None
     try:
-        prior_bytes, prior_mode = _read_output_prior(parent, path, label)
+        prior = _read_output_prior(parent, path, label)
         temporary_name, descriptor = _reserve_temporary(parent, path, label)
-        _write_temporary(descriptor, contents.encode("utf-8"), 0o644)
+        payload = contents.encode("utf-8")
+        _write_temporary(descriptor, payload, 0o644)
+        candidate_state = os.fstat(descriptor)
+        candidate = _OutputLeafState(
+            payload,
+            stat.S_IMODE(candidate_state.st_mode),
+            candidate_state.st_dev,
+            candidate_state.st_ino,
+        )
         os.close(descriptor)
         descriptor = None
-        return _PreparedOutput(path, label, parent, temporary_name, prior_bytes, prior_mode)
+        return _PreparedOutput(
+            path,
+            label,
+            parent,
+            temporary_name,
+            prior,
+            candidate,
+        )
     except BaseException:
         if descriptor is not None:
             os.close(descriptor)
@@ -275,7 +332,6 @@ def _prepare_output(
                 os.unlink(temporary_name, dir_fd=parent)
             except FileNotFoundError:
                 pass
-        os.close(parent)
         raise
 
 
@@ -286,7 +342,6 @@ def _discard_prepared(outputs: list[_PreparedOutput]) -> None:
                 os.unlink(output.temporary_name, dir_fd=output.parent)
             except FileNotFoundError:
                 pass
-        os.close(output.parent)
 
 
 def _finish_created_directories(created: list[_CreatedDirectory], *, remove: bool) -> None:
@@ -307,8 +362,21 @@ def _fsync_parent(parent: int) -> None:
     os.fsync(parent)
 
 
+def _validate_output_leaf(
+    output: _PreparedOutput,
+    expected: _OutputLeafState,
+    operation: str,
+) -> None:
+    current = _read_output_prior(output.parent, output.path, output.label)
+    if current != expected:
+        raise ValueError(
+            f"{output.label} changed before {operation}: {output.path}"
+        )
+
+
 def _restore_output(output: _PreparedOutput) -> None:
-    if output.prior_bytes is None:
+    if output.prior.contents is None:
+        _validate_output_leaf(output, output.candidate, "rollback")
         try:
             os.unlink(output.path.name, dir_fd=output.parent)
         except FileNotFoundError:
@@ -320,10 +388,15 @@ def _restore_output(output: _PreparedOutput) -> None:
     try:
         temporary_name, descriptor = _reserve_temporary(output.parent, output.path, output.label)
         try:
-            _write_temporary(descriptor, output.prior_bytes, output.prior_mode or 0o644)
+            _write_temporary(
+                descriptor,
+                output.prior.contents,
+                output.prior.mode or 0o644,
+            )
         finally:
             os.close(descriptor)
             descriptor = None
+        _validate_output_leaf(output, output.candidate, "rollback")
         os.replace(temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
         temporary_name = None
         _fsync_parent(output.parent)
@@ -349,6 +422,55 @@ def _rollback_outputs(committed: list[_PreparedOutput], original: BaseException)
         raise ValueError(f"Output commit failed: {original}; rollback failed: {details}") from failures[0]
 
 
+def _open_and_lock_output_parents(
+    outputs: tuple[tuple[Path, str, str], ...],
+    created: list[_CreatedDirectory],
+) -> tuple[list[int], list[tuple[tuple[int, int], int]]]:
+    if fcntl is None:
+        raise ValueError("Audit output locking requires POSIX advisory locks.")
+    parents_by_identity: dict[tuple[int, int], int] = {}
+    output_parents: list[int] = []
+    locked: list[tuple[tuple[int, int], int]] = []
+    try:
+        for path, _contents, _label in outputs:
+            descriptor = _open_directory(
+                path.parent,
+                create=True,
+                created=created,
+            )
+            state = os.fstat(descriptor)
+            identity = (state.st_dev, state.st_ino)
+            existing = parents_by_identity.get(identity)
+            if existing is not None:
+                os.close(descriptor)
+                descriptor = existing
+            else:
+                parents_by_identity[identity] = descriptor
+            output_parents.append(descriptor)
+        for identity, descriptor in sorted(parents_by_identity.items()):
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            locked.append((identity, descriptor))
+        return output_parents, locked
+    except BaseException:
+        for _identity, descriptor in reversed(locked):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        for descriptor in parents_by_identity.values():
+            os.close(descriptor)
+        raise
+
+
+def _release_output_parents(
+    locked: list[tuple[tuple[int, int], int]],
+) -> None:
+    if fcntl is None:  # pragma: no cover - paired acquisition already rejects
+        return
+    for _identity, descriptor in reversed(locked):
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
 def _write_outputs(
     outputs: tuple[tuple[Path, str, str], ...],
     *,
@@ -358,13 +480,23 @@ def _write_outputs(
     prepared: list[_PreparedOutput] = []
     created: list[_CreatedDirectory] = []
     committed: list[_PreparedOutput] = []
+    locked: list[tuple[tuple[int, int], int]] = []
     successful = False
     try:
-        for path, contents, label in outputs:
-            prepared.append(_prepare_output(path, contents, label, created))
+        output_parents, locked = _open_and_lock_output_parents(
+            outputs,
+            created,
+        )
+        for (path, contents, label), parent in zip(
+            outputs,
+            output_parents,
+            strict=True,
+        ):
+            prepared.append(_prepare_output(path, contents, label, parent))
         for index, output in enumerate(prepared):
             if before_replace is not None:
                 before_replace(index)
+            _validate_output_leaf(output, output.prior, "publication")
             try:
                 os.replace(output.temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
             except OSError as exc:
@@ -379,8 +511,16 @@ def _write_outputs(
             raise
         raise ValueError("Could not write requested outputs.") from exc
     finally:
-        _discard_prepared(prepared)
-        _finish_created_directories(created, remove=not successful)
+        try:
+            try:
+                _discard_prepared(prepared)
+            finally:
+                _finish_created_directories(
+                    created,
+                    remove=not successful,
+                )
+        finally:
+            _release_output_parents(locked)
 
 
 def _write_atomic(
