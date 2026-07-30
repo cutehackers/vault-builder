@@ -174,6 +174,10 @@ manifest의 교체 대상에 넣지 않는다.
 - `scratch/**`
 - 프로젝트별 문서와 사용자 추가 파일
 
+contract version 1의 허용 범위는 해당 catalog에 기록된 finite exact path
+set이다. `tools/wiki/` prefix만으로 새 경로를 허용하지 않으며, catalog 생성과
+Vault-side shared manifest validator는 같은 exact set을 사용한다.
+
 초기 legacy migration을 위해 구현 시점의 기존 `main` 생성 결과를
 contract version 0 baseline catalog로 고정한다. manifest가 없는 Vault라도
 대상 파일의 해시가 version 0의 알려진 해시와 일치하면 수정되지 않은
@@ -204,6 +208,18 @@ python3 tools/vault_migration/cli.py apply \
 `audit`는 plan을 표준 출력에 렌더링한다. `--plan-out`은 선택 사항이며
 target Vault 밖의 경로만 허용한다. `apply`는 audit가 생성한 JSON plan을
 필수 입력으로 받는다.
+
+`--plan-out`과 `--report`는 한 실행에서 함께 사용할 수 없다. 서로 다른 두
+경로를 이식 가능하게 원자 교체한다고 가정하지 않고, 한 audit 실행은
+소비 가능한 산출물 하나만 게시한다. 이 산출물은 create-only다. 완전히
+기록하고 fsync한 임시 파일을 no-overwrite hard link로 게시하며, 최종 경로가
+이미 있으면 덮어쓰지 않고 새 경로를 요구한다. hard stop은 최종 경로를
+없거나 완전한 파일로만 남긴다. 현재 실행이 만든 임시 파일만 정리하며,
+이름 모양만 같은 소유 불명의 sibling은 삭제하지 않는다.
+`scratch/reports/`는 migration 대상 상태가 아니므로 report의 추가나 내용
+변경은 plan action, target fingerprint, migration ID를 바꾸지 않는다.
+migration 관리 파일, canonical wiki, raw, manifest처럼 실제 적용 판단에
+필요한 상태는 계속 fingerprint와 apply 재검증 대상이다.
 
 1. audit가 target topology와 contract version을 확인한다.
 2. 모든 후보 파일의 현재 해시와 알려진 catalog 해시를 비교한다.
@@ -248,7 +264,20 @@ apply 직전에는 audit 이후 파일이 변경되지 않았는지 precondition
 - migration plan은 target 절대 경로 대신 Vault-relative path를 기록한다.
 - apply 대상 원본 bytes와 행동 journal을 target의
   `.vault-builder/recovery/<migration-id>/`에 보존한다.
-- 각 파일은 같은 filesystem의 임시 파일에서 atomic replace한다.
+- 각 기존 파일은 지원되는 POSIX 플랫폼의 native atomic exchange로
+  교체하고, 교체 경계에서 밀려난 파일 identity가 audit 상태와 같은지
+  확인한다. 없는 파일은 no-overwrite hard link로 게시한다. 지원되지 않는
+  플랫폼에서는 안전하지 않은 fallback 대신 apply를 중단한다.
+- source와 destination parent directory descriptor를 validation부터
+  exchange, fsync까지 유지하여 parent symlink 교체가 쓰기 대상을 바꾸지
+  못하게 한다. descriptor는 root부터 각 component를 no-follow로 열며,
+  사용자 경로 전체를 다시 resolve하지 않는다.
+- exchange 직후 중단되어 밀려난 파일이 durable staging에 남으면 recovery가
+  cleanup 전에 그 내용을 판별한다. audit 상태가 아닌 외부 변경이면 원래
+  leaf로 되돌리고 journal을 보존한다.
+- 원래 없던 leaf를 rollback할 때는 검증 후 경로 unlink를 하지 않는다.
+  native no-replace rename으로 journal quarantine에 옮긴 뒤 내용을 확인하여
+  마지막 경계의 외부 변경을 보존한다.
 - 프로세스 오류나 검증 실패 시 journal을 사용해 변경 파일을 복구한다.
 - 성공한 migration은 recovery journal을 제거하고 결과 metadata만
   manifest에 기록한다.

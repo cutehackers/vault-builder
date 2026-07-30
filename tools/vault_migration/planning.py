@@ -28,6 +28,7 @@ _REQUIRED_TOPOLOGY = (
 )
 _LEGACY_BUILDER_COPIES = ("init-vault.sh", "scripts/bootstrap.sh")
 _SYSTEM_SYMLINK_COMPONENTS = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})
+_MIGRATION_METADATA_PATHS = frozenset({".vault-builder/manifest.json"})
 
 
 def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
@@ -75,9 +76,10 @@ def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
 
 
 def target_fingerprint(target_root: Path, paths: Iterable[str]) -> str:
-    """Hash observed target state for sorted Vault-relative paths only."""
+    """Hash migration-relevant target state and supported builder metadata."""
     target = _target_root(target_root)
-    entries = [_fingerprint_entry(target, relative) for relative in sorted(set(paths))]
+    relevant = set(paths) | _MIGRATION_METADATA_PATHS
+    entries = [_fingerprint_entry(target, relative) for relative in sorted(relevant)]
     return hashlib.sha256(_canonical_json(entries).encode("utf-8")).hexdigest()
 
 
@@ -281,6 +283,8 @@ def _role_actions(target: Path, catalog_paths: set[str]) -> dict[str, MigrationA
             action, reason = "preserve", "User-owned wiki knowledge is never rewritten by migration."
         _add_role_action(actions, target, relative, action, reason, catalog_paths)
     for relative in _regular_files_below(target, "scratch"):
+        if relative.startswith("scratch/reports/"):
+            continue
         _add_role_action(actions, target, relative, "preserve", "Scratch and report evidence is preserved byte-for-byte.", catalog_paths)
     for relative in _LEGACY_BUILDER_COPIES:
         state = _file_state(target, relative)

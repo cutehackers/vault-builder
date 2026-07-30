@@ -14,6 +14,53 @@ _UTC_TIMESTAMP_RE = re.compile(
 )
 _MANAGED_MODES = frozenset({"0644", "0755"})
 _MANAGED_POLICIES = frozenset({"replace-if-unmodified"})
+MANAGED_EXACT_PATH_SCOPE = frozenset(
+    {
+        ".agents/skills/wiki-ingest/SKILL.md",
+        ".agents/skills/wiki-query/SKILL.md",
+        ".agents/skills/wiki-update/SKILL.md",
+        ".github/workflows/release-gate.yml",
+        ".gitignore",
+        "AGENTS.md",
+        "README-kr.md",
+        "README.md",
+        "docs/LLM-WIKI.md",
+        "docs/USER_PROMPTS.md",
+        "docs/VAULT_PROMPTS.md",
+        "docs/agent/DRAFTS.md",
+        "docs/agent/OPERATING-SCHEMA.md",
+        "docs/usage.md",
+        "scripts/release_gate.sh",
+        "tests/__init__.py",
+        "tests/test_wiki_quality_baseline.py",
+        "tests/test_wiki_tools.py",
+        "tools/wiki/cli.py",
+        "tools/wiki/lib/.gitkeep",
+        "tools/wiki/lib/authority.py",
+        "tools/wiki/lib/draft.py",
+        "tools/wiki/lib/frontmatter.py",
+        "tools/wiki/lib/hash_source.py",
+        "tools/wiki/lib/ingest.py",
+        "tools/wiki/lib/links.py",
+        "tools/wiki/lib/lint.py",
+        "tools/wiki/lib/maps.py",
+        "tools/wiki/lib/merge.py",
+        "tools/wiki/lib/metrics.py",
+        "tools/wiki/lib/paths.py",
+        "tools/wiki/lib/review.py",
+        "tools/wiki/lib/schema.py",
+        "tools/wiki/lib/source_registry.py",
+        "tools/wiki/lib/vault_manifest.py",
+        "tools/wiki/lib/wiki_update.py",
+        "tools/wiki/lib/workflow.py",
+        "tools/wiki/mcp_server.py",
+        "tools/wiki/metrics-policy.json",
+        "tools/wiki/templates/draft-batch-upsert-pages.json",
+        "tools/wiki/templates/draft-upsert-page.json",
+        "tools/wiki/templates/frontmatter.yaml",
+    }
+)
+MANAGED_TREE_ROOT_SCOPE: tuple[str, ...] = ()
 _REQUIRED_MANIFEST_KEYS = frozenset(
     {
         "builder_revision",
@@ -129,6 +176,11 @@ def _managed_files(value: object) -> dict[str, dict[str, str]]:
     managed: dict[str, dict[str, str]] = {}
     for raw_path, raw_entry in value.items():
         path = _safe_path(raw_path, "managed_files path")
+        if not managed_path_is_in_contract_scope(path):
+            raise ValueError(
+                "Vault builder manifest managed file is outside the "
+                f"contract-managed catalog scope: {path}."
+            )
         if not isinstance(raw_entry, dict):
             raise ValueError(
                 f"Vault builder manifest managed file must be an object: {path}."
@@ -177,6 +229,13 @@ def _managed_files(value: object) -> dict[str, dict[str, str]]:
             "sha256": digest,
         }
     return dict(sorted(managed.items()))
+
+
+def managed_path_is_in_contract_scope(path: str) -> bool:
+    """Return whether a safe path is an exact version-1 catalog member."""
+    return path in MANAGED_EXACT_PATH_SCOPE or path.startswith(
+        MANAGED_TREE_ROOT_SCOPE
+    )
 
 
 def _safe_path(value: object, name: str) -> str:

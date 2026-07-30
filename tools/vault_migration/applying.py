@@ -20,7 +20,11 @@ except ImportError:  # pragma: no cover - supported migrations are POSIX-only
     fcntl = None  # type: ignore[assignment]
 
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
-from .durability import fsync_directory as _strict_fsync_directory
+from .durability import (
+    exchange_directory_entries as _exchange_directory_entries,
+    fsync_directory as _strict_fsync_directory,
+    move_directory_entry_no_replace as _move_directory_entry_no_replace,
+)
 from .managed_paths import MANAGED_PATHS
 from .manifests import create_manifest, load_manifest
 from .models import MigrationAction, MigrationPlan, VaultManifest
@@ -61,6 +65,24 @@ _CLEANUP_ARTIFACT_RE = re.compile(
 )
 _ROLLBACK_CLEANUP_ARTIFACT_RE = re.compile(
     r"^\.rollback-cleanup-([0-9a-f]{16})-(?:keep|remove)-recovery-(?:keep|remove)-state$"
+)
+_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+_DIRECTORY_FSYNC_UNSUPPORTED = frozenset(
+    value
+    for value in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if value is not None
+)
+_SYSTEM_SYMLINK_COMPONENTS = frozenset(
+    {Path("/etc"), Path("/tmp"), Path("/var")}
 )
 
 
@@ -1258,20 +1280,197 @@ def _publish_staged_file(
     expected_mode: str,
     expected_destination: _ExpectedDestinationState,
 ) -> None:
-    if (
-        staged.is_symlink()
-        or not staged.is_file()
-        or sha256_file(staged) != expected_sha256
-        or _observed_mode(staged) != expected_mode
-    ):
-        raise ValueError(f"Migration staged file is invalid: {staged}")
-    source_parent = staged.parent
-    _publication_step("before-destination-validation", destination)
-    _validate_publication_destination(destination, expected_destination)
-    os.replace(staged, destination)
-    _fsync_directory(destination.parent)
-    if source_parent != destination.parent:
-        _fsync_directory(source_parent)
+    source_parent = _open_directory_descriptor(staged.parent)
+    try:
+        destination_parent = _open_directory_descriptor(destination.parent)
+    except BaseException:
+        os.close(source_parent)
+        raise
+    try:
+        staged_state = _capture_destination_state_at(
+            source_parent,
+            staged.name,
+            staged,
+        )
+        if (
+            not staged_state.existed
+            or staged_state.sha256 != expected_sha256
+            or staged_state.mode != expected_mode
+        ):
+            raise ValueError(f"Migration staged file is invalid: {staged}")
+
+        _publication_step("before-destination-validation", destination)
+        current = _capture_destination_state_at(
+            destination_parent,
+            destination.name,
+            destination,
+            parse_manifest=expected_destination.manifest is not None,
+        )
+        if current != expected_destination:
+            raise ValueError(
+                f"Migration destination changed before publication: {destination}"
+            )
+        _publication_step("after-destination-validation", destination)
+
+        if expected_destination.existed:
+            _exchange_directory_entries(
+                source_parent,
+                staged.name,
+                destination_parent,
+                destination.name,
+            )
+            _fsync_publication_parent(destination_parent, destination.parent)
+            if _descriptor_identity(source_parent) != _descriptor_identity(
+                destination_parent
+            ):
+                _fsync_publication_parent(source_parent, staged.parent)
+            _publication_step("after-exchange", destination)
+            displaced = _capture_destination_state_at(
+                source_parent,
+                staged.name,
+                staged,
+                parse_manifest=expected_destination.manifest is not None,
+            )
+            if displaced != expected_destination:
+                try:
+                    _exchange_directory_entries(
+                        source_parent,
+                        staged.name,
+                        destination_parent,
+                        destination.name,
+                    )
+                    _fsync_publication_parent(
+                        destination_parent,
+                        destination.parent,
+                    )
+                    if _descriptor_identity(
+                        source_parent
+                    ) != _descriptor_identity(destination_parent):
+                        _fsync_publication_parent(source_parent, staged.parent)
+                except BaseException as restore_exc:
+                    raise ValueError(
+                        "Migration destination changed at publication boundary "
+                        f"and could not be restored: {destination}"
+                    ) from restore_exc
+                raise ValueError(
+                    "Migration destination changed at publication boundary: "
+                    f"{destination}"
+                )
+        else:
+            try:
+                os.link(
+                    staged.name,
+                    destination.name,
+                    src_dir_fd=source_parent,
+                    dst_dir_fd=destination_parent,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise ValueError(
+                    "Migration destination changed at publication boundary: "
+                    f"{destination}"
+                ) from exc
+            except OSError as exc:
+                raise ValueError(
+                    f"Migration destination could not be published: {destination}"
+                ) from exc
+            _fsync_publication_parent(destination_parent, destination.parent)
+
+        candidate = _capture_destination_state_at(
+            destination_parent,
+            destination.name,
+            destination,
+        )
+        if (
+            candidate.sha256 != expected_sha256
+            or candidate.mode != expected_mode
+        ):
+            raise ValueError(
+                f"Migration candidate verification failed: {destination}"
+            )
+        os.unlink(staged.name, dir_fd=source_parent)
+        _fsync_publication_parent(source_parent, staged.parent)
+    finally:
+        os.close(destination_parent)
+        os.close(source_parent)
+
+
+def _open_directory_descriptor(path: Path) -> int:
+    if not path.is_absolute() or path == Path(path.anchor):
+        raise ValueError(f"Migration parent path is invalid: {path}")
+    raw_path = path
+    path = _expand_system_directory_alias(path)
+    try:
+        descriptor = os.open(path.anchor, _DIRECTORY_OPEN_FLAGS)
+    except OSError as exc:
+        raise ValueError(
+            f"Migration parent path is unreadable: {raw_path}"
+        ) from exc
+    try:
+        current = Path(path.anchor)
+        for part in path.parts[1:]:
+            current = current / part
+            _directory_open_step(current)
+            next_descriptor = os.open(
+                part,
+                _DIRECTORY_OPEN_FLAGS,
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except OSError as exc:
+        os.close(descriptor)
+        raise ValueError(
+            f"Migration parent path contains an unsafe directory: {raw_path}"
+        ) from exc
+
+
+def _expand_system_directory_alias(path: Path) -> Path:
+    parts = path.parts
+    if len(parts) < 2:
+        return path
+    alias = Path(path.anchor) / parts[1]
+    if alias not in _SYSTEM_SYMLINK_COMPONENTS:
+        return path
+    try:
+        state = alias.lstat()
+    except OSError as exc:
+        raise ValueError(f"Migration parent path is unreadable: {path}") from exc
+    if not stat.S_ISLNK(state.st_mode):
+        return path
+    try:
+        target = Path(os.readlink(alias))
+    except OSError as exc:
+        raise ValueError(f"Migration parent path is unreadable: {path}") from exc
+    if not target.is_absolute():
+        target = Path(path.anchor) / target
+    if any(part == ".." for part in target.parts):
+        raise ValueError(f"Migration parent path contains an unsafe directory: {path}")
+    return target.joinpath(*parts[2:])
+
+
+def _directory_open_step(_path: Path) -> None:
+    """Race-injection seam before opening one no-follow directory component."""
+
+
+def _descriptor_identity(descriptor: int) -> tuple[int, int]:
+    state = os.fstat(descriptor)
+    return state.st_dev, state.st_ino
+
+
+def _fsync_publication_parent(descriptor: int, path: Path) -> None:
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        if exc.errno not in _DIRECTORY_FSYNC_UNSUPPORTED:
+            raise
+    try:
+        current = path.stat()
+    except OSError:
+        return
+    if (current.st_dev, current.st_ino) == _descriptor_identity(descriptor):
+        _fsync_directory(path)
 
 
 def _publication_step(_stage: str, _destination: Path) -> None:
@@ -1297,32 +1496,51 @@ def _capture_destination_state(
     *,
     parse_manifest: bool = False,
 ) -> _ExpectedDestinationState:
+    parent = _open_directory_descriptor(destination.parent)
     try:
-        leaf_before = destination.lstat()
+        return _capture_destination_state_at(
+            parent,
+            destination.name,
+            destination,
+            parse_manifest=parse_manifest,
+        )
+    finally:
+        os.close(parent)
+
+
+def _capture_destination_state_at(
+    parent: int,
+    name: str,
+    display_path: Path,
+    *,
+    parse_manifest: bool = False,
+) -> _ExpectedDestinationState:
+    try:
+        leaf_before = os.stat(name, dir_fd=parent, follow_symlinks=False)
     except FileNotFoundError:
         return _ABSENT_DESTINATION
     except OSError as exc:
         raise ValueError(
-            f"Migration destination is unreadable: {destination}"
+            f"Migration destination is unreadable: {display_path}"
         ) from exc
     if stat.S_ISLNK(leaf_before.st_mode) or not stat.S_ISREG(leaf_before.st_mode):
         raise ValueError(
-            f"Migration destination must be a regular file: {destination}"
+            f"Migration destination must be a regular file: {display_path}"
         )
     flags = os.O_RDONLY
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(destination, flags)
+        descriptor = os.open(name, flags, dir_fd=parent)
     except OSError as exc:
         raise ValueError(
-            f"Migration destination is unreadable: {destination}"
+            f"Migration destination is unreadable: {display_path}"
         ) from exc
     try:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode):
             raise ValueError(
-                f"Migration destination must be a regular file: {destination}"
+                f"Migration destination must be a regular file: {display_path}"
             )
         chunks: list[bytes] = []
         while True:
@@ -1334,15 +1552,15 @@ def _capture_destination_state(
         after = os.fstat(descriptor)
     except OSError as exc:
         raise ValueError(
-            f"Migration destination is unreadable: {destination}"
+            f"Migration destination is unreadable: {display_path}"
         ) from exc
     finally:
         os.close(descriptor)
     try:
-        leaf_after = destination.lstat()
+        leaf_after = os.stat(name, dir_fd=parent, follow_symlinks=False)
     except OSError as exc:
         raise ValueError(
-            f"Migration destination changed during validation: {destination}"
+            f"Migration destination changed during validation: {display_path}"
         ) from exc
     if (
         _snapshot_identity(before) != _snapshot_identity(after)
@@ -1351,7 +1569,7 @@ def _capture_destination_state(
         != (after.st_dev, after.st_ino)
     ):
         raise ValueError(
-            f"Migration destination changed during validation: {destination}"
+            f"Migration destination changed during validation: {display_path}"
         )
     manifest: VaultManifest | None = None
     last_migration_id: str | None = None
@@ -1360,7 +1578,7 @@ def _capture_destination_state(
             manifest = VaultManifest.from_json(contents.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
             raise ValueError(
-                f"Migration destination manifest is invalid: {destination}"
+                f"Migration destination manifest is invalid: {display_path}"
             ) from exc
         last_migration_id = manifest.last_migration_id
     return _ExpectedDestinationState(
@@ -1407,6 +1625,12 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
     manifest = _journal_manifest(journal, allow_none=True)
     _validate_recovery_manifest_fence(target, journal)
     _validate_original_tree(journal_root, entries, manifest)
+    _reconcile_interrupted_publications(
+        target,
+        journal_root,
+        entries,
+        manifest,
+    )
     _validate_entry_recovery_targets(target, entries)
     if manifest is not None:
         manifest_state = _validate_manifest_recovery_target(target, manifest)
@@ -1457,6 +1681,244 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
         raise _RollbackCleanupPending(cleanup_exc) from cleanup_exc
 
 
+def _reconcile_interrupted_publications(
+    target: Path,
+    journal_root: Path,
+    entries: tuple[dict[str, object], ...],
+    manifest: dict[str, object] | None,
+) -> None:
+    for entry in entries:
+        _reconcile_managed_apply_publication(
+            target,
+            journal_root,
+            entry,
+        )
+    if manifest is not None:
+        _reconcile_manifest_apply_publication(
+            target,
+            journal_root,
+            manifest,
+        )
+    for entry in entries:
+        _reconcile_managed_rollback_publication(
+            target,
+            journal_root,
+            entry,
+        )
+    if manifest is not None:
+        _reconcile_manifest_rollback_publication(
+            target,
+            journal_root,
+            manifest,
+        )
+
+
+def _reconcile_managed_apply_publication(
+    target: Path,
+    journal_root: Path,
+    entry: dict[str, object],
+) -> None:
+    relative = str(entry["path"])
+    staged = _journal_path(journal_root, f"staged/managed/{relative}")
+    staged_state = _capture_optional_journal_stage(staged)
+    if not staged_state.existed:
+        return
+    applied = _ExpectedDestinationState(
+        True,
+        str(entry["applied_sha256"]),
+        str(entry["applied_mode"]),
+    )
+    if staged_state == applied:
+        return
+    destination = _safe_target_path(
+        target,
+        relative,
+        reject_leaf_symlink=False,
+    )
+    current = _capture_destination_state(destination)
+    if current != applied:
+        raise ValueError(
+            f"Interrupted publication retained unknown managed content: {relative}"
+        )
+    _publish_captured_stage(staged, destination, staged_state, applied)
+    prior = (
+        _ExpectedDestinationState(
+            True,
+            str(entry["sha256"]),
+            str(entry["mode"]),
+        )
+        if entry["existed"]
+        else _ABSENT_DESTINATION
+    )
+    if staged_state != prior:
+        raise ValueError(
+            f"Interrupted publication restored external managed content: {relative}"
+        )
+
+
+def _reconcile_manifest_apply_publication(
+    target: Path,
+    journal_root: Path,
+    manifest: dict[str, object],
+) -> None:
+    staged = _journal_path(journal_root, "staged/candidate-manifest.json")
+    staged_state = _capture_optional_journal_stage(staged)
+    if not staged_state.existed:
+        return
+    candidate = _ExpectedDestinationState(
+        True,
+        str(manifest["candidate_sha256"]),
+        _MANIFEST_MODE,
+    )
+    if staged_state == candidate:
+        return
+    destination = _safe_target_path(
+        target,
+        _MANIFEST_RELATIVE,
+        reject_leaf_symlink=False,
+    )
+    current = _capture_destination_state(destination)
+    if current != candidate:
+        raise ValueError(
+            "Interrupted publication retained unknown manifest content."
+        )
+    _publish_captured_stage(staged, destination, staged_state, candidate)
+    prior = (
+        _ExpectedDestinationState(
+            True,
+            str(manifest["sha256"]),
+            str(manifest["mode"]),
+        )
+        if manifest["existed"]
+        else _ABSENT_DESTINATION
+    )
+    if staged_state != prior:
+        raise ValueError(
+            "Interrupted publication restored external manifest content."
+        )
+
+
+def _reconcile_managed_rollback_publication(
+    target: Path,
+    journal_root: Path,
+    entry: dict[str, object],
+) -> None:
+    if not entry["existed"]:
+        return
+    relative = str(entry["path"])
+    staged = _journal_path(
+        journal_root,
+        f"staged/rollback-managed/{relative}",
+    )
+    staged_state = _capture_optional_journal_stage(staged)
+    if not staged_state.existed:
+        return
+    prior = _ExpectedDestinationState(
+        True,
+        str(entry["sha256"]),
+        str(entry["mode"]),
+    )
+    if staged_state == prior:
+        return
+    applied = _ExpectedDestinationState(
+        True,
+        str(entry["applied_sha256"]),
+        str(entry["applied_mode"]),
+    )
+    if staged_state == applied:
+        return
+    destination = _safe_target_path(
+        target,
+        relative,
+        reject_leaf_symlink=False,
+    )
+    current = _capture_destination_state(destination)
+    if current != prior:
+        raise ValueError(
+            f"Interrupted rollback retained unknown managed content: {relative}"
+        )
+    _publish_captured_stage(staged, destination, staged_state, prior)
+    raise ValueError(
+        f"Interrupted rollback restored external managed content: {relative}"
+    )
+
+
+def _reconcile_manifest_rollback_publication(
+    target: Path,
+    journal_root: Path,
+    manifest: dict[str, object],
+) -> None:
+    if not manifest["existed"]:
+        return
+    staged = _journal_path(journal_root, "staged/rollback-manifest.json")
+    staged_state = _capture_optional_journal_stage(staged)
+    if not staged_state.existed:
+        return
+    prior = _ExpectedDestinationState(
+        True,
+        str(manifest["sha256"]),
+        str(manifest["mode"]),
+    )
+    if staged_state == prior:
+        return
+    candidate = _ExpectedDestinationState(
+        True,
+        str(manifest["candidate_sha256"]),
+        _MANIFEST_MODE,
+    )
+    if staged_state == candidate:
+        return
+    destination = _safe_target_path(
+        target,
+        _MANIFEST_RELATIVE,
+        reject_leaf_symlink=False,
+    )
+    current = _capture_destination_state(destination)
+    if current != prior:
+        raise ValueError(
+            "Interrupted rollback retained unknown manifest content."
+        )
+    _publish_captured_stage(staged, destination, staged_state, prior)
+    raise ValueError(
+        "Interrupted rollback restored external manifest content."
+    )
+
+
+def _publish_captured_stage(
+    staged: Path,
+    destination: Path,
+    staged_state: _ExpectedDestinationState,
+    expected_destination: _ExpectedDestinationState,
+) -> None:
+    if (
+        not staged_state.existed
+        or staged_state.sha256 is None
+        or staged_state.mode is None
+    ):
+        raise ValueError(f"Interrupted publication stage is invalid: {staged}")
+    _publish_staged_file(
+        staged,
+        destination,
+        staged_state.sha256,
+        staged_state.mode,
+        expected_destination,
+    )
+
+
+def _capture_optional_journal_stage(
+    staged: Path,
+) -> _ExpectedDestinationState:
+    try:
+        staged.lstat()
+    except FileNotFoundError:
+        return _ABSENT_DESTINATION
+    except OSError as exc:
+        raise ValueError(
+            f"Interrupted publication stage is unreadable: {staged}"
+        ) from exc
+    return _capture_destination_state(staged)
+
+
 def _restore_entry(
     target: Path,
     journal_root: Path,
@@ -1502,7 +1964,19 @@ def _restore_entry(
             applied_destination,
         )
         return
-    _delete_transaction_file(destination, entry.get("applied_sha256"))
+    _delete_transaction_file(
+        destination,
+        journal_root,
+        _journal_path(
+            journal_root,
+            f"staged/deleted-managed/{relative}",
+        ),
+        _ExpectedDestinationState(
+            True,
+            str(entry["applied_sha256"]),
+            str(entry["applied_mode"]),
+        ),
+    )
 
 
 def _validate_entry_recovery_targets(
@@ -1581,8 +2055,19 @@ def _restore_manifest(
             expected_candidate,
         )
         return
-    if state is not None:
-        _delete_transaction_file(destination, candidate_sha256)
+    _delete_transaction_file(
+        destination,
+        journal_root,
+        _journal_path(
+            journal_root,
+            "staged/deleted-manifest.json",
+        ),
+        _ExpectedDestinationState(
+            True,
+            candidate_sha256,
+            _MANIFEST_MODE,
+        ),
+    )
 
 
 def _validate_manifest_recovery_target(target: Path, manifest: dict[str, object]) -> str:
@@ -1616,17 +2101,173 @@ def _validate_manifest_recovery_target(target: Path, manifest: dict[str, object]
     return "absent"
 
 
-def _delete_transaction_file(path: Path, applied_sha256: object) -> None:
+def _delete_transaction_file(
+    path: Path,
+    journal_root: Path,
+    quarantine: Path,
+    expected: _ExpectedDestinationState,
+) -> None:
+    if (
+        not expected.existed
+        or expected.sha256 is None
+        or expected.mode is None
+    ):
+        raise ValueError(f"Recovery deletion expectation is invalid: {path}")
     try:
-        state = path.lstat()
+        path.lstat()
+        destination_exists = True
     except FileNotFoundError:
+        destination_exists = False
+    try:
+        quarantine.lstat()
+        quarantine_exists = True
+    except FileNotFoundError:
+        quarantine_exists = False
+    if not destination_exists and not quarantine_exists:
         return
-    if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
-        raise ValueError(f"Refusing to delete unsafe recovery path: {path}")
-    if not isinstance(applied_sha256, str) or not _HEX_RE.fullmatch(applied_sha256) or sha256_file(path) != applied_sha256:
-        raise ValueError(f"Refusing to delete a non-transaction recovery file: {path}")
-    path.unlink()
-    _fsync_directory(path.parent)
+    _ensure_regular_parent(journal_root, quarantine)
+    if quarantine_exists and not destination_exists:
+        quarantined = _capture_destination_state(quarantine)
+        if quarantined == expected:
+            return
+        try:
+            _restore_quarantined_content(path, quarantine)
+        except BaseException as exc:
+            raise ValueError(
+                f"Rollback retained external quarantined content: {quarantine}"
+            ) from exc
+        raise ValueError(
+            f"Rollback restored external quarantined content: {path}"
+        )
+    source_parent = _open_directory_descriptor(path.parent)
+    try:
+        quarantine_parent = _open_directory_descriptor(quarantine.parent)
+    except BaseException:
+        os.close(source_parent)
+        raise
+    try:
+        quarantined = _capture_destination_state_at(
+            quarantine_parent,
+            quarantine.name,
+            quarantine,
+        )
+        current = _capture_destination_state_at(
+            source_parent,
+            path.name,
+            path,
+        )
+        if quarantined.existed:
+            if quarantined == expected and not current.existed:
+                return
+            if quarantined != expected and not current.existed:
+                _move_directory_entry_no_replace(
+                    quarantine_parent,
+                    quarantine.name,
+                    source_parent,
+                    path.name,
+                )
+                _fsync_publication_parent(source_parent, path.parent)
+                if _descriptor_identity(source_parent) != _descriptor_identity(
+                    quarantine_parent
+                ):
+                    _fsync_publication_parent(
+                        quarantine_parent,
+                        quarantine.parent,
+                    )
+                raise ValueError(
+                    f"Rollback restored external content before deletion: {path}"
+                )
+            raise ValueError(
+                f"Rollback retained unknown quarantined content: {quarantine}"
+            )
+        if not current.existed:
+            return
+        if current != expected:
+            raise ValueError(
+                f"Refusing to delete a non-transaction recovery file: {path}"
+            )
+        _deletion_step(path)
+        _move_directory_entry_no_replace(
+            source_parent,
+            path.name,
+            quarantine_parent,
+            quarantine.name,
+        )
+        _fsync_publication_parent(quarantine_parent, quarantine.parent)
+        if _descriptor_identity(source_parent) != _descriptor_identity(
+            quarantine_parent
+        ):
+            _fsync_publication_parent(source_parent, path.parent)
+        captured = _capture_destination_state_at(
+            quarantine_parent,
+            quarantine.name,
+            quarantine,
+        )
+        if captured == expected:
+            return
+        destination_after = _capture_destination_state_at(
+            source_parent,
+            path.name,
+            path,
+        )
+        if not destination_after.existed:
+            _move_directory_entry_no_replace(
+                quarantine_parent,
+                quarantine.name,
+                source_parent,
+                path.name,
+            )
+            _fsync_publication_parent(source_parent, path.parent)
+            if _descriptor_identity(source_parent) != _descriptor_identity(
+                quarantine_parent
+            ):
+                _fsync_publication_parent(
+                    quarantine_parent,
+                    quarantine.parent,
+                )
+            raise ValueError(
+                f"Rollback restored external content after deletion race: {path}"
+            )
+        raise ValueError(
+            f"Rollback preserved competing content at {path} and {quarantine}"
+        )
+    finally:
+        os.close(quarantine_parent)
+        os.close(source_parent)
+
+
+def _deletion_step(_path: Path) -> None:
+    """Race-injection seam after final rollback deletion validation."""
+
+
+def _restore_quarantined_content(
+    destination: Path,
+    quarantine: Path,
+) -> None:
+    quarantine_parent = _open_directory_descriptor(quarantine.parent)
+    try:
+        destination_parent = _open_directory_descriptor(destination.parent)
+    except BaseException:
+        os.close(quarantine_parent)
+        raise
+    try:
+        _move_directory_entry_no_replace(
+            quarantine_parent,
+            quarantine.name,
+            destination_parent,
+            destination.name,
+        )
+        _fsync_publication_parent(destination_parent, destination.parent)
+        if _descriptor_identity(quarantine_parent) != _descriptor_identity(
+            destination_parent
+        ):
+            _fsync_publication_parent(
+                quarantine_parent,
+                quarantine.parent,
+            )
+    finally:
+        os.close(destination_parent)
+        os.close(quarantine_parent)
 
 
 def _verify_restored(

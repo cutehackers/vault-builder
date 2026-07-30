@@ -229,6 +229,26 @@ def _invalid_v1_manifests() -> dict[str, dict[str, object]]:
 
     mutate("nested-path-mismatch", nested_mismatch)
 
+    for name, unmanaged_path in (
+        ("managed-raw-path", "raw/sources/input.md"),
+        ("managed-canonical-wiki-path", "wiki/concepts/topic.md"),
+        ("managed-report-path", "scratch/reports/audit.md"),
+        ("managed-unknown-tool-path", "tools/wiki/not-in-v1-catalog.py"),
+    ):
+        def unmanaged_scope(
+            value: dict[str, object],
+            *,
+            unmanaged_path: str = unmanaged_path,
+        ) -> None:
+            managed = value["managed_files"]
+            assert isinstance(managed, dict)
+            item = managed.pop("AGENTS.md")
+            assert isinstance(item, dict)
+            item["path"] = unmanaged_path
+            managed[unmanaged_path] = item
+
+        mutate(name, unmanaged_scope)
+
     for name, field, invalid in (
         ("bad-hash", "sha256", "A" * 64),
         ("bad-mode", "mode", "0600"),
@@ -390,6 +410,65 @@ class WikiAuthorityContractTest(unittest.TestCase):
             self.assertEqual(PageRole.SOURCE_MANIFEST, classify_page_role(root, parse_page(source)))
             self.assertEqual(PageRole.GENERATED_VIEW, classify_page_role(root, parse_page(generated)))
             self.assertEqual(PageRole.CANONICAL_KNOWLEDGE, classify_page_role(root, parse_page(canonical)))
+
+    def test_source_directory_precedes_generated_frontmatter_and_reports_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            path = _write_role_page(root, "wiki/sources/input.md", "map")
+            page = parse_page(path)
+
+            self.assertEqual(
+                PageRole.SOURCE_MANIFEST,
+                classify_page_role(root, page),
+            )
+            codes = {
+                issue.code
+                for issue in validate_authority_contract(root, [page])
+            }
+            self.assertIn("source-manifest-type-location-mismatch", codes)
+            self.assertIn("source-manifest-missing-canonical-source", codes)
+
+    def test_source_type_outside_source_directory_is_reported_as_location_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            path = _write_role_page(
+                root,
+                "wiki/concepts/misplaced-source.md",
+                "source",
+            )
+            page = parse_page(path)
+
+            self.assertEqual(
+                PageRole.CANONICAL_KNOWLEDGE,
+                classify_page_role(root, page),
+            )
+            self.assertIn(
+                "source-manifest-type-location-mismatch",
+                {
+                    issue.code
+                    for issue in validate_authority_contract(root, [page])
+                },
+            )
+
+    def test_v1_authority_skips_vault_location_checks_for_explicit_external_page(self):
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as outside_tmpdir,
+        ):
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root)
+            external = Path(outside_tmpdir) / "invalid.md"
+            external.write_text("# Missing Frontmatter\n")
+
+            self.assertEqual(
+                [],
+                validate_authority_contract(root, [parse_page(external)]),
+            )
 
     def test_contract_v1_rejects_semantic_source_page_sections(self):
         with tempfile.TemporaryDirectory() as tmpdir:

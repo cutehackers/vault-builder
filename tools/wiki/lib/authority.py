@@ -51,14 +51,18 @@ def classify_page_role(root: Path, page: Page) -> PageRole:
         return PageRole.RAW_EVIDENCE
     if path.startswith("scratch/reports/"):
         return PageRole.AUDIT_REPORT
-    if path == "wiki/log.md" or page_type == "log":
-        return PageRole.OPERATION_LOG
-    if path == "wiki/index.md" or path.startswith("wiki/maps/") or page_type in {"index", "map"}:
-        return PageRole.GENERATED_VIEW
-    if path.startswith("wiki/sources/") or page_type == "source":
+    if path.startswith("wiki/sources/"):
         return PageRole.SOURCE_MANIFEST
+    if path == "wiki/log.md":
+        return PageRole.OPERATION_LOG
+    if path == "wiki/index.md" or path.startswith("wiki/maps/"):
+        return PageRole.GENERATED_VIEW
     if path.startswith("docs/") or path == "AGENTS.md":
         return PageRole.OPERATING_CONTRACT
+    if page_type == "log":
+        return PageRole.OPERATION_LOG
+    if page_type in {"index", "map"}:
+        return PageRole.GENERATED_VIEW
     return PageRole.CANONICAL_KNOWLEDGE
 
 
@@ -89,11 +93,25 @@ def scan_authority_issues(root: Path, pages: list[Page]) -> list[Issue]:
 
 
 def validate_page_authority(root: Path, page: Page) -> list[Issue]:
-    if classify_page_role(root, page) != PageRole.SOURCE_MANIFEST:
-        return []
-
     frontmatter = page.frontmatter or {}
     issues: list[Issue] = []
+    try:
+        relative = _relative_path(root, page.path)
+    except ValueError:
+        return issues
+    source_location = relative.startswith("wiki/sources/")
+    source_type = frontmatter.get("type") == "source"
+    if source_location != source_type:
+        issues.append(
+            _issue(
+                page,
+                "source-manifest-type-location-mismatch",
+                "Source manifest type and wiki/sources location must agree.",
+            )
+        )
+    if not source_location:
+        return issues
+
     canonical_source = frontmatter.get("canonical_source")
     raw_sha256 = frontmatter.get("raw_sha256")
     if not canonical_source:

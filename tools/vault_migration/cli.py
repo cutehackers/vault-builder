@@ -78,7 +78,6 @@ class _PreparedOutput:
     label: str
     parent: int
     temporary_name: str
-    prior: "_OutputLeafState"
     candidate: "_OutputLeafState"
 
 
@@ -304,6 +303,10 @@ def _prepare_output(
     descriptor: int | None = None
     try:
         prior = _read_output_prior(parent, path, label)
+        if prior != _ABSENT_OUTPUT:
+            raise ValueError(
+                f"{label} already exists; choose a new output path: {path}"
+            )
         temporary_name, descriptor = _reserve_temporary(parent, path, label)
         payload = contents.encode("utf-8")
         _write_temporary(descriptor, payload, 0o644)
@@ -321,7 +324,6 @@ def _prepare_output(
             label,
             parent,
             temporary_name,
-            prior,
             candidate,
         )
     except BaseException:
@@ -372,54 +374,6 @@ def _validate_output_leaf(
         raise ValueError(
             f"{output.label} changed before {operation}: {output.path}"
         )
-
-
-def _restore_output(output: _PreparedOutput) -> None:
-    if output.prior.contents is None:
-        _validate_output_leaf(output, output.candidate, "rollback")
-        try:
-            os.unlink(output.path.name, dir_fd=output.parent)
-        except FileNotFoundError:
-            return
-        _fsync_parent(output.parent)
-        return
-    temporary_name: str | None = None
-    descriptor: int | None = None
-    try:
-        temporary_name, descriptor = _reserve_temporary(output.parent, output.path, output.label)
-        try:
-            _write_temporary(
-                descriptor,
-                output.prior.contents,
-                output.prior.mode or 0o644,
-            )
-        finally:
-            os.close(descriptor)
-            descriptor = None
-        _validate_output_leaf(output, output.candidate, "rollback")
-        os.replace(temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
-        temporary_name = None
-        _fsync_parent(output.parent)
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-        if temporary_name is not None:
-            try:
-                os.unlink(temporary_name, dir_fd=output.parent)
-            except FileNotFoundError:
-                pass
-
-
-def _rollback_outputs(committed: list[_PreparedOutput], original: BaseException) -> None:
-    failures: list[BaseException] = []
-    for output in reversed(committed):
-        try:
-            _restore_output(output)
-        except BaseException as rollback_exc:
-            failures.append(rollback_exc)
-    if failures:
-        details = "; ".join(str(failure) for failure in failures)
-        raise ValueError(f"Output commit failed: {original}; rollback failed: {details}") from failures[0]
 
 
 def _open_and_lock_output_parents(
@@ -476,12 +430,14 @@ def _write_outputs(
     *,
     before_replace: Callable[[int], None] | None = None,
 ) -> None:
-    """Prepare every output, then atomically commit or restore them as a unit."""
+    """Create one complete output without overwriting an existing leaf."""
+    if len(outputs) != 1:
+        raise ValueError("Audit output publication requires exactly one artifact.")
     prepared: list[_PreparedOutput] = []
     created: list[_CreatedDirectory] = []
-    committed: list[_PreparedOutput] = []
     locked: list[tuple[tuple[int, int], int]] = []
     successful = False
+    published = False
     try:
         output_parents, locked = _open_and_lock_output_parents(
             outputs,
@@ -496,17 +452,27 @@ def _write_outputs(
         for index, output in enumerate(prepared):
             if before_replace is not None:
                 before_replace(index)
-            _validate_output_leaf(output, output.prior, "publication")
+            _validate_output_leaf(output, _ABSENT_OUTPUT, "publication")
+            _output_publication_step(output.path)
             try:
-                os.replace(output.temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
+                os.link(
+                    output.temporary_name,
+                    output.path.name,
+                    src_dir_fd=output.parent,
+                    dst_dir_fd=output.parent,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise ValueError(
+                    f"{output.label} changed at publication boundary: {output.path}"
+                ) from exc
             except OSError as exc:
                 raise ValueError(f"Could not write {output.label.lower()}: {output.path}") from exc
-            output.temporary_name = ""
-            committed.append(output)
+            published = True
             _fsync_parent(output.parent)
+            _validate_output_leaf(output, output.candidate, "publication verification")
         successful = True
     except BaseException as exc:
-        _rollback_outputs(committed, exc)
         if isinstance(exc, ValueError):
             raise
         raise ValueError("Could not write requested outputs.") from exc
@@ -517,10 +483,14 @@ def _write_outputs(
             finally:
                 _finish_created_directories(
                     created,
-                    remove=not successful,
+                    remove=not (successful or published),
                 )
         finally:
             _release_output_parents(locked)
+
+
+def _output_publication_step(_path: Path) -> None:
+    """Test seam immediately before the no-overwrite publication boundary."""
 
 
 def _write_atomic(
@@ -590,6 +560,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_audit(args: argparse.Namespace) -> int:
+    if args.plan_out and args.report:
+        raise ValueError(
+            "Audit publishes one output artifact per invocation; choose "
+            "--plan-out or --report."
+        )
     plan = audit_vault(ROOT, Path(args.target))
     target = Path(args.target).resolve()
     plan_output: Path | None = None

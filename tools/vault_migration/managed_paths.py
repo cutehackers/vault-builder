@@ -3,29 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-MANAGED_EXACT_PATHS = (
-    ".agents/skills/wiki-ingest/SKILL.md",
-    ".agents/skills/wiki-query/SKILL.md",
-    ".agents/skills/wiki-update/SKILL.md",
-    ".github/workflows/release-gate.yml",
-    ".gitignore",
-    "AGENTS.md",
-    "README-kr.md",
-    "README.md",
-    "docs/LLM-WIKI.md",
-    "docs/USER_PROMPTS.md",
-    "docs/VAULT_PROMPTS.md",
-    "docs/agent/DRAFTS.md",
-    "docs/agent/OPERATING-SCHEMA.md",
-    "docs/usage.md",
-    "scripts/release_gate.sh",
-    "tests/__init__.py",
-    "tests/test_wiki_quality_baseline.py",
-    "tests/test_wiki_tools.py",
+from tools.wiki.lib.vault_manifest import (
+    MANAGED_EXACT_PATH_SCOPE,
+    MANAGED_TREE_ROOT_SCOPE,
 )
 
-MANAGED_TREE_ROOTS = ("tools/wiki",)
+MANAGED_EXACT_PATHS = tuple(sorted(MANAGED_EXACT_PATH_SCOPE))
+MANAGED_TREE_ROOTS = tuple(
+    root.removesuffix("/")
+    for root in MANAGED_TREE_ROOT_SCOPE
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EXCLUDED_PARTS = frozenset({"__pycache__"})

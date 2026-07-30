@@ -108,7 +108,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "a971d3674ec8384005fcff0eaeb13cfb831129eab9601a022425a993e1858451"
+      "sha256": "1d3432d603bdc8f3c2872212b513c14013c83deb00c7cdc2d4c540b6e15e9be0"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/authority.py",
       "policy": "replace-if-unmodified",
-      "sha256": "eb521bd97b97051c722d0890e3e21815c36b2525f6d56152ecd9e05ecd5d069d"
+      "sha256": "176a7360bb22ee7712865f72c2607674200c150e0e6212d8bd8a6b29b2540ce8"
     },
     "tools/wiki/lib/draft.py": {
       "mode": "0644",
@@ -210,7 +210,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/vault_manifest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "c974a57962d9dd1843056d2c0c15d6fa162f5f101b78bf69f68393619ab6dba6"
+      "sha256": "83c5512b359aa413bb93c0a63ab9ac42f310b89a266bc86e9afc6fac19d39605"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",

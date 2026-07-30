@@ -766,10 +766,62 @@ class MigrationPlanningTest(unittest.TestCase):
             self.assertEqual("preserve", actions["raw/sources/input.md"].action)
             self.assertEqual("preserve", actions["wiki/concepts/topic.md"].action)
             self.assertEqual("preserve", actions["wiki/log.md"].action)
-            self.assertEqual("preserve", actions["scratch/reports/audit.md"].action)
+            self.assertNotIn("scratch/reports/audit.md", actions)
             self.assertEqual("rebuild-suggested", actions["wiki/maps/topic-map.md"].action)
             self.assertEqual("preserve", actions["init-vault.sh"].action)
             self.assertEqual("preserve", actions["scripts/bootstrap.sh"].action)
+
+    def test_audit_reports_are_not_migration_relevant_fingerprint_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            first = audit_vault(ROOT, target)
+            report = target / "scratch" / "reports" / "new-audit.md"
+            report.write_text("new audit output\n")
+
+            second = audit_vault(ROOT, target)
+
+            self.assertEqual(first, second)
+            self.assertNotIn(
+                report.relative_to(target).as_posix(),
+                {action.path for action in second.actions},
+            )
+
+    def test_supported_manifest_is_migration_relevant_fingerprint_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            (target / "AGENTS.md").chmod(0o600)
+            first = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                current.schema_version,
+                current.contract_version,
+                current.builder_revision,
+                current.generated_at,
+                current.managed_files,
+                "f" * 16,
+            )
+            write_manifest(target, later)
+
+            second = audit_vault(ROOT, target)
+
+            self.assertNotEqual(first.target_fingerprint, second.target_fingerprint)
+            self.assertNotEqual(first.migration_id, second.migration_id)
+            with self.assertRaisesRegex(
+                ValueError,
+                "target changed after audit",
+            ):
+                apply_plan(ROOT, target, first, run_gate=lambda _: None)
+            self.assertEqual(later, load_manifest(target))
 
     def test_audit_is_deterministic_and_uses_known_legacy_hashes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2194,6 +2246,611 @@ class MigrationApplyTest(unittest.TestCase):
                 / plan.migration_id
             )
             self.assertTrue((journal_root / "journal.json").is_file())
+
+    def test_publication_uses_stable_parent_descriptor_after_parent_symlink_swap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            journal = root / "journal"
+            parent = root / "target" / "managed"
+            outside = root / "outside"
+            journal.mkdir()
+            parent.mkdir(parents=True)
+            outside.mkdir()
+            destination = parent / "file.md"
+            destination.write_bytes(b"prior\n")
+            staged = journal / "candidate.md"
+            candidate = b"candidate\n"
+            applying._create_staged_file(
+                journal,
+                staged,
+                candidate,
+                "0644",
+            )
+            expected = applying._capture_destination_state(destination)
+            moved_parent = root / "moved-managed"
+            injected = False
+
+            def swap_parent(stage: str, path: Path) -> None:
+                nonlocal injected
+                if stage == "after-destination-validation" and path == destination:
+                    injected = True
+                    parent.rename(moved_parent)
+                    parent.symlink_to(outside, target_is_directory=True)
+
+            with mock.patch.object(
+                applying,
+                "_publication_step",
+                side_effect=swap_parent,
+            ):
+                applying._publish_staged_file(
+                    staged,
+                    destination,
+                    hashlib.sha256(candidate).hexdigest(),
+                    "0644",
+                    expected,
+                )
+
+            self.assertTrue(injected)
+            self.assertEqual(candidate, (moved_parent / "file.md").read_bytes())
+            self.assertFalse((outside / "file.md").exists())
+
+    def test_descriptor_open_does_not_follow_parent_swapped_during_walk(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            journal = root / "journal"
+            parent = root / "target" / "managed"
+            outside = root / "outside"
+            journal.mkdir()
+            parent.mkdir(parents=True)
+            outside.mkdir()
+            destination = parent / "file.md"
+            destination.write_bytes(b"prior\n")
+            outside_destination = outside / destination.name
+            outside_destination.write_bytes(b"prior\n")
+            staged = journal / "candidate.md"
+            candidate = b"candidate\n"
+            applying._create_staged_file(
+                journal,
+                staged,
+                candidate,
+                "0644",
+            )
+            expected = applying._capture_destination_state(destination)
+            moved_parent = root / "moved-managed"
+            canonical_parent = parent.resolve()
+            real_resolve = Path.resolve
+            swapped = False
+
+            def swap_once(path: Path) -> None:
+                nonlocal swapped
+                if not swapped and path in {parent, canonical_parent}:
+                    swapped = True
+                    parent.rename(moved_parent)
+                    parent.symlink_to(outside, target_is_directory=True)
+
+            def resolve_with_swap(
+                path: Path,
+                *args: object,
+                **kwargs: object,
+            ) -> Path:
+                swap_once(path)
+                return real_resolve(path, *args, **kwargs)
+
+            def walk_with_swap(path: Path) -> None:
+                swap_once(path)
+
+            with (
+                mock.patch.object(
+                    Path,
+                    "resolve",
+                    autospec=True,
+                    side_effect=resolve_with_swap,
+                ),
+                mock.patch.object(
+                    applying,
+                    "_directory_open_step",
+                    side_effect=walk_with_swap,
+                    create=True,
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "unsafe|unreadable"):
+                    applying._publish_staged_file(
+                        staged,
+                        destination,
+                        hashlib.sha256(candidate).hexdigest(),
+                        "0644",
+                        expected,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertEqual(b"prior\n", (moved_parent / destination.name).read_bytes())
+            self.assertEqual(b"prior\n", outside_destination.read_bytes())
+
+    def test_publication_preserves_external_writer_at_final_exchange_boundary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            journal = root / "journal"
+            parent = root / "target"
+            journal.mkdir()
+            parent.mkdir()
+            destination = parent / "file.md"
+            destination.write_bytes(b"prior\n")
+            staged = journal / "candidate.md"
+            candidate = b"candidate\n"
+            external = b"external writer\n"
+            applying._create_staged_file(
+                journal,
+                staged,
+                candidate,
+                "0644",
+            )
+            expected = applying._capture_destination_state(destination)
+            injected = False
+
+            def replace_after_validation(stage: str, path: Path) -> None:
+                nonlocal injected
+                if stage == "after-destination-validation" and path == destination:
+                    injected = True
+                    replacement = parent / "external.tmp"
+                    replacement.write_bytes(external)
+                    replacement.chmod(0o600)
+                    os.replace(replacement, destination)
+
+            with mock.patch.object(
+                applying,
+                "_publication_step",
+                side_effect=replace_after_validation,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "changed at publication boundary",
+                ):
+                    applying._publish_staged_file(
+                        staged,
+                        destination,
+                        hashlib.sha256(candidate).hexdigest(),
+                        "0644",
+                        expected,
+                    )
+
+            self.assertTrue(injected)
+            self.assertEqual(external, destination.read_bytes())
+            self.assertEqual("0600", applying._observed_mode(destination))
+            self.assertEqual(candidate, staged.read_bytes())
+
+    def test_candidate_manifest_preserves_final_boundary_external_writer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            (target / "AGENTS.md").chmod(0o600)
+            plan = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                current.schema_version,
+                current.contract_version,
+                current.builder_revision,
+                current.generated_at,
+                current.managed_files,
+                "c" * 16,
+            )
+            manifest_path = (
+                target.resolve() / ".vault-builder" / "manifest.json"
+            )
+            injected = False
+
+            def publish_external_manifest(stage: str, path: Path) -> None:
+                nonlocal injected
+                if (
+                    not injected
+                    and stage == "after-destination-validation"
+                    and path == manifest_path
+                ):
+                    injected = True
+                    write_manifest(target, later)
+
+            with mock.patch.object(
+                applying,
+                "_publication_step",
+                side_effect=publish_external_manifest,
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertTrue(injected)
+            self.assertFalse(raised.exception.rollback_completed)
+            self.assertEqual(later, load_manifest(target))
+            self.assertTrue(
+                (
+                    target
+                    / ".vault-builder"
+                    / "recovery"
+                    / plan.migration_id
+                    / "journal.json"
+                ).is_file()
+            )
+
+    def test_rollback_preserves_final_boundary_external_writer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            destination = target.resolve() / "AGENTS.md"
+            desired = (ROOT / "AGENTS.md").read_bytes()
+            external = b"external rollback writer\n"
+            injected = False
+
+            def publish_external_managed(stage: str, path: Path) -> None:
+                nonlocal injected
+                if (
+                    not injected
+                    and stage == "after-destination-validation"
+                    and path == destination
+                    and destination.read_bytes() == desired
+                ):
+                    injected = True
+                    replacement = destination.with_name(".external-agents")
+                    replacement.write_bytes(external)
+                    replacement.chmod(0o600)
+                    os.replace(replacement, destination)
+
+            def fail_gate(_: Path) -> None:
+                raise ValueError("force rollback")
+
+            with mock.patch.object(
+                applying,
+                "_publication_step",
+                side_effect=publish_external_managed,
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            self.assertTrue(injected)
+            self.assertFalse(raised.exception.rollback_completed)
+            self.assertEqual(external, destination.read_bytes())
+            self.assertEqual("0600", applying._observed_mode(destination))
+            self.assertTrue(
+                (
+                    target
+                    / ".vault-builder"
+                    / "recovery"
+                    / plan.migration_id
+                    / "journal.json"
+                ).is_file()
+            )
+
+    def test_recovery_preserves_managed_external_writer_captured_by_hard_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            destination = target.resolve() / "AGENTS.md"
+            external = b"external managed writer\n"
+            exit_code = 88
+
+            child = os.fork()
+            if child == 0:
+                injected = False
+
+                def stop_after_exchange(stage: str, path: Path) -> None:
+                    nonlocal injected
+                    if path != destination:
+                        return
+                    if stage == "after-destination-validation" and not injected:
+                        replacement = destination.with_name(".external-managed")
+                        replacement.write_bytes(external)
+                        replacement.chmod(0o600)
+                        os.replace(replacement, destination)
+                        injected = True
+                    elif stage == "after-exchange" and injected:
+                        os._exit(exit_code)
+
+                with mock.patch.object(
+                    applying,
+                    "_publication_step",
+                    side_effect=stop_after_exchange,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(exit_code, os.WEXITSTATUS(status))
+
+            with self.assertRaisesRegex(ValueError, "external|unknown"):
+                recover_migration(target, plan.migration_id)
+            self.assertEqual(external, destination.read_bytes())
+            self.assertEqual("0600", applying._observed_mode(destination))
+
+    def test_recovery_preserves_manifest_external_writer_captured_by_hard_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            (target / "AGENTS.md").chmod(0o600)
+            plan = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                current.schema_version,
+                current.contract_version,
+                current.builder_revision,
+                current.generated_at,
+                current.managed_files,
+                "e" * 16,
+            )
+            destination = (
+                target.resolve() / ".vault-builder" / "manifest.json"
+            )
+            exit_code = 89
+
+            child = os.fork()
+            if child == 0:
+                injected = False
+
+                def stop_after_exchange(stage: str, path: Path) -> None:
+                    nonlocal injected
+                    if path != destination:
+                        return
+                    if stage == "after-destination-validation" and not injected:
+                        write_manifest(target, later)
+                        injected = True
+                    elif stage == "after-exchange" and injected:
+                        os._exit(exit_code)
+
+                with mock.patch.object(
+                    applying,
+                    "_publication_step",
+                    side_effect=stop_after_exchange,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(exit_code, os.WEXITSTATUS(status))
+
+            with self.assertRaisesRegex(ValueError, "external|unknown"):
+                recover_migration(target, plan.migration_id)
+            self.assertEqual(later, load_manifest(target))
+
+    def test_recovery_preserves_rollback_external_writer_captured_by_hard_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            destination = target.resolve() / "AGENTS.md"
+            desired = (ROOT / "AGENTS.md").read_bytes()
+            external = b"external rollback writer after crash\n"
+            exit_code = 90
+
+            child = os.fork()
+            if child == 0:
+                injected = False
+
+                def stop_after_exchange(stage: str, path: Path) -> None:
+                    nonlocal injected
+                    if path != destination:
+                        return
+                    if (
+                        stage == "after-destination-validation"
+                        and not injected
+                        and destination.read_bytes() == desired
+                    ):
+                        replacement = destination.with_name(".external-rollback")
+                        replacement.write_bytes(external)
+                        replacement.chmod(0o600)
+                        os.replace(replacement, destination)
+                        injected = True
+                    elif stage == "after-exchange" and injected:
+                        os._exit(exit_code)
+
+                with mock.patch.object(
+                    applying,
+                    "_publication_step",
+                    side_effect=stop_after_exchange,
+                ):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: (_ for _ in ()).throw(
+                            ValueError("force rollback")
+                        ),
+                    )
+                os._exit(99)
+
+            _, status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(exit_code, os.WEXITSTATUS(status))
+
+            with self.assertRaisesRegex(ValueError, "external|unknown"):
+                recover_migration(target, plan.migration_id)
+            self.assertEqual(external, destination.read_bytes())
+            self.assertEqual("0600", applying._observed_mode(destination))
+
+    def test_rollback_quarantines_external_replacements_of_created_files(self):
+        cases = ("managed", "manifest")
+        for boundary in cases:
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                plan = audit_vault(ROOT, target)
+                if boundary == "managed":
+                    destination = (
+                        target.resolve()
+                        / "tools"
+                        / "wiki"
+                        / "lib"
+                        / "authority.py"
+                    )
+                    gate = lambda _: (_ for _ in ()).throw(
+                        ValueError("force managed rollback")
+                    )
+                else:
+                    destination = (
+                        target.resolve()
+                        / ".vault-builder"
+                        / "manifest.json"
+                    )
+                    calls = 0
+
+                    def gate(_: Path) -> None:
+                        nonlocal calls
+                        calls += 1
+                        if calls == 2:
+                            raise ValueError("force manifest rollback")
+
+                external = f"external {boundary} delete writer\n".encode()
+                real_unlink = Path.unlink
+                injected = False
+
+                def replace_before_delete(path: Path) -> None:
+                    nonlocal injected
+                    if path == destination and not injected:
+                        replacement = destination.with_name(
+                            f".external-{boundary}-delete"
+                        )
+                        replacement.write_bytes(external)
+                        replacement.chmod(0o600)
+                        os.replace(replacement, destination)
+                        injected = True
+
+                def unlink_with_replacement(
+                    path: Path,
+                    *args: object,
+                    **kwargs: object,
+                ) -> None:
+                    replace_before_delete(path)
+                    real_unlink(path, *args, **kwargs)
+
+                with (
+                    mock.patch.object(
+                        Path,
+                        "unlink",
+                        autospec=True,
+                        side_effect=unlink_with_replacement,
+                    ),
+                    mock.patch.object(
+                        applying,
+                        "_deletion_step",
+                        side_effect=replace_before_delete,
+                        create=True,
+                    ),
+                ):
+                    with self.assertRaises(applying.MigrationApplyError) as raised:
+                        apply_plan(ROOT, target, plan, run_gate=gate)
+
+                self.assertTrue(injected)
+                self.assertFalse(raised.exception.rollback_completed)
+                self.assertEqual(external, destination.read_bytes())
+                self.assertEqual("0600", applying._observed_mode(destination))
+
+    def test_recovery_restores_external_writer_from_interrupted_deletion_quarantine(self):
+        cases = ("managed", "manifest")
+        for index, boundary in enumerate(cases):
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                plan = audit_vault(ROOT, target)
+                if boundary == "managed":
+                    destination = (
+                        target.resolve()
+                        / "tools"
+                        / "wiki"
+                        / "lib"
+                        / "authority.py"
+                    )
+                    gate = lambda _: (_ for _ in ()).throw(
+                        ValueError("force managed rollback")
+                    )
+                else:
+                    destination = (
+                        target.resolve()
+                        / ".vault-builder"
+                        / "manifest.json"
+                    )
+                    calls = 0
+
+                    def gate(_: Path) -> None:
+                        nonlocal calls
+                        calls += 1
+                        if calls == 2:
+                            raise ValueError("force manifest rollback")
+
+                external = f"external interrupted {boundary} writer\n".encode()
+                exit_code = 92 + index
+                child = os.fork()
+                if child == 0:
+                    injected = False
+                    real_move = applying._move_directory_entry_no_replace
+
+                    def replace_before_delete(path: Path) -> None:
+                        nonlocal injected
+                        if path == destination and not injected:
+                            replacement = destination.with_name(
+                                f".external-interrupted-{boundary}"
+                            )
+                            replacement.write_bytes(external)
+                            replacement.chmod(0o600)
+                            os.replace(replacement, destination)
+                            injected = True
+
+                    def stop_after_quarantine(
+                        source_parent: int,
+                        source_name: str,
+                        destination_parent: int,
+                        destination_name: str,
+                    ) -> None:
+                        real_move(
+                            source_parent,
+                            source_name,
+                            destination_parent,
+                            destination_name,
+                        )
+                        if injected:
+                            os._exit(exit_code)
+
+                    with (
+                        mock.patch.object(
+                            applying,
+                            "_deletion_step",
+                            side_effect=replace_before_delete,
+                        ),
+                        mock.patch.object(
+                            applying,
+                            "_move_directory_entry_no_replace",
+                            side_effect=stop_after_quarantine,
+                        ),
+                    ):
+                        apply_plan(ROOT, target, plan, run_gate=gate)
+                    os._exit(99)
+
+                _, status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(status))
+                self.assertEqual(exit_code, os.WEXITSTATUS(status))
+                with self.assertRaisesRegex(ValueError, "external|unknown"):
+                    recover_migration(target, plan.migration_id)
+                self.assertEqual(external, destination.read_bytes())
+                self.assertEqual("0600", applying._observed_mode(destination))
 
     def test_candidate_publication_rechecks_manifest_precondition(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3895,6 +4552,206 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertTrue(MigrationPlan.from_json(plan_path.read_text()).has_blocking_actions)
             self.assertFalse((target / ".vault-builder").exists())
 
+    def test_audit_report_does_not_invalidate_the_plan_emitted_by_that_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            report = target / "scratch" / "reports" / "migration-audit.md"
+            _copy_legacy_fixture(target)
+
+            reported = _run_cli(
+                "audit",
+                "--target",
+                str(target),
+                "--report",
+                str(report),
+            )
+            checked = _run_cli("audit", "--target", str(target))
+
+            self.assertEqual(0, reported.returncode, reported.stderr)
+            self.assertEqual(0, checked.returncode, checked.stderr)
+            reported_json = "{\n" + reported.stdout.partition("\n\n{\n")[2]
+            checked_json = "{\n" + checked.stdout.partition("\n\n{\n")[2]
+            self.assertEqual(
+                MigrationPlan.from_json(reported_json),
+                MigrationPlan.from_json(checked_json),
+            )
+
+    def test_audit_rejects_plan_and_report_pair_as_non_atomic_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan = root / "migration-plan.json"
+            report = target / "scratch" / "reports" / "migration-audit.md"
+            _copy_legacy_fixture(target)
+
+            result = _run_cli(
+                "audit",
+                "--target",
+                str(target),
+                "--plan-out",
+                str(plan),
+                "--report",
+                str(report),
+            )
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("one output artifact", result.stderr)
+            self.assertFalse(plan.exists())
+            self.assertFalse(report.exists())
+
+    def test_single_plan_publication_hard_stop_leaves_final_absent_and_future_write_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "migration-plan.json"
+            candidate = MigrationPlan(
+                1,
+                "fedcba9876543210",
+                None,
+                1,
+                "candidate",
+                "b" * 64,
+                (),
+                (),
+            )
+
+            child = os.fork()
+            if child == 0:
+                cli._write_atomic(
+                    output.resolve(),
+                    candidate.to_json(),
+                    "Migration plan output",
+                    before_replace=lambda: os._exit(87),
+                )
+                os._exit(99)
+            _, status = os.waitpid(child, 0)
+
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(87, os.WEXITSTATUS(status))
+            self.assertFalse(output.exists())
+            stale = list(root.glob(".migration-plan.json.*.tmp"))
+            self.assertEqual(1, len(stale))
+            cli._write_atomic(
+                output.resolve(),
+                candidate.to_json(),
+                "Migration plan output",
+            )
+            self.assertEqual(candidate, cli._load_plan(str(output)))
+            self.assertEqual(stale, list(root.glob(".migration-plan.json.*.tmp")))
+
+    def test_single_output_hard_stop_after_link_leaves_complete_final(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "migration-plan.json"
+
+            child = os.fork()
+            if child == 0:
+                with mock.patch.object(
+                    cli,
+                    "_fsync_parent",
+                    side_effect=lambda _descriptor: os._exit(88),
+                ):
+                    cli._write_atomic(
+                        output.resolve(),
+                        "candidate\n",
+                        "Migration plan output",
+                    )
+                os._exit(99)
+            _, status = os.waitpid(child, 0)
+
+            self.assertTrue(os.WIFEXITED(status))
+            self.assertEqual(88, os.WEXITSTATUS(status))
+            self.assertEqual("candidate\n", output.read_text())
+            self.assertEqual(1, len(list(root.glob(".migration-plan.json.*.tmp"))))
+
+    def test_single_output_publication_preserves_unowned_temp_shaped_sibling(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "migration-plan.json"
+            sibling = root / f".{output.name}.{'a' * 32}.tmp"
+            sibling.write_text("external sibling\n")
+
+            cli._write_atomic(
+                output.resolve(),
+                "candidate\n",
+                "Migration plan output",
+            )
+
+            self.assertEqual("candidate\n", output.read_text())
+            self.assertEqual("external sibling\n", sibling.read_text())
+
+    def test_single_output_preserves_final_boundary_external_writer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "migration-plan.json"
+            destination = output.resolve()
+            external = b"external output writer\n"
+            injected = False
+
+            def publish_external(path: Path) -> None:
+                nonlocal injected
+                if path == destination and not injected:
+                    replacement = output.with_name(".external-output")
+                    replacement.write_bytes(external)
+                    replacement.chmod(0o600)
+                    os.replace(replacement, output)
+                    injected = True
+
+            with mock.patch.object(
+                cli,
+                "_output_publication_step",
+                side_effect=publish_external,
+                create=True,
+            ):
+                with self.assertRaisesRegex(ValueError, "publication boundary"):
+                    cli._write_atomic(
+                        destination,
+                        "candidate\n",
+                        "Migration plan output",
+                    )
+
+            self.assertTrue(injected)
+            self.assertEqual(external, output.read_bytes())
+            self.assertEqual("0600", f"{output.stat().st_mode & 0o7777:04o}")
+
+    def test_single_output_refuses_to_overwrite_existing_leaf(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output = root / "migration-plan.json"
+            output.write_text("external output\n")
+            output.chmod(0o600)
+
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                cli._write_atomic(
+                    output.resolve(),
+                    "candidate\n",
+                    "Migration plan output",
+                )
+
+            self.assertEqual("external output\n", output.read_text())
+            self.assertEqual("0600", f"{output.stat().st_mode & 0o7777:04o}")
+            self.assertFalse(list(root.glob(".migration-plan.json.*.tmp")))
+
+    def test_audit_refuses_to_overwrite_existing_plan_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            output = root / "migration-plan.json"
+            _copy_legacy_fixture(target)
+            output.write_text("external output\n")
+
+            result = _run_cli(
+                "audit",
+                "--target",
+                str(target),
+                "--plan-out",
+                str(output),
+            )
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("already exists", result.stderr)
+            self.assertEqual("external output\n", output.read_text())
+
     def test_audit_validates_all_outputs_before_writing_either_one(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3940,161 +4797,6 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertFalse(plan_path.exists())
 
-    def test_output_preparation_cleans_missing_parent_and_temps_when_later_output_fails(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            nested_report = root / "report" / "nested" / "audit.md"
-            blocked_parent = root / "blocked"
-            blocked_parent.write_text("not a directory\n")
-            blocked_plan = blocked_parent / "migration-plan.json"
-
-            with self.assertRaisesRegex(ValueError, "unsafe parent"):
-                cli._write_outputs(
-                    ((nested_report.resolve(), "report\n", "Audit report"), (blocked_plan.resolve(), "plan\n", "Migration plan output"))
-                )
-
-            self.assertFalse((root / "report").exists())
-            self.assertFalse(list(root.rglob(".*.tmp")))
-
-    def test_output_transaction_restores_existing_outputs_after_second_replace_failure(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plan = root / "migration-plan.json"
-            report = root / "migration-audit.md"
-            plan.write_text("old plan\n")
-            report.write_text("old report\n")
-            plan.chmod(0o600)
-            report.chmod(0o640)
-
-            def fail_second_replace(index: int) -> None:
-                if index == 1:
-                    raise OSError("injected second replace failure")
-
-            with self.assertRaisesRegex(ValueError, "Could not write"):
-                cli._write_outputs(
-                    ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
-                    before_replace=fail_second_replace,
-                )
-
-            self.assertEqual("old plan\n", plan.read_text())
-            self.assertEqual("old report\n", report.read_text())
-            self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
-            self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
-            self.assertFalse(list(root.glob(".*.tmp")))
-
-    def test_output_transaction_revalidates_each_leaf_before_replacement(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plan = root / "migration-plan.json"
-            report = root / "migration-audit.md"
-            plan.write_text("old plan\n")
-            report.write_text("old report\n")
-            plan.chmod(0o600)
-            report.chmod(0o640)
-
-            def publish_external_report(index: int) -> None:
-                if index == 1:
-                    report.write_text("external report\n")
-                    report.chmod(0o600)
-
-            with self.assertRaisesRegex(ValueError, "changed before publication"):
-                cli._write_outputs(
-                    (
-                        (
-                            plan.resolve(),
-                            "new plan\n",
-                            "Migration plan output",
-                        ),
-                        (
-                            report.resolve(),
-                            "new report\n",
-                            "Audit report",
-                        ),
-                    ),
-                    before_replace=publish_external_report,
-                )
-
-            self.assertEqual("old plan\n", plan.read_text())
-            self.assertEqual("external report\n", report.read_text())
-            self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
-            self.assertEqual("0600", f"{report.stat().st_mode & 0o7777:04o}")
-            self.assertFalse(list(root.glob(".*.tmp")))
-
-    def test_output_transaction_restores_replaced_outputs_when_either_commit_parent_fsync_fails(self):
-        for failing_call in (1, 2):
-            with self.subTest(failing_call=failing_call), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                plan = root / "migration-plan.json"
-                report = root / "migration-audit.md"
-                plan.write_text("old plan\n")
-                report.write_text("old report\n")
-                plan.chmod(0o600)
-                report.chmod(0o640)
-                real_fsync = cli._fsync_parent
-                calls = 0
-
-                def fail_selected_parent_fsync(descriptor: int) -> None:
-                    nonlocal calls
-                    calls += 1
-                    if calls == failing_call:
-                        raise OSError(f"injected parent fsync {failing_call}")
-                    real_fsync(descriptor)
-
-                with mock.patch.object(cli, "_fsync_parent", side_effect=fail_selected_parent_fsync):
-                    with self.assertRaisesRegex(ValueError, "Could not write"):
-                        cli._write_outputs(
-                            ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report"))
-                        )
-
-                self.assertEqual("old plan\n", plan.read_text())
-                self.assertEqual("old report\n", report.read_text())
-                self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
-                self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
-                self.assertFalse(list(root.glob(".*.tmp")))
-
-    def test_concurrent_writers_cannot_publish_a_mixed_output_pair(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plan = root / "plans" / "migration-plan.json"
-            report = root / "reports" / "migration-audit.md"
-            plan.parent.mkdir()
-            report.parent.mkdir()
-
-            def first_write(pause: Callable[[], None]) -> None:
-                cli._write_outputs(
-                    (
-                        (plan.resolve(), "first plan\n", "Migration plan output"),
-                        (report.resolve(), "first report\n", "Audit report"),
-                    ),
-                    before_replace=lambda index: pause() if index == 1 else None,
-                )
-
-            def second_write() -> None:
-                cli._write_outputs(
-                    (
-                        (report.resolve(), "second report\n", "Audit report"),
-                        (plan.resolve(), "second plan\n", "Migration plan output"),
-                    )
-                )
-
-            (
-                second_finished_while_first_paused,
-                first_status,
-                second_status,
-            ) = _run_concurrent_output_writes(
-                first_write,
-                second_write,
-                timeout=1.0,
-            )
-
-            self.assertTrue(os.WIFEXITED(first_status))
-            self.assertEqual(0, os.WEXITSTATUS(first_status))
-            self.assertTrue(os.WIFEXITED(second_status))
-            self.assertEqual(0, os.WEXITSTATUS(second_status))
-            self.assertFalse(second_finished_while_first_paused)
-            self.assertEqual("second plan\n", plan.read_text())
-            self.assertEqual("second report\n", report.read_text())
-
     def test_output_parent_locks_use_deterministic_device_inode_order(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -4134,7 +4836,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(sorted(identities.values()), lock_order)
             self.assertEqual([], created)
 
-    def test_overlapping_single_output_transactions_serialize(self):
+    def test_overlapping_single_output_publications_serialize_and_do_not_overwrite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             output = root / "shared" / "migration-plan.json"
@@ -4168,9 +4870,9 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertTrue(os.WIFEXITED(first_status))
             self.assertEqual(0, os.WEXITSTATUS(first_status))
             self.assertTrue(os.WIFEXITED(second_status))
-            self.assertEqual(0, os.WEXITSTATUS(second_status))
+            self.assertEqual(72, os.WEXITSTATUS(second_status))
             self.assertFalse(second_finished_while_first_paused)
-            self.assertEqual("second\n", output.read_text())
+            self.assertEqual("first\n", output.read_text())
 
     def test_disjoint_output_directories_can_publish_independently(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4212,62 +4914,6 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertTrue(second_finished_while_first_paused)
             self.assertEqual("first\n", first_output.read_text())
             self.assertEqual("second\n", second_output.read_text())
-
-    def test_restore_temp_is_cleaned_when_restore_write_fails(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plan = root / "migration-plan.json"
-            report = root / "migration-audit.md"
-            plan.write_text("old plan\n")
-            report.write_text("old report\n")
-            real_write = cli._write_temporary
-            calls = 0
-
-            def fail_restore_write(descriptor: int, contents: bytes, mode: int) -> None:
-                nonlocal calls
-                calls += 1
-                if calls == 3:
-                    raise OSError("injected restore write failure")
-                real_write(descriptor, contents, mode)
-
-            with mock.patch.object(cli, "_write_temporary", side_effect=fail_restore_write):
-                with self.assertRaisesRegex(ValueError, "commit failed.*rollback failed"):
-                    cli._write_outputs(
-                        ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
-                        before_replace=lambda index: (_ for _ in ()).throw(OSError("injected second replace")) if index == 1 else None,
-                    )
-
-            self.assertEqual("new plan\n", plan.read_text())
-            self.assertEqual("old report\n", report.read_text())
-            self.assertFalse(list(root.glob(".*.tmp")))
-
-    def test_restore_parent_fsync_failure_reports_commit_and_rollback_failures_without_temp_leak(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plan = root / "migration-plan.json"
-            report = root / "migration-audit.md"
-            plan.write_text("old plan\n")
-            report.write_text("old report\n")
-            real_fsync = cli._fsync_parent
-            calls = 0
-
-            def fail_restore_fsync(descriptor: int) -> None:
-                nonlocal calls
-                calls += 1
-                if calls == 2:
-                    raise OSError("injected restore parent fsync failure")
-                real_fsync(descriptor)
-
-            with mock.patch.object(cli, "_fsync_parent", side_effect=fail_restore_fsync):
-                with self.assertRaisesRegex(ValueError, "injected second replace.*rollback failed"):
-                    cli._write_outputs(
-                        ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
-                        before_replace=lambda index: (_ for _ in ()).throw(OSError("injected second replace")) if index == 1 else None,
-                    )
-
-            self.assertEqual("old plan\n", plan.read_text())
-            self.assertEqual("old report\n", report.read_text())
-            self.assertFalse(list(root.glob(".*.tmp")))
 
     def test_audit_rejects_raw_traversal_for_report_and_plan_output_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

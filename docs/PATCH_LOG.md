@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-30 - Final Publication And Authority Contract Correction
+**Trigger:** Post-fix whole-review found final-boundary publication races, self-invalidating audit output, non-portable paired-output claims, source-role precedence gaps, and over-broad manifest path acceptance.
+**Scope:** Managed, manifest, and rollback publication and recovery; audit artifact ownership and plan identity; role classification; shared manifest validation.
+**Core Values Protected:** External-writer preservation, honest atomicity boundaries, migration-relevant plan stability, path-owned authority, and exact builder scope.
+**Changes Applied:** Open every parent component through no-follow descriptors, validate atomic-exchange displacement, and reconcile durable staged content before recovery cleanup; quarantine rollback deletions with native no-replace moves; publish only one create-only audit artifact per invocation with a no-overwrite hard link, never clean unowned temp-shaped siblings, exclude reports but include supported manifest bytes in plan fingerprints; make `wiki/sources/` location authoritative while reporting type mismatches; accept only exact v1 catalog paths in shared manifests.
+**Verification:** Descriptor-open and final-boundary races, interrupted managed/manifest/rollback exchange recovery, originally-absent rollback replacement, manifest-plan staleness, self-report, existing-output refusal, pre/post-publication hard stops, unowned-temp preservation, source precedence and exact manifest corruption matrices, plus full builder, wiki, generated-Vault, catalog, acceptance, and release gates.
+
 ## 2026-07-30 - Final Race Correction
 **Trigger:** Ultimate whole-branch review after final contract correction.
 **Scope:** Managed and manifest publication preconditions plus atomic audit plan/report output publication.
