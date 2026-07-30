@@ -25,6 +25,7 @@ _JOURNAL_STATES = frozenset({"prepared", "applying", "validating", "rolling-back
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODE_RE = re.compile(r"^[0-7]{4}$")
 _MANIFEST_RELATIVE = ".vault-builder/manifest.json"
+_DIRECTORY_MARKER_FILENAME = ".vault-builder-migration.json"
 
 
 def _safe_target_path(target: Path, relative: str, *, reject_leaf_symlink: bool = True) -> Path:
@@ -70,13 +71,19 @@ def apply_plan(
         _write_journal_state(journal_root, journal, "applying")
         created_directories: list[str] = []
 
-        def record_created(directories: list[str]) -> None:
-            created_directories.extend(directories)
+        def record_created(directory: str) -> None:
+            created_directories.append(directory)
             journal["created_directories"] = sorted(set(created_directories))
             _write_journal_state(journal_root, journal, "applying")
 
         for action in actions:
-            _replace_from_builder(builder, target, action, record_created=record_created)
+            _replace_from_builder(
+                builder,
+                target,
+                action,
+                migration_id=checked_plan.migration_id,
+                record_created=record_created,
+            )
         _write_journal_state(journal_root, journal, "validating")
 
         # Gate one deliberately runs before authority-v1 metadata exists.
@@ -266,11 +273,12 @@ def _replace_from_builder(
     target: Path,
     action: MigrationAction,
     *,
-    record_created: Callable[[list[str]], None],
+    migration_id: str,
+    record_created: Callable[[str], None],
 ) -> None:
     source = _safe_relative_path(builder, action.path)
     destination = _safe_target_path(target, action.path, reject_leaf_symlink=False)
-    record_created(_ensure_regular_parent(target, destination))
+    _ensure_managed_parent(target, destination, action.path, migration_id=migration_id, record_created=record_created)
     _atomic_write(destination, source.read_bytes(), action.desired_mode or "0644")
     if sha256_file(destination) != action.desired_sha256 or _observed_mode(destination) != action.desired_mode:
         raise ValueError(f"Atomic replacement verification failed: {action.path}")
@@ -291,6 +299,49 @@ def _ensure_regular_parent(target: Path, destination: Path) -> list[str]:
         if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
             raise ValueError(f"Migration target parent contains an unsafe path: {destination.relative_to(target)}")
     return created
+
+
+def _ensure_managed_parent(
+    target: Path,
+    destination: Path,
+    managed_path: str,
+    *,
+    migration_id: str,
+    record_created: Callable[[str], None],
+) -> None:
+    relative_parent = destination.parent.relative_to(target)
+    current = target
+    for part in relative_parent.parts:
+        current = current / part
+        try:
+            state = current.lstat()
+        except FileNotFoundError:
+            _mkdir_directory(current)
+            relative = current.relative_to(target).as_posix()
+            try:
+                _write_directory_marker(current, migration_id, relative)
+            except BaseException:
+                _rmdir_if_empty(current)
+                raise
+            record_created(relative)
+            continue
+        if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
+            raise ValueError(f"Migration target parent contains an unsafe path: {managed_path}")
+
+
+def _mkdir_directory(path: Path) -> None:
+    path.mkdir()
+
+
+def _write_directory_marker(directory: Path, migration_id: str, relative: str) -> None:
+    marker = directory / _DIRECTORY_MARKER_FILENAME
+    if marker.exists() or marker.is_symlink():
+        raise ValueError(f"Migration directory marker already exists: {relative}")
+    _atomic_write(marker, _canonical_json(_directory_marker(migration_id, relative)).encode("utf-8"), "0644")
+
+
+def _directory_marker(migration_id: str, relative: str) -> dict[str, object]:
+    return {"migration_id": migration_id, "path": relative, "schema_version": 1}
 
 
 def _atomic_write(destination: Path, contents: bytes, mode: str) -> None:
@@ -337,9 +388,14 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
     manifest = _journal_manifest(journal, allow_none=True)
     if manifest is not None:
         _restore_manifest(target, originals, manifest)
-    created_directories = _validate_created_directories(entries, journal.get("created_directories"))
+    created_directories = _validate_created_directories(
+        target,
+        str(journal["migration_id"]),
+        entries,
+        journal.get("created_directories"),
+    )
     for relative in sorted(created_directories, key=lambda value: len(PurePosixPath(value).parts), reverse=True):
-        _rmdir_if_empty(_safe_target_path(target, relative, reject_leaf_symlink=False))
+        _remove_created_directory(target, str(journal["migration_id"]), relative)
     _verify_restored(target, originals, entries, manifest)
     _remove_journal(target, journal_root, journal)
 
@@ -427,7 +483,7 @@ def _load_journal(target: Path, journal_root: Path, migration_id: str) -> dict[s
         raise ValueError("Migration recovery journal has an invalid state.")
     entries = _journal_entries(data)
     manifest = _journal_manifest(data, allow_none=True)
-    _validate_created_directories(entries, data.get("created_directories"))
+    _validate_created_directories(target, migration_id, entries, data.get("created_directories"))
     for key in ("state_directory_existed", "recovery_directory_existed"):
         if key in data and not isinstance(data[key], bool):
             raise ValueError("Migration recovery journal state is invalid.")
@@ -564,6 +620,8 @@ def _journal_path(root: Path, relative: str) -> Path:
 
 
 def _remove_journal(target: Path, journal_root: Path, journal: dict[str, object]) -> None:
+    if journal.get("state") == "complete":
+        _remove_created_markers(target, str(journal["migration_id"]), _string_list(journal.get("created_directories")))
     _remove_tree_no_symlinks(journal_root)
     recovery = journal_root.parent
     state_directory = recovery.parent
@@ -649,7 +707,12 @@ def _string_list(value: object) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _validate_created_directories(entries: tuple[dict[str, object], ...], value: object) -> tuple[str, ...]:
+def _validate_created_directories(
+    target: Path,
+    migration_id: str,
+    entries: tuple[dict[str, object], ...],
+    value: object,
+) -> tuple[str, ...]:
     directories = _string_list(value)
     if directories != tuple(sorted(set(directories))):
         raise ValueError("Migration recovery created directories are invalid.")
@@ -663,7 +726,61 @@ def _validate_created_directories(entries: tuple[dict[str, object], ...], value:
             parent = parent.parent
     if not set(directories) <= allowed:
         raise ValueError("Migration recovery created directories are invalid.")
+    for relative in directories:
+        _validate_directory_marker(_safe_target_path(target, relative, reject_leaf_symlink=False), migration_id, relative)
     return directories
+
+
+def _remove_created_markers(target: Path, migration_id: str, directories: tuple[str, ...]) -> None:
+    markers = [
+        _validate_directory_marker(_safe_target_path(target, relative, reject_leaf_symlink=False), migration_id, relative)
+        for relative in directories
+    ]
+    for marker in markers:
+        marker.unlink()
+        _fsync_directory(marker.parent)
+
+
+def _remove_created_directory(target: Path, migration_id: str, relative: str) -> None:
+    directory = _safe_target_path(target, relative, reject_leaf_symlink=False)
+    marker = _validate_directory_marker(directory, migration_id, relative)
+    try:
+        children = list(directory.iterdir())
+    except OSError as exc:
+        raise ValueError(f"Migration directory is unreadable: {relative}") from exc
+    if children != [marker]:
+        raise ValueError(f"Migration directory contains unexpected content: {relative}")
+    marker.unlink()
+    _fsync_directory(directory)
+    directory.rmdir()
+    _fsync_directory(directory.parent)
+
+
+def _validate_directory_marker(directory: Path, migration_id: str, relative: str) -> Path:
+    try:
+        state = directory.lstat()
+    except OSError as exc:
+        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
+        raise ValueError(f"Migration directory marker is invalid: {relative}")
+    marker = directory / _DIRECTORY_MARKER_FILENAME
+    try:
+        marker_state = marker.lstat()
+    except OSError as exc:
+        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
+    if stat.S_ISLNK(marker_state.st_mode) or not stat.S_ISREG(marker_state.st_mode) or _observed_mode(marker) != "0644":
+        raise ValueError(f"Migration directory marker is invalid: {relative}")
+    try:
+        data = json.loads(
+            marker.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"Migration directory marker is invalid: {relative}") from exc
+    if data != _directory_marker(migration_id, relative):
+        raise ValueError(f"Migration directory marker is invalid: {relative}")
+    return marker
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
