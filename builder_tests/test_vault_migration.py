@@ -1581,6 +1581,73 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertFalse(plan_path.exists())
 
+    def test_audit_prepares_report_before_writing_external_plan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            plan_path = root / "migration-plan.json"
+            _copy_legacy_fixture(target)
+            report_parent = target / "scratch" / "reports"
+            original_mode = report_parent.stat().st_mode
+            report_parent.chmod(0o500)
+            try:
+                result = _run_cli(
+                    "audit",
+                    "--target",
+                    str(target),
+                    "--plan-out",
+                    str(plan_path),
+                    "--report",
+                    str(report_parent / "migration-audit.md"),
+                )
+            finally:
+                report_parent.chmod(original_mode)
+
+            self.assertEqual(1, result.returncode)
+            self.assertFalse(plan_path.exists())
+
+    def test_output_preparation_cleans_missing_parent_and_temps_when_later_output_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            nested_report = root / "report" / "nested" / "audit.md"
+            blocked_parent = root / "blocked"
+            blocked_parent.write_text("not a directory\n")
+            blocked_plan = blocked_parent / "migration-plan.json"
+
+            with self.assertRaisesRegex(ValueError, "unsafe parent"):
+                cli._write_outputs(
+                    ((nested_report.resolve(), "report\n", "Audit report"), (blocked_plan.resolve(), "plan\n", "Migration plan output"))
+                )
+
+            self.assertFalse((root / "report").exists())
+            self.assertFalse(list(root.rglob(".*.tmp")))
+
+    def test_output_transaction_restores_existing_outputs_after_second_replace_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plan = root / "migration-plan.json"
+            report = root / "migration-audit.md"
+            plan.write_text("old plan\n")
+            report.write_text("old report\n")
+            plan.chmod(0o600)
+            report.chmod(0o640)
+
+            def fail_second_replace(index: int) -> None:
+                if index == 1:
+                    raise OSError("injected second replace failure")
+
+            with self.assertRaisesRegex(ValueError, "Could not write"):
+                cli._write_outputs(
+                    ((plan.resolve(), "new plan\n", "Migration plan output"), (report.resolve(), "new report\n", "Audit report")),
+                    before_replace=fail_second_replace,
+                )
+
+            self.assertEqual("old plan\n", plan.read_text())
+            self.assertEqual("old report\n", report.read_text())
+            self.assertEqual("0600", f"{plan.stat().st_mode & 0o7777:04o}")
+            self.assertEqual("0640", f"{report.stat().st_mode & 0o7777:04o}")
+            self.assertFalse(list(root.glob(".*.tmp")))
+
     def test_audit_rejects_raw_traversal_for_report_and_plan_output_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

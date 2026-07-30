@@ -11,6 +11,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +59,22 @@ def render_plan_summary(
 
 _DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+
+
+@dataclass
+class _CreatedDirectory:
+    parent: int
+    name: str
+
+
+@dataclass
+class _PreparedOutput:
+    path: Path
+    label: str
+    parent: int
+    temporary_name: str
+    prior_bytes: bytes | None
+    prior_mode: int | None
 
 
 def _canonical_safe_path(path_value: str, label: str) -> Path:
@@ -117,7 +134,7 @@ def _validate_report_output(target_root: Path, raw_path: str) -> tuple[Path, str
     return report, relative.as_posix()
 
 
-def _open_directory(path: Path, *, create: bool) -> int:
+def _open_directory(path: Path, *, create: bool, created: list[_CreatedDirectory] | None = None) -> int:
     """Open an absolute directory by no-follow component walk."""
     if not path.is_absolute() or path == Path(path.anchor):
         raise ValueError("Output parent must be an absolute non-root directory.")
@@ -134,6 +151,9 @@ def _open_directory(path: Path, *, create: bool) -> int:
                     pass
                 except OSError as exc:
                     raise ValueError(f"Could not create output parent: {part}") from exc
+                else:
+                    if created is not None:
+                        created.append(_CreatedDirectory(os.dup(descriptor), part))
             try:
                 next_descriptor = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
             except OSError as exc:
@@ -176,6 +196,175 @@ def _read_regular_file(
         os.close(parent)
 
 
+def _read_output_prior(parent: int, path: Path, label: str) -> tuple[bytes | None, int | None]:
+    try:
+        try:
+            state = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return None, None
+        if not stat.S_ISREG(state.st_mode):
+            raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
+        descriptor = os.open(path.name, _READ_FLAGS, dir_fd=parent)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks), stat.S_IMODE(opened.st_mode)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise ValueError(f"Could not prepare {label.lower()}: {path}") from exc
+
+
+def _reserve_temporary(parent: int, path: Path, label: str) -> tuple[str, int]:
+    for _ in range(8):
+        candidate = f".{path.name}.{secrets.token_hex(16)}.tmp"
+        try:
+            descriptor = os.open(
+                candidate,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=parent,
+            )
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise ValueError(f"Could not reserve temporary {label.lower()}: {path}") from exc
+        return candidate, descriptor
+    raise ValueError(f"Could not reserve temporary {label.lower()}: {path}")
+
+
+def _write_temporary(descriptor: int, contents: bytes, mode: int) -> None:
+    view = memoryview(contents)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError("Temporary output write was incomplete.")
+        view = view[written:]
+    os.fchmod(descriptor, mode)
+    os.fsync(descriptor)
+
+
+def _prepare_output(
+    path: Path,
+    contents: str,
+    label: str,
+    created: list[_CreatedDirectory],
+) -> _PreparedOutput:
+    parent = _open_directory(path.parent, create=True, created=created)
+    temporary_name: str | None = None
+    descriptor: int | None = None
+    try:
+        prior_bytes, prior_mode = _read_output_prior(parent, path, label)
+        temporary_name, descriptor = _reserve_temporary(parent, path, label)
+        _write_temporary(descriptor, contents.encode("utf-8"), 0o644)
+        os.close(descriptor)
+        descriptor = None
+        return _PreparedOutput(path, label, parent, temporary_name, prior_bytes, prior_mode)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=parent)
+            except FileNotFoundError:
+                pass
+        os.close(parent)
+        raise
+
+
+def _discard_prepared(outputs: list[_PreparedOutput]) -> None:
+    for output in outputs:
+        if output.temporary_name:
+            try:
+                os.unlink(output.temporary_name, dir_fd=output.parent)
+            except FileNotFoundError:
+                pass
+        os.close(output.parent)
+
+
+def _finish_created_directories(created: list[_CreatedDirectory], *, remove: bool) -> None:
+    for directory in reversed(created):
+        try:
+            if remove:
+                try:
+                    os.rmdir(directory.name, dir_fd=directory.parent)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
+        finally:
+            os.close(directory.parent)
+
+
+def _restore_output(output: _PreparedOutput) -> None:
+    if output.prior_bytes is None:
+        try:
+            os.unlink(output.path.name, dir_fd=output.parent)
+        except FileNotFoundError:
+            return
+        os.fsync(output.parent)
+        return
+    temporary_name, descriptor = _reserve_temporary(output.parent, output.path, output.label)
+    try:
+        _write_temporary(descriptor, output.prior_bytes, output.prior_mode or 0o644)
+    finally:
+        os.close(descriptor)
+    try:
+        os.replace(temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
+    except BaseException:
+        try:
+            os.unlink(temporary_name, dir_fd=output.parent)
+        except FileNotFoundError:
+            pass
+        raise
+    os.fsync(output.parent)
+
+
+def _write_outputs(
+    outputs: tuple[tuple[Path, str, str], ...],
+    *,
+    before_replace: Callable[[int], None] | None = None,
+) -> None:
+    """Prepare every output, then atomically commit or restore them as a unit."""
+    prepared: list[_PreparedOutput] = []
+    created: list[_CreatedDirectory] = []
+    committed: list[_PreparedOutput] = []
+    successful = False
+    try:
+        for path, contents, label in outputs:
+            prepared.append(_prepare_output(path, contents, label, created))
+        for index, output in enumerate(prepared):
+            if before_replace is not None:
+                before_replace(index)
+            try:
+                os.replace(output.temporary_name, output.path.name, src_dir_fd=output.parent, dst_dir_fd=output.parent)
+            except OSError as exc:
+                raise ValueError(f"Could not write {output.label.lower()}: {output.path}") from exc
+            output.temporary_name = ""
+            os.fsync(output.parent)
+            committed.append(output)
+        successful = True
+    except BaseException as exc:
+        try:
+            for output in reversed(committed):
+                _restore_output(output)
+        except BaseException as rollback_exc:
+            raise ValueError("Could not restore prepared outputs after a failed write.") from rollback_exc
+        if isinstance(exc, ValueError):
+            raise
+        raise ValueError("Could not write requested outputs.") from exc
+    finally:
+        _discard_prepared(prepared)
+        _finish_created_directories(created, remove=not successful)
+
+
 def _write_atomic(
     path: Path,
     contents: str,
@@ -183,58 +372,8 @@ def _write_atomic(
     *,
     before_replace: Callable[[], None] | None = None,
 ) -> None:
-    """Write through a no-follow parent descriptor, never a reopened pathname."""
-    parent = _open_directory(path.parent, create=True)
-    temporary_name: str | None = None
-    try:
-        try:
-            destination = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-        except FileNotFoundError:
-            destination = None
-        except OSError as exc:
-            raise ValueError(f"{label} is unreadable: {path}") from exc
-        if destination is not None and not stat.S_ISREG(destination.st_mode):
-            raise ValueError(f"{label} must be an absent or regular non-symlink file: {path}")
-
-        for _ in range(8):
-            candidate = f".{path.name}.{secrets.token_hex(16)}.tmp"
-            try:
-                descriptor = os.open(
-                    candidate,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                    0o600,
-                    dir_fd=parent,
-                )
-            except FileExistsError:
-                continue
-            temporary_name = candidate
-            break
-        else:
-            raise ValueError(f"Could not reserve temporary {label.lower()}: {path}")
-        try:
-            encoded = contents.encode("utf-8")
-            view = memoryview(encoded)
-            while view:
-                written = os.write(descriptor, view)
-                view = view[written:]
-            os.fchmod(descriptor, 0o644)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        if before_replace is not None:
-            before_replace()
-        os.replace(temporary_name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
-        temporary_name = None
-        os.fsync(parent)
-    except OSError as exc:
-        raise ValueError(f"Could not write {label.lower()}: {path}") from exc
-    finally:
-        if temporary_name is not None:
-            try:
-                os.unlink(temporary_name, dir_fd=parent)
-            except FileNotFoundError:
-                pass
-        os.close(parent)
+    hook = None if before_replace is None else lambda _index: before_replace()
+    _write_outputs(((path, contents, label),), before_replace=hook)
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -307,10 +446,13 @@ def _run_audit(args: argparse.Namespace) -> int:
 
     target_writes = "none" if report_relative is None else f"scratch/reports/{report_relative}"
     rendered = render_plan_summary(target, plan, target_writes=target_writes) + "\n" + plan.to_json()
+    outputs: list[tuple[Path, str, str]] = []
     if plan_output is not None:
-        _write_atomic(plan_output, plan.to_json(), "Migration plan output")
+        outputs.append((plan_output, plan.to_json(), "Migration plan output"))
     if report_output is not None:
-        _write_atomic(report_output, rendered, "Audit report")
+        outputs.append((report_output, rendered, "Audit report"))
+    if outputs:
+        _write_outputs(tuple(outputs))
     print(rendered, end="")
     return 2 if plan.has_blocking_actions else 0
 
