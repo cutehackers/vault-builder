@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,11 +11,70 @@ from unittest import mock
 
 from tools.vault_migration import cli
 from tools.vault_migration.catalogs import build_catalog, load_catalog, sha256_file, write_catalog
+from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.managed_paths import MANAGED_PATHS
-from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan
+from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan, VaultManifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class VaultManifestTest(unittest.TestCase):
+    def test_manifest_records_only_copied_managed_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+                env={**os.environ, "VAULT_BUILDER_REVISION": "test-revision"},
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            manifest = load_manifest(target)
+            self.assertIsNotNone(manifest)
+            assert manifest is not None
+            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual("test-revision", manifest.builder_revision)
+            self.assertNotIn("wiki/overview.md", manifest.managed_files)
+            self.assertNotIn("tools/vault_migration/cli.py", manifest.managed_files)
+            for relative, managed in manifest.managed_files.items():
+                self.assertEqual(managed.sha256, sha256_file(target / relative), relative)
+
+    def test_load_manifest_rejects_malformed_or_symlinked_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            target.mkdir()
+            self.assertIsNone(load_manifest(target))
+
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            manifest_path.parent.mkdir()
+            manifest_path.write_text("{not-json\n")
+            with self.assertRaisesRegex(ValueError, "manifest"):
+                load_manifest(target)
+
+            manifest_path.unlink()
+            outside = Path(tmpdir) / "outside.json"
+            outside.write_text("{}\n")
+            manifest_path.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                load_manifest(target)
+
+    def test_write_manifest_rejects_symlinked_state_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            outside = Path(tmpdir) / "outside"
+            target.mkdir()
+            outside.mkdir()
+            (target / ".vault-builder").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                write_manifest(
+                    target,
+                    VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {}),
+                )
 
 
 class ContractCatalogTest(unittest.TestCase):

@@ -132,7 +132,6 @@ mkdir -p "${TARGET_DIR}/scratch/drafts" "${TARGET_DIR}/scratch/reports" "${TARGE
 mkdir -p "${TARGET_DIR}/docs"
 
 copy_file ".gitignore"
-copy_file "init-vault.sh"
 copy_file "AGENTS.md"
 copy_file "README.md"
 copy_file "README-kr.md"
@@ -143,7 +142,7 @@ copy_file "docs/VAULT_PROMPTS.md"
 copy_tree ".github"
 copy_tree ".agents"
 copy_tree "docs/agent"
-copy_tree "scripts"
+copy_file "scripts/release_gate.sh"
 copy_tree "tools/wiki"
 copy_tree "tests"
 copy_tree "wiki"
@@ -162,9 +161,30 @@ touch "${TARGET_DIR}/raw/assets/.gitkeep"
 touch "${TARGET_DIR}/raw/imports/.gitkeep"
 touch "${TARGET_DIR}/scratch/reports/.gitkeep"
 
-chmod +x "${TARGET_DIR}/init-vault.sh" 2>/dev/null || true
-chmod +x "${TARGET_DIR}/scripts/bootstrap.sh" 2>/dev/null || true
 chmod +x "${TARGET_DIR}/scripts/release_gate.sh" 2>/dev/null || true
+
+choose_python() {
+  local candidate
+  for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
+    if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then
+      if "${candidate}" - <<'PY' >/dev/null 2>&1; then
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+        echo "${candidate}"
+        return 0
+      fi
+    fi
+  done
+  echo "Missing required command: Python 3.10 or newer" >&2
+  exit 1
+}
+
+PYTHON_BIN="$(choose_python)"
+"${PYTHON_BIN}" "${SCRIPT_DIR}/tools/vault_migration/cli.py" manifest \
+  --builder-root "${SCRIPT_DIR}" \
+  --target "${TARGET_DIR}" \
+  --builder-revision "${VAULT_BUILDER_REVISION:-contract-v1}"
 
 echo "LLM Wiki Vault initialized: ${TARGET_DIR}"
 if [[ "${WITH_STENC}" -eq 1 ]]; then

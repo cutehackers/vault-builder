@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 scratch/reports/*.tmp
 scratch/reports/*.cache
+.vault-builder/recovery/

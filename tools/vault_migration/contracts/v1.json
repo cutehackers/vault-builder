@@ -30,7 +30,7 @@
       "mode": "0644",
       "path": ".gitignore",
       "policy": "replace-if-unmodified",
-      "sha256": "a6945bb4c5df11360bfcd7dce2f7f6970bfb11f6a3223a6b39b34be9906b2698"
+      "sha256": "e81a7daedef941efd44c0372aa266d89a5346398a85db1a42b1e6804607b1bde"
     },
     "AGENTS.md": {
       "mode": "0644",
@@ -108,7 +108,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "a6331339a7d5f6ae6070ec9f3d8c831b5ca5e0e683e960d0cb6a76de4bb3cc73"
+      "sha256": "1a9310b5ee81049365ab911733e010379d23d08bdad0adebc7e4f56e95e64db3"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",

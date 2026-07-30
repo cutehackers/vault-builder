@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.vault_migration.catalogs import build_catalog, write_catalog
+from tools.vault_migration.manifests import create_manifest, write_manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +22,10 @@ def main(argv: list[str] | None = None) -> int:
     catalog.add_argument("--revision", required=True)
     catalog.add_argument("--source-ref")
     catalog.add_argument("--output", required=True)
+    manifest = subcommands.add_parser("manifest")
+    manifest.add_argument("--builder-root", required=True)
+    manifest.add_argument("--target", required=True)
+    manifest.add_argument("--builder-revision", required=True)
 
     args = parser.parse_args(argv)
     if args.command == "catalog":
@@ -33,6 +38,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"catalog: {exc}", file=sys.stderr)
             return 1
         print(display_output)
+        return 0
+    if args.command == "manifest":
+        try:
+            result = create_manifest(
+                Path(args.builder_root),
+                Path(args.target),
+                args.builder_revision,
+            )
+            output = write_manifest(Path(args.target), result)
+        except (OSError, ValueError) as exc:
+            print(f"manifest: {exc}", file=sys.stderr)
+            return 1
+        print(f"{output} (contract v{result.contract_version})")
         return 0
     return 1
 

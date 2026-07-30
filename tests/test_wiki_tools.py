@@ -1877,7 +1877,6 @@ class WikiToolCliTest(unittest.TestCase):
                 target / "AGENTS.md",
                 target / "README-kr.md",
                 target / ".github" / "workflows" / "release-gate.yml",
-                target / "scripts" / "bootstrap.sh",
                 target / "scripts" / "release_gate.sh",
                 target / "docs" / "LLM-WIKI.md",
                 target / "docs" / "usage.md",
@@ -1900,7 +1899,13 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "agents" / "skills").exists())
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
-            self.assertTrue((target / "scripts" / "bootstrap.sh").stat().st_mode & 0o111)
+            manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
+            self.assertEqual(1, manifest["contract_version"])
+            self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
+            self.assertNotIn("wiki/overview.md", manifest["managed_files"])
+            self.assertFalse((target / "tools" / "vault_migration").exists())
+            self.assertFalse((target / "init-vault.sh").exists())
+            self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
             self.assertTrue((target / "scripts" / "release_gate.sh").stat().st_mode & 0o111)
             self.assertEqual(0, lint_result.returncode, lint_result.stdout + lint_result.stderr)
             self.assertIn("No issues found", lint_result.stdout)
@@ -1925,7 +1930,10 @@ class WikiToolCliTest(unittest.TestCase):
             resolved_target = target.resolve()
             self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
             self.assertTrue((target / "tools" / "wiki" / "cli.py").exists())
-            self.assertTrue((target / "scripts" / "bootstrap.sh").exists())
+            self.assertTrue((target / ".vault-builder" / "manifest.json").exists())
+            self.assertTrue((target / "scripts" / "release_gate.sh").exists())
+            self.assertFalse((target / "init-vault.sh").exists())
+            self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
             self.assertTrue((target / "README-kr.md").exists())
             self.assertFalse((tmp / "wiki").exists())
             self.assertIn(f"cd {resolved_target}", init_result.stdout)
@@ -1956,14 +1964,13 @@ class WikiToolCliTest(unittest.TestCase):
             tmp = Path(tmpdir)
             template = tmp / "template-without-stenc"
             target = tmp / "new-wiki"
-            init_result = subprocess.run(
-                ["./init-vault.sh", str(template)],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
+            shutil.copytree(
+                root,
+                template,
+                ignore=shutil.ignore_patterns(".git", ".worktrees", "__pycache__"),
             )
-            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+            shutil.rmtree(template / "docs" / "stenc")
+            shutil.rmtree(template / "tools" / "stenc")
 
             opt_in_result = subprocess.run(
                 ["./init-vault.sh", "--with-stenc", str(target)],
@@ -2023,7 +2030,8 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
             self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
             self.assertTrue((target / "tools" / "wiki" / "cli.py").exists())
-            self.assertTrue((target / "scripts" / "bootstrap.sh").exists())
+            self.assertTrue((target / ".vault-builder" / "manifest.json").exists())
+            self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             self.assertIn("Ready:", bootstrap_result.stdout)

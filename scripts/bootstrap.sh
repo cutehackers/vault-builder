@@ -130,7 +130,9 @@ case "${WITH_STENC}" in
 esac
 init_args+=("${TARGET_DIR}")
 
-bash "${template_dir}/init-vault.sh" "${init_args[@]}"
+VAULT_BUILDER_REVISION="${REF}" \
+  PYTHON="${PYTHON_BIN}" \
+  bash "${template_dir}/init-vault.sh" "${init_args[@]}"
 
 (
   cd -- "${TARGET_DIR}"
