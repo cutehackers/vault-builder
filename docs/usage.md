@@ -84,6 +84,25 @@ python3 tools/vault_migration/cli.py apply \
 복구가 필요하다고 도구가 안내할 때만 명시적으로 `recover`를 실행합니다. Vault
 Graph는 읽기 전용 소비자이며 Vault를 수정하거나 migration하지 않습니다.
 
+apply가 `Migration committed, cleanup pending`을 보고하면 두 gate와 version 1
+manifest commit은 이미 끝난 상태입니다. 이때는 audit이나 apply를 다시 실행하지
+말고, 출력된 migration ID로 cleanup-only 복구를 실행합니다.
+
+```bash
+python3 tools/vault_migration/cli.py recover \
+  --target /path/to/vault \
+  --migration-id <printed-migration-id>
+```
+
+이 상태의 `recover`는 남은 marker와 recovery tombstone만 정리하며 관리 파일이나
+manifest를 legacy bytes로 되돌리지 않습니다. 같은 명령을 다시 실행해도 version 1
+상태를 유지합니다.
+
+실패한 apply가 `Automatic rollback: completed; cleanup pending`을 보고하면 prior
+Vault bytes와 mode 복원은 이미 검증된 상태입니다. 같은 `recover` 형식으로
+preparation/rollback journal cleanup만 재개합니다. 이 경로는 version 1 commit을
+되돌리지 않는 committed cleanup 경로와 구분됩니다.
+
 ## 2. 단순 사용 모델
 
 LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 세 가지 요청만 기억하면 됩니다.

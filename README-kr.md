@@ -50,6 +50,15 @@ python3 tools/vault_migration/cli.py apply \
 index/map을 재생성하지 않습니다. Vault Graph는 읽기 전용 소비자이며 Vault를
 수정하거나 migration하지 않습니다.
 
+apply가 `Migration committed, cleanup pending`을 출력하면 version 1 파일과
+manifest는 이미 commit된 상태입니다. 출력된 정확한 `recover --migration-id`
+명령을 실행하세요. 이 복구는 cleanup만 완료하며 legacy bytes로 rollback하지
+않습니다.
+
+실패한 apply가 `Automatic rollback: completed; cleanup pending`을 출력하면 이전
+Vault bytes 복원은 이미 끝났습니다. 출력된 `recover` 명령으로 durable preparation
+또는 rollback journal 정리만 완료하세요.
+
 ## 예제 프롬프트
 
 아래 문장을 agent에게 그대로 요청하면 됩니다. 파일 이름만 현재 vault에 맞게

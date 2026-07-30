@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-30 - Migration Durability And Cleanup Lifecycle Correction
+**Trigger:** Final whole-branch durability re-review after the integration correction.
+**Scope:** Directory-entry persistence, journal-contained publication staging, preparation/rollback authority, and committed cleanup recovery.
+**Core Values Protected:** Crash-safe WAL ordering, exact rollback, committed-state preservation, and actionable idempotent recovery.
+**Changes Applied:** Propagate fatal directory fsync failures; establish target-root preparation authority before recovery ancestry; durably stage managed, prior/candidate manifest, and rollback publications; move committed and rolled-back journals through phase-specific tombstones; make `recover` resume preparation, rollback, or committed cleanup without crossing state boundaries.
+**Verification:** Focused fsync injection; nested preparation, managed/manifest, rollback, marker, tombstone-rename, partial-deletion, and final-fsync hard stops; full builder, generated-Vault, catalog, wiki, and acceptance gates.
+
 ## 2026-07-30 - Final Branch Integration Correction
 **Trigger:** Final whole-branch review after Task 8 acceptance.
 **Scope:** Candidate-manifest write-ahead recovery, authority strictness, transactional apply errors, and generated-Vault topology documentation.

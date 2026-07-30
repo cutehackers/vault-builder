@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
@@ -347,6 +348,21 @@ class VaultManifestTest(unittest.TestCase):
             manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
 
             with mock.patch("tools.vault_migration.manifests.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(ValueError, "Could not write"):
+                    write_manifest(target, manifest)
+
+            self.assertEqual([], list((target / ".vault-builder").glob(".manifest.json.*.tmp")))
+
+    def test_manifest_write_reports_parent_fsync_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            target.mkdir()
+            manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
+
+            with mock.patch(
+                "tools.vault_migration.manifests._fsync_directory",
+                side_effect=OSError(errno.EIO, "injected manifest parent fsync"),
+            ):
                 with self.assertRaisesRegex(ValueError, "Could not write"):
                     write_manifest(target, manifest)
 
@@ -928,14 +944,32 @@ class MigrationApplyTest(unittest.TestCase):
             shutil.rmtree(target / ".agents")
             before = _tree_digest(target)
             plan = audit_vault(ROOT, target)
-            original_write = applying._atomic_write
+            original_stage = applying._create_staged_file
 
-            def fail_created_file(destination: Path, contents: bytes, mode: str) -> None:
-                if destination.as_posix().endswith("/.agents/skills/wiki-ingest/SKILL.md"):
+            def fail_created_file(
+                journal_root: Path,
+                destination: Path,
+                contents: bytes,
+                mode: str,
+                *,
+                replace_partial: bool = False,
+            ) -> None:
+                if destination.as_posix().endswith(
+                    "/staged/managed/.agents/skills/wiki-ingest/SKILL.md"
+                ):
                     raise OSError("injected create failure")
-                original_write(destination, contents, mode)
+                original_stage(
+                    journal_root,
+                    destination,
+                    contents,
+                    mode,
+                    replace_partial=replace_partial,
+                )
 
-            with mock.patch("tools.vault_migration.applying._atomic_write", side_effect=fail_created_file):
+            with mock.patch(
+                "tools.vault_migration.applying._create_staged_file",
+                side_effect=fail_created_file,
+            ):
                 with self.assertRaisesRegex(applying.MigrationApplyError, "injected create failure"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
@@ -1069,6 +1103,119 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIsNone(failure.audit_command)
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
+    def test_rollback_cleanup_fsync_failure_remains_recoverable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            journal_root = target.resolve() / ".vault-builder" / "recovery" / plan.migration_id
+            original = journal_root / "originals" / "AGENTS.md"
+            tombstone = applying._cleanup_tombstone(
+                journal_root,
+                recovery_existed=False,
+                rolled_back=True,
+                state_existed=False,
+            )
+            tombstone_original = tombstone / "originals" / "AGENTS.md"
+            real_fsync = applying._fsync_directory
+            failed = False
+            gate_failed = False
+
+            def fail_after_original_unlink(path: Path) -> None:
+                nonlocal failed
+                if (
+                    gate_failed
+                    and not failed
+                    and (
+                        (path == original.parent and not original.exists())
+                        or (
+                            path == tombstone_original.parent
+                            and not tombstone_original.exists()
+                        )
+                    )
+                ):
+                    failed = True
+                    raise OSError(errno.EIO, "injected rollback cleanup fsync")
+                real_fsync(path)
+
+            def fail_gate(_: Path) -> None:
+                nonlocal gate_failed
+                gate_failed = True
+                raise subprocess.CalledProcessError(13, ["bash", "scripts/release_gate.sh"])
+
+            with mock.patch.object(
+                applying,
+                "_fsync_directory",
+                side_effect=fail_after_original_unlink,
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            failure = raised.exception
+            self.assertTrue(failed)
+            self.assertTrue(failure.rollback_completed)
+            self.assertTrue(failure.rollback_cleanup_pending, str(failure))
+            self.assertIn(
+                f"recover --target {target.resolve()} --migration-id {plan.migration_id}",
+                failure.recover_command,
+            )
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_rollback_ancestry_fsync_failure_keeps_terminal_marker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            journal_root = target.resolve() / ".vault-builder" / "recovery" / plan.migration_id
+            tombstone = applying._cleanup_tombstone(
+                journal_root,
+                recovery_existed=False,
+                rolled_back=True,
+                state_existed=False,
+            )
+            state_directory = target.resolve() / ".vault-builder"
+            real_fsync = applying._fsync_directory
+            failed = False
+            gate_failed = False
+
+            def fail_removed_state_parent(path: Path) -> None:
+                nonlocal failed
+                if (
+                    gate_failed
+                    and path == target.resolve()
+                    and not state_directory.exists()
+                    and not failed
+                ):
+                    failed = True
+                    raise OSError(errno.EIO, "injected rollback ancestry fsync")
+                real_fsync(path)
+
+            def fail_gate(_: Path) -> None:
+                nonlocal gate_failed
+                gate_failed = True
+                raise subprocess.CalledProcessError(14, ["bash", "scripts/release_gate.sh"])
+
+            with mock.patch.object(
+                applying,
+                "_fsync_directory",
+                side_effect=fail_removed_state_parent,
+            ):
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+
+            failure = raised.exception
+            self.assertTrue(failed)
+            self.assertTrue(failure.rollback_completed)
+            self.assertTrue(failure.rollback_cleanup_pending)
+            self.assertTrue(tombstone.is_dir())
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
     def test_precondition_failure_is_not_reported_as_a_rollback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1109,6 +1256,7 @@ class MigrationApplyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
             _copy_legacy_fixture(target)
+            before = _tree_digest(target)
             plan = audit_vault(ROOT, target)
 
             with (
@@ -1120,7 +1268,7 @@ class MigrationApplyTest(unittest.TestCase):
                 ),
                 mock.patch.object(
                     applying,
-                    "_remove_tree_no_symlinks",
+                    "_cleanup_preparing",
                     side_effect=OSError("journal cleanup failure"),
                 ),
             ):
@@ -1135,6 +1283,201 @@ class MigrationApplyTest(unittest.TestCase):
                 failure.recover_command,
             )
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_preparation_backup_hard_stop_has_durable_cleanup_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            victim_bytes = (target / ".gitignore").read_bytes()
+
+            child = os.fork()
+            if child == 0:
+                real_write_all = applying._write_all
+
+                def hard_stop_first_backup(
+                    descriptor: int,
+                    contents: bytes,
+                ) -> None:
+                    if contents == victim_bytes:
+                        os.write(descriptor, contents[: max(1, len(contents) // 2)])
+                        os.fsync(descriptor)
+                        os._exit(59)
+                    real_write_all(descriptor, contents)
+
+                with mock.patch.object(
+                    applying,
+                    "_write_all",
+                    side_effect=hard_stop_first_backup,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(59, os.WEXITSTATUS(child_status))
+            journal_root = (
+                target / ".vault-builder" / "recovery" / plan.migration_id
+            )
+            journal = json.loads((journal_root / "journal.json").read_text())
+            self.assertEqual("preparing", journal["state"])
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_preparation_bootstrap_hard_stop_has_durable_cleanup_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-root":
+                        os._exit(60)
+
+                with mock.patch.object(
+                    applying,
+                    "_journal_bootstrap_step",
+                    side_effect=hard_stop,
+                    create=True,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(60, os.WEXITSTATUS(child_status))
+            preparing_root = applying._preparing_journal_root(
+                target.resolve(),
+                plan.migration_id,
+                recovery_existed=False,
+                state_existed=False,
+                create=False,
+            )
+            self.assertTrue(preparing_root.is_dir())
+            self.assertFalse((preparing_root / "journal.json").exists())
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_partial_preparing_journal_has_durable_cleanup_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                first_write = True
+
+                def hard_stop_first_write(
+                    descriptor: int,
+                    contents: bytes,
+                ) -> None:
+                    nonlocal first_write
+                    if first_write:
+                        first_write = False
+                        os.write(descriptor, contents[: max(1, len(contents) // 2)])
+                        os.fsync(descriptor)
+                        os._exit(61)
+                    applying._write_all(descriptor, contents)
+
+                with mock.patch.object(
+                    applying,
+                    "_write_all",
+                    side_effect=hard_stop_first_write,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(61, os.WEXITSTATUS(child_status))
+            preparing_root = applying._preparing_journal_root(
+                target.resolve(),
+                plan.migration_id,
+                recovery_existed=False,
+                state_existed=False,
+                create=False,
+            )
+            self.assertTrue((preparing_root / ".journal.json.next").is_file())
+            self.assertFalse((preparing_root / "journal.json").exists())
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_preparing_root_recovery_publication_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            preparing_root = applying._preparing_journal_root(
+                target.resolve(),
+                plan.migration_id,
+                recovery_existed=False,
+                state_existed=False,
+                create=False,
+            )
+            journal_root = (
+                target.resolve()
+                / ".vault-builder"
+                / "recovery"
+                / plan.migration_id
+            )
+
+            child = os.fork()
+            if child == 0:
+                def stop_after_root(stage: str) -> None:
+                    if stage == "after-root":
+                        os._exit(62)
+
+                with mock.patch.object(
+                    applying,
+                    "_journal_bootstrap_step",
+                    side_effect=stop_after_root,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+            _, child_status = os.waitpid(child, 0)
+            self.assertEqual(62, os.WEXITSTATUS(child_status))
+
+            child = os.fork()
+            if child == 0:
+                real_replace = applying.os.replace
+
+                def stop_before_recovery_publication(
+                    source: Path,
+                    destination: Path,
+                ) -> None:
+                    if (
+                        Path(source) == preparing_root
+                        and Path(destination) == journal_root
+                    ):
+                        os._exit(63)
+                    real_replace(source, destination)
+
+                with mock.patch.object(
+                    applying.os,
+                    "replace",
+                    side_effect=stop_before_recovery_publication,
+                ):
+                    recover_migration(target, plan.migration_id)
+                os._exit(99)
+            _, child_status = os.waitpid(child, 0)
+            self.assertEqual(63, os.WEXITSTATUS(child_status))
+            journal = json.loads((preparing_root / "journal.json").read_text())
+            self.assertEqual("preparation-cleanup-pending", journal["state"])
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
 
     def test_apply_rejects_changed_builder_bytes_before_journal_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1163,7 +1506,10 @@ class MigrationApplyTest(unittest.TestCase):
             plan = audit_vault(ROOT, target)
             before = _tree_digest(target)
 
-            with mock.patch("tools.vault_migration.applying.write_manifest", side_effect=ValueError("manifest write failed")):
+            with mock.patch(
+                "tools.vault_migration.applying._publish_candidate_manifest",
+                side_effect=ValueError("manifest write failed"),
+            ):
                 with self.assertRaisesRegex(applying.MigrationApplyError, "manifest write failed"):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
@@ -1247,7 +1593,14 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(prior_bytes, (target / ".vault-builder" / "manifest.json").read_bytes())
 
     def test_prior_manifest_backup_write_ahead_crash_recovers_exactly(self):
-        for stop_stage, exit_code in (("after-intent", 38), ("after-original", 39)):
+        cases = (
+            ("after-intent", 38, False, False),
+            ("after-backup-stage", 56, True, False),
+            ("before-backup-publication", 57, True, False),
+            ("after-backup-publication", 58, False, True),
+            ("after-original", 39, False, True),
+        )
+        for stop_stage, exit_code, staged_exists, original_exists in cases:
             with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
                 target = Path(tmpdir) / "vault"
                 _copy_legacy_fixture(target)
@@ -1259,6 +1612,9 @@ class MigrationApplyTest(unittest.TestCase):
                     managed_files={},
                 )
                 write_manifest(target, prior)
+                prior_bytes = (
+                    target / ".vault-builder" / "manifest.json"
+                ).read_bytes()
                 before = _tree_digest(target)
                 plan = audit_vault(ROOT, target)
 
@@ -1278,13 +1634,68 @@ class MigrationApplyTest(unittest.TestCase):
                 journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
                 journal = json.loads((journal_root / "journal.json").read_text())
                 self.assertEqual("intent", journal["manifest"]["backup_state"])
+                self.assertEqual(
+                    "staged/prior-manifest.json",
+                    journal["manifest"]["backup_staged_path"],
+                )
                 backup = journal_root / "originals" / ".vault-builder" / "manifest.json"
-                self.assertEqual(stop_stage == "after-original", backup.is_file())
+                staged = journal_root / "staged" / "prior-manifest.json"
+                self.assertEqual(staged_exists, staged.is_file())
+                self.assertEqual(original_exists, backup.is_file())
+                if backup.is_file():
+                    self.assertEqual(prior_bytes, backup.read_bytes())
 
                 recover_migration(target, plan.migration_id)
 
                 self.assertEqual(before, _tree_digest(target))
                 self.assertEqual(prior, load_manifest(target))
+
+    def test_prior_manifest_partial_backup_staging_recovers_exactly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            prior = VaultManifest(
+                schema_version=1,
+                contract_version=1,
+                builder_revision="prior",
+                generated_at="2026-07-30T00:00:00Z",
+                managed_files={},
+            )
+            write_manifest(target, prior)
+            prior_bytes = (target / ".vault-builder" / "manifest.json").read_bytes()
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                real_write_all = applying._write_all
+
+                def hard_stop_during_backup(descriptor: int, contents: bytes) -> None:
+                    if contents == prior_bytes:
+                        os.write(descriptor, contents[: max(1, len(contents) // 2)])
+                        os.fsync(descriptor)
+                        os._exit(55)
+                    real_write_all(descriptor, contents)
+
+                with mock.patch.object(
+                    applying,
+                    "_write_all",
+                    side_effect=hard_stop_during_backup,
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(55, os.WEXITSTATUS(child_status))
+            journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+            journal = json.loads((journal_root / "journal.json").read_text())
+            self.assertEqual("intent", journal["manifest"]["backup_state"])
+            self.assertEqual(prior, load_manifest(target))
+
+            self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
+            self.assertEqual(before, _tree_digest(target))
+            self.assertEqual(prior, load_manifest(target))
 
     def test_candidate_manifest_recovery_refuses_unknown_current_hash(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1307,6 +1718,35 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(34, os.WEXITSTATUS(child_status))
             manifest_path = target / ".vault-builder" / "manifest.json"
             manifest_path.write_text("unknown manifest bytes\n")
+            before_recovery = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "unknown Vault builder manifest"):
+                recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before_recovery, _tree_digest(target))
+            self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
+
+    def test_candidate_manifest_recovery_refuses_unknown_current_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+
+            child = os.fork()
+            if child == 0:
+                def hard_stop(stage: str) -> None:
+                    if stage == "after-publication":
+                        os._exit(54)
+
+                with mock.patch.object(applying, "_manifest_step", side_effect=hard_stop):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                os._exit(99)
+
+            _, child_status = os.waitpid(child, 0)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(54, os.WEXITSTATUS(child_status))
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            manifest_path.chmod(0o600)
             before_recovery = _tree_digest(target)
 
             with self.assertRaisesRegex(ValueError, "unknown Vault builder manifest"):
@@ -1526,6 +1966,7 @@ class MigrationApplyTest(unittest.TestCase):
                             "sha256": None,
                             "mode": None,
                             "backup_state": "not-required",
+                            "backup_staged_path": None,
                             "candidate_sha256": "c" * 64,
                             "publication_state": "intent",
                         },
@@ -1935,6 +2376,448 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
 
+    def test_directory_fsync_suppresses_only_explicit_unsupported_errors(self):
+        descriptor = 123
+        unsupported = {errno.EINVAL}
+        if hasattr(errno, "ENOTSUP"):
+            unsupported.add(errno.ENOTSUP)
+        if hasattr(errno, "EOPNOTSUPP"):
+            unsupported.add(errno.EOPNOTSUPP)
+
+        for error_number in sorted(unsupported):
+            with self.subTest(error_number=error_number), mock.patch.object(
+                applying.os,
+                "open",
+                return_value=descriptor,
+            ), mock.patch.object(
+                applying.os,
+                "fsync",
+                side_effect=OSError(error_number, "unsupported"),
+            ), mock.patch.object(applying.os, "close") as close:
+                applying._fsync_directory(Path("/durability-test"))
+                close.assert_called_once_with(descriptor)
+
+        for error_number in (errno.EIO, errno.ENOSPC, errno.EROFS, errno.EACCES, errno.EBADF):
+            with self.subTest(error_number=error_number), mock.patch.object(
+                applying.os,
+                "open",
+                return_value=descriptor,
+            ), mock.patch.object(
+                applying.os,
+                "fsync",
+                side_effect=OSError(error_number, "fatal"),
+            ), mock.patch.object(applying.os, "close") as close:
+                with self.assertRaises(OSError) as raised:
+                    applying._fsync_directory(Path("/durability-test"))
+                self.assertEqual(error_number, raised.exception.errno)
+                close.assert_called_once_with(descriptor)
+
+        with mock.patch.object(
+            applying.os,
+            "open",
+            side_effect=OSError(errno.EACCES, "open denied"),
+        ):
+            with self.assertRaises(OSError) as raised:
+                applying._fsync_directory(Path("/durability-test"))
+            self.assertEqual(errno.EACCES, raised.exception.errno)
+
+    def test_journal_ancestry_fsync_failure_aborts_without_target_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_state_directory_creation(path: Path) -> None:
+                nonlocal failed
+                if path == target.resolve() and not failed:
+                    failed = True
+                    raise OSError(errno.EIO, "injected journal ancestry fsync")
+                real_fsync(path)
+
+            with mock.patch.object(applying, "_fsync_directory", side_effect=fail_state_directory_creation):
+                with self.assertRaisesRegex(
+                    applying.MigrationApplyError,
+                    "journal ancestry fsync",
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_journal_state_parent_fsync_failure_aborts_without_target_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            journal_root = target.resolve() / ".vault-builder" / "recovery" / plan.migration_id
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_first_journal_state(path: Path) -> None:
+                nonlocal failed
+                if path == journal_root and not failed:
+                    failed = True
+                    raise OSError(errno.EIO, "injected journal state parent fsync")
+                real_fsync(path)
+
+            with mock.patch.object(applying, "_fsync_directory", side_effect=fail_first_journal_state):
+                with self.assertRaisesRegex(
+                    applying.MigrationApplyError,
+                    "journal state parent fsync",
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_managed_replacement_parent_fsync_failure_rolls_back_exactly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            victim = next(
+                action for action in plan.actions
+                if action.action == "replace" and action.path == "AGENTS.md"
+            )
+            victim_parent = (target.resolve() / victim.path).parent
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_managed_parent(path: Path) -> None:
+                nonlocal failed
+                if path == victim_parent and (target / victim.path).read_bytes() == (ROOT / victim.path).read_bytes() and not failed:
+                    failed = True
+                    raise OSError(errno.EIO, "injected managed replacement parent fsync")
+                real_fsync(path)
+
+            with mock.patch.object(applying, "_fsync_directory", side_effect=fail_managed_parent):
+                with self.assertRaisesRegex(
+                    applying.MigrationApplyError,
+                    "managed replacement parent fsync",
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_cross_directory_publication_fsyncs_destination_before_stage_removal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            journal = root / "journal"
+            destination_parent = root / "target"
+            journal.mkdir()
+            destination_parent.mkdir()
+            staged = journal / "staged.bin"
+            destination = destination_parent / "managed.bin"
+            contents = b"durable publication\n"
+            applying._create_staged_file(journal, staged, contents, "0644")
+            calls: list[Path] = []
+
+            with mock.patch.object(
+                applying,
+                "_fsync_directory",
+                side_effect=lambda path: calls.append(path),
+            ):
+                applying._publish_staged_file(
+                    staged,
+                    destination,
+                    hashlib.sha256(contents).hexdigest(),
+                    "0644",
+                )
+
+            self.assertEqual(
+                [destination_parent, journal],
+                calls,
+            )
+
+    def test_candidate_manifest_parent_fsync_failure_rolls_back_exactly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            manifest_parent = target.resolve() / ".vault-builder"
+            manifest_path = manifest_parent / "manifest.json"
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_candidate_parent(path: Path) -> None:
+                nonlocal failed
+                if path == manifest_parent and manifest_path.is_file() and not failed:
+                    failed = True
+                    raise OSError(errno.EIO, "injected candidate manifest parent fsync")
+                real_fsync(path)
+
+            with mock.patch.object(applying, "_fsync_directory", side_effect=fail_candidate_parent):
+                with self.assertRaisesRegex(
+                    applying.MigrationApplyError,
+                    "candidate manifest parent fsync",
+                ):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_managed_and_manifest_staging_hard_stops_recover_exactly(self):
+        cases = (
+            ("managed", 51),
+            ("manifest", 52),
+        )
+        for boundary, exit_code in cases:
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+                managed_path = next(
+                    action.path for action in plan.actions
+                    if action.action == "replace"
+                )
+
+                child = os.fork()
+                if child == 0:
+                    def managed_stop(stage: str, relative: str) -> None:
+                        if boundary == "managed" and stage == "after-stage" and relative == managed_path:
+                            os._exit(exit_code)
+
+                    def manifest_stop(stage: str) -> None:
+                        if boundary == "manifest" and stage == "after-stage":
+                            os._exit(exit_code)
+
+                    with (
+                        mock.patch.object(applying, "_managed_step", side_effect=managed_stop, create=True),
+                        mock.patch.object(applying, "_manifest_step", side_effect=manifest_stop),
+                    ):
+                        apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                    os._exit(99)
+
+                _, child_status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(child_status))
+                self.assertEqual(exit_code, os.WEXITSTATUS(child_status))
+                journal_root = target / ".vault-builder" / "recovery" / plan.migration_id
+                self.assertTrue(journal_root.is_dir())
+                self.assertTrue((journal_root / "staged").is_dir())
+
+                recover_migration(target, plan.migration_id)
+
+                self.assertEqual(before, _tree_digest(target))
+                self.assertFalse(journal_root.exists())
+                self.assertEqual([], list(target.rglob("*.tmp")))
+
+    def test_cleanup_parent_fsync_failure_is_cleanup_pending_not_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            protected_before = _protected_hashes(target)
+            plan = audit_vault(ROOT, target)
+            recovery = target.resolve() / ".vault-builder" / "recovery"
+            tombstone = applying._cleanup_tombstone(
+                recovery / plan.migration_id,
+                recovery_existed=False,
+            )
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_cleanup_parent(path: Path) -> None:
+                nonlocal failed
+                if path == recovery and tombstone.exists() and not failed:
+                    failed = True
+                    raise OSError(errno.EIO, "injected cleanup parent fsync")
+                real_fsync(path)
+
+            with mock.patch.object(applying, "_fsync_directory", side_effect=fail_cleanup_parent):
+                with self.assertRaises(applying.MigrationCleanupPendingError) as raised:
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertIn("Migration committed, cleanup pending", str(raised.exception))
+            self.assertIn(f"recover --target {target.resolve()}", str(raised.exception))
+            self.assertEqual(protected_before, _protected_hashes(target))
+            manifest = load_manifest(target)
+            self.assertIsNotNone(manifest)
+            assert manifest is not None
+            self.assertEqual(plan.migration_id, manifest.last_migration_id)
+
+            self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+            self.assertEqual(manifest, load_manifest(target))
+            self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
+            self.assertFalse(recovery.exists())
+
+    def test_cleanup_recovers_when_final_tombstone_fsync_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            recovery = target.resolve() / ".vault-builder" / "recovery"
+            tombstone = applying._cleanup_tombstone(
+                recovery / plan.migration_id,
+                recovery_existed=False,
+            )
+            real_fsync = applying._fsync_directory
+            failed = False
+
+            def fail_empty_tombstone_fsync(path: Path) -> None:
+                nonlocal failed
+                if (
+                    path == tombstone
+                    and not (tombstone / "journal.json").exists()
+                    and not failed
+                ):
+                    failed = True
+                    raise OSError(errno.EIO, "injected empty tombstone fsync")
+                real_fsync(path)
+
+            with mock.patch.object(
+                applying,
+                "_fsync_directory",
+                side_effect=fail_empty_tombstone_fsync,
+            ):
+                with self.assertRaises(applying.MigrationCleanupPendingError):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertTrue(tombstone.is_dir())
+            self.assertEqual([], list(tombstone.iterdir()))
+            committed = load_manifest(target)
+
+            self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+            self.assertEqual(committed, load_manifest(target))
+            self.assertFalse(recovery.exists())
+
+    def test_cleanup_transient_nonempty_error_keeps_journal_for_resume(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            recovery = target.resolve() / ".vault-builder" / "recovery"
+            tombstone = applying._cleanup_tombstone(
+                recovery / plan.migration_id,
+                recovery_existed=False,
+            )
+            real_rmdir = Path.rmdir
+            failed = False
+
+            def fail_first_empty_child(path: Path) -> None:
+                nonlocal failed
+                if (
+                    tombstone in path.parents
+                    and path != tombstone
+                    and not any(path.iterdir())
+                    and not failed
+                ):
+                    failed = True
+                    raise OSError(errno.ENOTEMPTY, "injected transient nonempty error")
+                real_rmdir(path)
+
+            with mock.patch.object(
+                Path,
+                "rmdir",
+                autospec=True,
+                side_effect=fail_first_empty_child,
+            ):
+                with self.assertRaises(applying.MigrationCleanupPendingError):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(failed)
+            self.assertTrue((tombstone / "journal.json").is_file())
+            committed = load_manifest(target)
+
+            self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+            self.assertEqual(committed, load_manifest(target))
+            self.assertFalse(recovery.exists())
+
+    def test_idempotent_cleanup_preserves_preexisting_recovery_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            recovery = target / ".vault-builder" / "recovery"
+            recovery.mkdir(parents=True)
+            plan = audit_vault(ROOT, target)
+
+            committed = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertTrue(recovery.is_dir())
+            self.assertEqual([], list(recovery.iterdir()))
+            self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+            self.assertEqual(committed, load_manifest(target))
+            self.assertTrue(recovery.is_dir())
+
+    def test_cleanup_pending_rejects_symlinked_created_directory_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            shutil.rmtree(target / ".agents")
+            plan = audit_vault(ROOT, target)
+
+            with mock.patch.object(
+                applying,
+                "_remove_created_markers",
+                side_effect=OSError("injected marker cleanup failure"),
+            ):
+                with self.assertRaises(applying.MigrationCleanupPendingError):
+                    apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            created = target / ".agents" / "skills" / "wiki-update"
+            moved = target / ".agents" / "skills" / "wiki-update-moved"
+            created.rename(moved)
+            created.symlink_to(target / "docs", target_is_directory=True)
+            before_recovery = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "marker|symlink|identity"):
+                recover_migration(target, plan.migration_id)
+
+            self.assertEqual(before_recovery, _tree_digest(target))
+            self.assertTrue(
+                (target / ".vault-builder" / "recovery" / plan.migration_id).is_dir()
+            )
+
+    def test_cleanup_hard_stops_resume_without_rollback(self):
+        cases = (
+            ("after-marker-removal", 61, True),
+            ("after-journal-rename", 62, False),
+            ("during-tombstone-delete", 63, False),
+        )
+        for stop_stage, exit_code, missing_agents in cases:
+            with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                _copy_legacy_fixture(target)
+                if missing_agents:
+                    shutil.rmtree(target / ".agents")
+                protected_before = _protected_hashes(target)
+                plan = audit_vault(ROOT, target)
+
+                child = os.fork()
+                if child == 0:
+                    def hard_stop(stage: str) -> None:
+                        if stage == stop_stage:
+                            os._exit(exit_code)
+
+                    with mock.patch.object(applying, "_cleanup_step", side_effect=hard_stop, create=True):
+                        apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+                    os._exit(99)
+
+                _, child_status = os.waitpid(child, 0)
+                self.assertTrue(os.WIFEXITED(child_status))
+                self.assertEqual(exit_code, os.WEXITSTATUS(child_status))
+                committed = load_manifest(target)
+                self.assertIsNotNone(committed)
+                assert committed is not None
+                self.assertEqual(plan.migration_id, committed.last_migration_id)
+                self.assertEqual(protected_before, _protected_hashes(target))
+
+                self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+
+                self.assertEqual(committed, load_manifest(target))
+                self.assertEqual(protected_before, _protected_hashes(target))
+                self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
+                recovery = target / ".vault-builder" / "recovery"
+                self.assertFalse(recovery.exists())
+                self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
+
     def test_recovery_refuses_hostile_journals_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1960,6 +2843,7 @@ class MigrationApplyTest(unittest.TestCase):
                             "sha256": None,
                             "mode": None,
                             "backup_state": "not-required",
+                            "backup_staged_path": None,
                             "candidate_sha256": "c" * 64,
                             "publication_state": "intent",
                         },
@@ -2000,6 +2884,7 @@ class MigrationApplyTest(unittest.TestCase):
                     "sha256": None,
                     "mode": None,
                     "backup_state": "not-required",
+                    "backup_staged_path": None,
                     "candidate_sha256": "c" * 64,
                     "publication_state": "intent",
                 },
@@ -2607,6 +3492,19 @@ class VaultMigrationCliTest(unittest.TestCase):
                     ),
                 ),
                 (
+                    "cleanup-pending",
+                    applying.MigrationCleanupPendingError(
+                        OSError("cleanup exploded"),
+                        target=target,
+                        migration_id=plan.migration_id,
+                    ),
+                    (
+                        "Migration committed, cleanup pending",
+                        "Cleanup failure: cleanup exploded",
+                        f"recover --target {target} --migration-id {plan.migration_id}",
+                    ),
+                ),
+                (
                     "precondition",
                     ValueError("Migration target changed after audit; run audit again."),
                     ("Migration target changed after audit",),
@@ -2624,6 +3522,42 @@ class VaultMigrationCliTest(unittest.TestCase):
                     if name == "precondition":
                         self.assertNotIn("Automatic rollback", rendered)
                         self.assertNotIn("recover --target", rendered)
+
+    def test_recover_cli_distinguishes_cleanup_only_from_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            target.mkdir()
+            manifest = VaultManifest(
+                1,
+                1,
+                "test",
+                "2026-07-30T00:00:00Z",
+                {},
+                "0123456789abcdef",
+            )
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(
+                    cli,
+                    "recover_migration",
+                    return_value="cleanup-completed",
+                ),
+                mock.patch.object(cli, "load_manifest", return_value=manifest),
+                mock.patch("sys.stdout", stdout),
+            ):
+                result = cli.main(
+                    [
+                        "recover",
+                        "--target",
+                        str(target),
+                        "--migration-id",
+                        "0123456789abcdef",
+                    ]
+                )
+
+            self.assertEqual(0, result)
+            self.assertIn("Migration committed; cleanup completed.", stdout.getvalue())
+            self.assertNotIn("rollback completed", stdout.getvalue().lower())
 
     def test_recover_prints_actionable_failure_for_missing_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir:

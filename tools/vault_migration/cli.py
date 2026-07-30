@@ -491,10 +491,13 @@ def _run_apply(args: argparse.Namespace) -> int:
 
 
 def _run_recover(args: argparse.Namespace) -> int:
-    recover_migration(Path(args.target), args.migration_id)
+    outcome = recover_migration(Path(args.target), args.migration_id)
     manifest = load_manifest(Path(args.target))
     contract = "legacy" if manifest is None else str(manifest.contract_version)
-    print("Migration recovery completed.")
+    if outcome == "cleanup-completed":
+        print("Migration committed; cleanup completed.")
+    else:
+        print("Migration rollback completed.")
     print(f"Final contract: {contract}")
     return 0
 

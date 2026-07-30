@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
+from .durability import fsync_directory as _fsync_directory
 from .models import VaultManifest
 
 
@@ -97,27 +98,52 @@ def load_manifest(target_root: Path) -> VaultManifest | None:
 
 def write_manifest(target_root: Path, manifest: VaultManifest) -> Path:
     """Atomically replace the target manifest without following symlinks."""
-    _, state_directory, manifest_path = _manifest_paths(target_root)
-    state_directory.mkdir(exist_ok=True)
+    root, state_directory, manifest_path = _manifest_paths(target_root)
+    state_created = False
+    if not state_directory.exists():
+        state_directory.mkdir()
+        state_created = True
+        try:
+            _fsync_directory(root)
+        except OSError as exc:
+            try:
+                state_directory.rmdir()
+            except OSError:
+                pass
+            raise ValueError("Could not write Vault builder manifest.") from exc
     _, state_directory, manifest_path = _manifest_paths(target_root)
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
+            mode="wb",
             dir=state_directory,
             prefix=f".{_MANIFEST_FILENAME}.",
             suffix=".tmp",
             delete=False,
         ) as handle:
             temporary_path = Path(handle.name)
-            handle.write(manifest.to_json())
+            payload = manifest.to_json().encode("utf-8")
+            if handle.write(payload) != len(payload):
+                raise OSError("Vault builder manifest write was incomplete.")
             handle.flush()
+            os.fchmod(handle.fileno(), 0o644)
             os.fsync(handle.fileno())
         os.replace(temporary_path, manifest_path)
+        temporary_path = None
+        _fsync_directory(state_directory)
     except OSError as exc:
         raise ValueError("Could not write Vault builder manifest.") from exc
     finally:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+            try:
+                temporary_path.unlink(missing_ok=True)
+                _fsync_directory(state_directory)
+            except OSError:
+                pass
+        if state_created and not manifest_path.exists():
+            try:
+                state_directory.rmdir()
+                _fsync_directory(root)
+            except OSError:
+                pass
     return manifest_path

@@ -53,6 +53,15 @@ read-only audit succeeded but needs human review (`review-required`). Apply
 never merges wiki knowledge or rebuilds indexes/maps. Vault Graph is a
 read-only consumer and never edits or migrates a Vault.
 
+If apply reports `Migration committed, cleanup pending`, the version 1 files
+and manifest are already committed. Run the exact printed `recover
+--migration-id` command; that recovery finishes cleanup only and does not
+restore legacy bytes.
+
+If a failed apply reports `Automatic rollback: completed; cleanup pending`,
+the prior Vault bytes are already restored. Run the printed `recover` command
+to finish removing only the durable preparation or rollback journal.
+
 ## Example Prompts
 
 Send these prompts to your agent as-is. Change only the file names to match
