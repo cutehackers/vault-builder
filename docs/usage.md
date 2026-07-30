@@ -83,6 +83,12 @@ python3 tools/vault_migration/cli.py apply \
 자동 병합하거나 `wiki/index.md`/`wiki/maps/`를 재생성하지 않습니다. 실패 후
 복구가 필요하다고 도구가 안내할 때만 명시적으로 `recover`를 실행합니다. Vault
 Graph는 읽기 전용 소비자이며 Vault를 수정하거나 migration하지 않습니다.
+recovery journal, preparation authority, cleanup tombstone가 하나라도 남아 있으면
+apply는 target write 전에 중단하고 outstanding migration ID를 모두 정렬해 정확한
+`recover` 명령을 출력합니다.
+apply와 recover는 전체 실행 동안 target root의 process lock을 배타적으로
+유지합니다. 이미 migration 명령이 실행 중이면 새 명령은 target write 없이
+실패하며, process crash 시 lock은 운영체제가 해제합니다.
 
 apply가 `Migration committed, cleanup pending`을 보고하면 두 gate와 version 1
 manifest commit은 이미 끝난 상태입니다. 이때는 audit이나 apply를 다시 실행하지

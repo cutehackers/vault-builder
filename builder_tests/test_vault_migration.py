@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -271,6 +272,23 @@ class VaultManifestTest(unittest.TestCase):
             self.assertNotIn("tools/vault_migration/cli.py", manifest.managed_files)
             for relative, managed in manifest.managed_files.items():
                 self.assertEqual(managed.sha256, sha256_file(target / relative), relative)
+
+    def test_manifest_creation_rejects_managed_file_mode_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            managed = target / "AGENTS.md"
+            managed.chmod(0o600)
+
+            with self.assertRaisesRegex(ValueError, "mode"):
+                create_manifest(ROOT, target, "test")
 
     def test_load_manifest_rejects_malformed_or_symlinked_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -635,6 +653,31 @@ class ContractCatalogTest(unittest.TestCase):
         self.assertEqual(plan, MigrationPlan.from_json(rendered))
         self.assertEqual(rendered, json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n")
 
+    def test_plan_round_trip_preserves_observed_permission_drift(self):
+        for current_mode in ("0000", "0600", "0640", "0777"):
+            with self.subTest(current_mode=current_mode):
+                action = MigrationAction(
+                    path="AGENTS.md",
+                    action="replace",
+                    current_sha256="a" * 64,
+                    desired_sha256="a" * 64,
+                    current_mode=current_mode,
+                    desired_mode="0644",
+                    reason="mode drift",
+                )
+                plan = MigrationPlan(
+                    schema_version=1,
+                    migration_id="0123456789abcdef",
+                    current_contract_version=1,
+                    target_contract_version=1,
+                    builder_revision="test",
+                    target_fingerprint="c" * 64,
+                    actions=(action,),
+                    authority_issues=(),
+                )
+
+                self.assertEqual(plan, MigrationPlan.from_json(plan.to_json()))
+
 
 class MigrationPlanningTest(unittest.TestCase):
     def test_audit_is_read_only_and_classifies_known_custom_and_owned_files(self):
@@ -703,7 +746,33 @@ class MigrationPlanningTest(unittest.TestCase):
             self.assertEqual(1, plan.current_contract_version)
             self.assertEqual("replace", actions["tools/wiki/cli.py"].action)
 
-    def test_audit_blocks_unknown_manifest_contract_without_trusting_its_hashes(self):
+    def test_audit_classifies_mode_only_drift_as_replace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            managed = target / "AGENTS.md"
+            managed.chmod(0o600)
+            before = _tree_digest(target)
+
+            plan = audit_vault(ROOT, target)
+
+            self.assertEqual(before, _tree_digest(target))
+            action = next(
+                action for action in plan.actions if action.path == "AGENTS.md"
+            )
+            self.assertEqual("replace", action.action)
+            self.assertEqual(action.current_sha256, action.desired_sha256)
+            self.assertEqual("0600", action.current_mode)
+            self.assertEqual("0644", action.desired_mode)
+
+    def test_audit_rejects_unknown_manifest_contract_without_trusting_its_hashes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
             _copy_legacy_fixture(target)
@@ -712,29 +781,32 @@ class MigrationPlanningTest(unittest.TestCase):
             manifest_path = target / ".vault-builder" / "manifest.json"
             manifest_path.parent.mkdir()
             manifest_path.write_text(
-                VaultManifest(
-                    1,
-                    2,
-                    "unknown-contract",
-                    "2026-07-30T00:00:00Z",
+                json.dumps(
                     {
+                        "schema_version": 1,
+                        "contract_version": 2,
+                        "builder_revision": "unknown-contract",
+                        "generated_at": "2026-07-30T00:00:00Z",
+                        "managed_files": {
                         "tools/wiki/cli.py": ManagedFile(
                             "tools/wiki/cli.py",
                             hashlib.sha256(managed_path.read_bytes()).hexdigest(),
                             "0644",
-                        )
+                        ).to_dict()
+                        },
+                        "last_migration_id": None,
                     },
-                ).to_json()
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
             )
+            before = _tree_digest(target)
 
-            plan = audit_vault(ROOT, target)
+            with self.assertRaisesRegex(ValueError, "manifest"):
+                audit_vault(ROOT, target)
 
-            actions = {action.path: action for action in plan.actions}
-            self.assertEqual(2, plan.current_contract_version)
-            self.assertTrue(plan.has_blocking_actions)
-            self.assertEqual("review-required", actions["tools/wiki/cli.py"].action)
-            self.assertEqual("invalid", actions[".vault-builder/manifest.json"].action)
-            self.assertIn("unsupported-vault-builder-manifest-contract", {issue["code"] for issue in plan.authority_issues})
+            self.assertEqual(before, _tree_digest(target))
 
     def test_audit_marks_non_topology_catalog_leaf_as_invalid_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1020,6 +1092,271 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
 
+    def test_outstanding_rollback_blocks_every_apply_until_recovered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            original = _tree_digest(target)
+            first_plan = audit_vault(ROOT, target)
+
+            def fail_gate(_: Path) -> None:
+                raise subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"])
+
+            with mock.patch.object(applying, "_rollback", side_effect=OSError("rollback exploded")):
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(ROOT, target, first_plan, run_gate=fail_gate)
+
+            first_journal = (
+                target / ".vault-builder" / "recovery" / first_plan.migration_id
+            )
+            self.assertEqual(
+                "rollback-failed",
+                json.loads((first_journal / "journal.json").read_text())["state"],
+            )
+            second_plan = audit_vault(ROOT, target)
+            self.assertNotEqual(first_plan.migration_id, second_plan.migration_id)
+            blocked = _tree_digest(target)
+            expected_command = (
+                "python3 tools/vault_migration/cli.py recover "
+                f"--target {target.resolve()} --migration-id {first_plan.migration_id}"
+            )
+
+            for candidate in (first_plan, second_plan):
+                with self.subTest(candidate=candidate.migration_id):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        re.escape(expected_command),
+                    ):
+                        apply_plan(ROOT, target, candidate, run_gate=lambda _: None)
+                    self.assertEqual(blocked, _tree_digest(target))
+
+            self.assertEqual(
+                "rolled-back",
+                recover_migration(target, first_plan.migration_id),
+            )
+            self.assertEqual(original, _tree_digest(target))
+
+            fresh_plan = audit_vault(ROOT, target)
+            manifest = apply_plan(
+                ROOT,
+                target,
+                fresh_plan,
+                run_gate=lambda _: None,
+            )
+
+            self.assertEqual(fresh_plan.migration_id, manifest.last_migration_id)
+
+    def test_concurrent_apply_is_serialized_before_journal_creation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            _copy_legacy_fixture(target)
+            first_plan = audit_vault(ROOT, target)
+            second_builder = root / "second-builder"
+            shutil.copytree(
+                ROOT,
+                second_builder,
+                ignore=shutil.ignore_patterns(
+                    ".git",
+                    ".superpowers",
+                    "__pycache__",
+                    "scratch",
+                ),
+            )
+            second_catalog_path = (
+                second_builder
+                / "tools"
+                / "vault_migration"
+                / "contracts"
+                / "v1.json"
+            )
+            second_catalog = json.loads(second_catalog_path.read_text())
+            second_catalog["builder_revision"] = "concurrent-builder"
+            second_catalog_path.write_text(
+                json.dumps(second_catalog, indent=2, sort_keys=True) + "\n"
+            )
+            second_plan = audit_vault(second_builder, target)
+            self.assertNotEqual(first_plan.migration_id, second_plan.migration_id)
+            ready_read, ready_write = os.pipe()
+            release_read, release_write = os.pipe()
+            error_read, error_write = os.pipe()
+            original_check = applying._require_no_outstanding_migrations
+            child = os.fork()
+            if child == 0:
+                os.close(ready_read)
+                os.close(release_write)
+                os.close(error_read)
+
+                def pause_before_journal(resolved_target: Path) -> None:
+                    original_check(resolved_target)
+                    os.write(ready_write, b"1")
+                    os.read(release_read, 1)
+
+                try:
+                    with mock.patch.object(
+                        applying,
+                        "_require_no_outstanding_migrations",
+                        side_effect=pause_before_journal,
+                    ):
+                        apply_plan(
+                            ROOT,
+                            target,
+                            first_plan,
+                            run_gate=lambda _: None,
+                        )
+                except BaseException as exc:
+                    os.write(error_write, repr(exc).encode("utf-8"))
+                    os._exit(31)
+                os._exit(0)
+
+            os.close(ready_write)
+            os.close(release_read)
+            os.close(error_write)
+            self.assertEqual(b"1", os.read(ready_read, 1))
+            before = _tree_digest(target)
+            try:
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "migration operation is active",
+                ):
+                    apply_plan(
+                        second_builder,
+                        target,
+                        second_plan,
+                        run_gate=lambda _: None,
+                    )
+                self.assertEqual(before, _tree_digest(target))
+            finally:
+                os.write(release_write, b"1")
+                _, child_status = os.waitpid(child, 0)
+                os.close(ready_read)
+                os.close(release_write)
+            child_error = os.read(error_read, 4096).decode("utf-8")
+            os.close(error_read)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(0, os.WEXITSTATUS(child_status), child_error)
+
+    def test_recovery_acquires_directory_lock_after_process_crash(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            (
+                before,
+                plan,
+                _resolved_target,
+                _journal_root,
+                _journal,
+                _action,
+                _record_directory,
+            ) = self._prepare_missing_agents_transaction(target)
+            ready_read, ready_write = os.pipe()
+            child = os.fork()
+            if child == 0:
+                os.close(ready_read)
+
+                def hard_stop_after_lock(
+                    _target: Path,
+                    _migration_id: str,
+                ) -> str:
+                    os.write(ready_write, b"1")
+                    os._exit(23)
+
+                with mock.patch.object(
+                    applying,
+                    "_recover_migration_locked",
+                    side_effect=hard_stop_after_lock,
+                ):
+                    recover_migration(target, plan.migration_id)
+                os._exit(24)
+
+            os.close(ready_write)
+            self.assertEqual(b"1", os.read(ready_read, 1))
+            _, child_status = os.waitpid(child, 0)
+            os.close(ready_read)
+            self.assertTrue(os.WIFEXITED(child_status))
+            self.assertEqual(23, os.WEXITSTATUS(child_status))
+
+            self.assertEqual(
+                "rolled-back",
+                recover_migration(target, plan.migration_id),
+            )
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_apply_reports_every_outstanding_migration_deterministically(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            recovery = target / ".vault-builder" / "recovery"
+            recovery.mkdir(parents=True)
+            (recovery / "bbbbbbbbbbbbbbbb").mkdir()
+            (
+                target
+                / ".preparing-aaaaaaaaaaaaaaaa-keep-recovery-keep-state"
+            ).mkdir()
+            before = _tree_digest(target)
+
+            with self.assertRaises(ValueError) as raised:
+                apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            message = str(raised.exception)
+            first = (
+                "python3 tools/vault_migration/cli.py recover "
+                f"--target {target.resolve()} --migration-id aaaaaaaaaaaaaaaa"
+            )
+            second = (
+                "python3 tools/vault_migration/cli.py recover "
+                f"--target {target.resolve()} --migration-id bbbbbbbbbbbbbbbb"
+            )
+            self.assertIn(first, message)
+            self.assertIn(second, message)
+            self.assertLess(message.index(first), message.index(second))
+            self.assertEqual(before, _tree_digest(target))
+
+    def test_stale_journal_cannot_roll_back_a_later_committed_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "vault"
+            stale_storage = root / "stale-journal"
+            _copy_legacy_fixture(target)
+            stale_plan = audit_vault(ROOT, target)
+            resolved = applying._target_root(target)
+            checked, actions = applying._verify_preconditions(
+                ROOT,
+                resolved,
+                stale_plan,
+            )
+            stale_journal, _ = applying._prepare_journal(
+                resolved,
+                checked,
+                actions,
+            )
+            stale_journal.rename(stale_storage)
+
+            changed = target / "AGENTS.md"
+            desired = load_catalog(
+                ROOT / "tools" / "vault_migration" / "contracts" / "v1.json"
+            ).managed_files["AGENTS.md"]
+            changed.write_bytes((ROOT / "AGENTS.md").read_bytes())
+            changed.chmod(int(desired.mode, 8))
+            later_plan = audit_vault(ROOT, target)
+            self.assertNotEqual(stale_plan.migration_id, later_plan.migration_id)
+            later_manifest = apply_plan(
+                ROOT,
+                target,
+                later_plan,
+                run_gate=lambda _: None,
+            )
+            recovery = target / ".vault-builder" / "recovery"
+            recovery.mkdir(exist_ok=True)
+            stale_storage.rename(recovery / stale_plan.migration_id)
+            before_recovery = _tree_digest(target)
+
+            with self.assertRaisesRegex(ValueError, "manifest|stale|later"):
+                recover_migration(target, stale_plan.migration_id)
+
+            self.assertEqual(before_recovery, _tree_digest(target))
+            self.assertEqual(later_manifest, load_manifest(target))
+
     def test_apply_rolls_back_on_either_gate_failure_and_restores_manifest(self):
         for fail_after_manifest in (False, True):
             with self.subTest(fail_after_manifest=fail_after_manifest), tempfile.TemporaryDirectory() as tmpdir:
@@ -1036,6 +1373,159 @@ class MigrationApplyTest(unittest.TestCase):
                     apply_plan(ROOT, target, plan, run_gate=fail_gate)
 
                 self.assertEqual(before, _tree_digest(target))
+
+    def test_mode_only_apply_repairs_and_failed_apply_restores_modes(self):
+        cases = (
+            ("AGENTS.md", 0o755, "0644"),
+            ("scripts/release_gate.sh", 0o644, "0755"),
+        )
+        for relative, drift_mode, desired_mode in cases:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                result = subprocess.run(
+                    ["bash", "init-vault.sh", str(target)],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    0,
+                    result.returncode,
+                    result.stdout + result.stderr,
+                )
+                managed = target / relative
+                managed.chmod(drift_mode)
+                before = _tree_digest(target)
+                plan = audit_vault(ROOT, target)
+                action = next(
+                    action for action in plan.actions if action.path == relative
+                )
+                self.assertEqual("replace", action.action)
+                self.assertEqual(action.current_sha256, action.desired_sha256)
+
+                def fail_gate(_: Path) -> None:
+                    raise subprocess.CalledProcessError(
+                        1,
+                        ["bash", "scripts/release_gate.sh"],
+                    )
+
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(ROOT, target, plan, run_gate=fail_gate)
+                self.assertEqual(before, _tree_digest(target))
+
+                fresh = audit_vault(ROOT, target)
+                apply_plan(ROOT, target, fresh, run_gate=lambda _: None)
+                self.assertEqual(desired_mode, applying._observed_mode(managed))
+
+    def test_apply_rejects_content_edit_between_verification_and_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            managed = target / "AGENTS.md"
+            concurrent_contents = b"concurrent user edit\n"
+            original_prepare = applying._prepare_journal
+
+            def edit_then_prepare(
+                resolved_target: Path,
+                checked_plan: MigrationPlan,
+                actions: tuple[MigrationAction, ...],
+            ) -> tuple[Path, dict[str, object]]:
+                managed.write_bytes(concurrent_contents)
+                return original_prepare(
+                    resolved_target,
+                    checked_plan,
+                    actions,
+                )
+
+            with mock.patch.object(
+                applying,
+                "_prepare_journal",
+                side_effect=edit_then_prepare,
+            ):
+                with self.assertRaisesRegex(ValueError, "changed after audit"):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertEqual(concurrent_contents, managed.read_bytes())
+            self.assertFalse(
+                (target / ".vault-builder" / "recovery").exists()
+            )
+
+    def test_apply_rejects_mode_change_during_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            managed = target / "AGENTS.md"
+
+            def change_mode(stage: str, relative: str) -> None:
+                if stage == "after-open" and relative == "AGENTS.md":
+                    managed.chmod(0o600)
+
+            with mock.patch.object(
+                applying,
+                "_snapshot_step",
+                side_effect=change_mode,
+                create=True,
+            ):
+                with self.assertRaisesRegex(ValueError, "changed after audit"):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertEqual("0600", applying._observed_mode(managed))
+            self.assertFalse(
+                (target / ".vault-builder" / "recovery").exists()
+            )
+
+    def test_apply_revalidates_all_snapshots_before_first_target_mutation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            plan = audit_vault(ROOT, target)
+            managed = target / "AGENTS.md"
+            concurrent_contents = b"edit after snapshot\n"
+            original_prepare = applying._prepare_journal
+
+            def edit_after_snapshot(
+                resolved_target: Path,
+                checked_plan: MigrationPlan,
+                actions: tuple[MigrationAction, ...],
+            ) -> tuple[Path, dict[str, object]]:
+                prepared = original_prepare(
+                    resolved_target,
+                    checked_plan,
+                    actions,
+                )
+                managed.write_bytes(concurrent_contents)
+                return prepared
+
+            with mock.patch.object(
+                applying,
+                "_prepare_journal",
+                side_effect=edit_after_snapshot,
+            ):
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertEqual(concurrent_contents, managed.read_bytes())
+            self.assertFalse(
+                (target / ".vault-builder" / "recovery").exists()
+            )
 
     def test_transactional_gate_failure_preserves_command_exit_and_rollback_result(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1514,6 +2004,118 @@ class MigrationApplyTest(unittest.TestCase):
                     apply_plan(ROOT, target, plan, run_gate=lambda _: None)
 
             self.assertEqual(before, _tree_digest(target))
+
+    def test_apply_never_overwrites_manifest_newer_than_journal_precondition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            managed = target / "AGENTS.md"
+            managed.chmod(0o600)
+            plan = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                schema_version=current.schema_version,
+                contract_version=current.contract_version,
+                builder_revision=current.builder_revision,
+                generated_at=current.generated_at,
+                managed_files=current.managed_files,
+                last_migration_id="f" * 16,
+            )
+            original_record = applying._record_manifest_publication_intent
+
+            def publish_later_then_record(
+                resolved_target: Path,
+                journal_root: Path,
+                journal: dict[str, object],
+                candidate_sha256: str,
+            ) -> None:
+                write_manifest(resolved_target, later)
+                original_record(
+                    resolved_target,
+                    journal_root,
+                    journal,
+                    candidate_sha256,
+                )
+
+            with mock.patch.object(
+                applying,
+                "_record_manifest_publication_intent",
+                side_effect=publish_later_then_record,
+            ):
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertEqual(later, load_manifest(target))
+            journal_root = (
+                target
+                / ".vault-builder"
+                / "recovery"
+                / plan.migration_id
+            )
+            self.assertTrue((journal_root / "journal.json").is_file())
+
+    def test_candidate_publication_rechecks_manifest_precondition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            (target / "AGENTS.md").chmod(0o600)
+            plan = audit_vault(ROOT, target)
+            current = load_manifest(target)
+            assert current is not None
+            later = VaultManifest(
+                schema_version=current.schema_version,
+                contract_version=current.contract_version,
+                builder_revision=current.builder_revision,
+                generated_at=current.generated_at,
+                managed_files=current.managed_files,
+                last_migration_id="e" * 16,
+            )
+
+            def publish_later_before_candidate(stage: str) -> None:
+                if stage == "before-publication":
+                    write_manifest(target, later)
+
+            with mock.patch.object(
+                applying,
+                "_manifest_step",
+                side_effect=publish_later_before_candidate,
+            ):
+                with self.assertRaises(applying.MigrationApplyError):
+                    apply_plan(
+                        ROOT,
+                        target,
+                        plan,
+                        run_gate=lambda _: None,
+                    )
+
+            self.assertEqual(later, load_manifest(target))
+            journal_root = (
+                target
+                / ".vault-builder"
+                / "recovery"
+                / plan.migration_id
+            )
+            self.assertTrue((journal_root / "journal.json").is_file())
 
     def test_candidate_manifest_write_ahead_crash_windows_recover_exactly(self):
         for stop_stage, exit_code in (("before-publication", 31), ("after-publication", 32)):
@@ -2127,6 +2729,61 @@ class MigrationApplyTest(unittest.TestCase):
 
                 self.assertEqual(before, _tree_digest(target))
                 self.assertFalse((target / ".agents" / ".vault-builder-migration.json").exists())
+
+    def test_directory_rollback_hard_stops_resume_after_marker_and_rmdir(self):
+        class StopDuringDirectoryRollback(Exception):
+            pass
+
+        for stop_stage in (
+            "after-rollback-marker-removal",
+            "after-rollback-directory-removal",
+        ):
+            with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / "vault"
+                (
+                    before,
+                    plan,
+                    resolved_target,
+                    journal_root,
+                    journal,
+                    action,
+                    record_directory,
+                ) = self._prepare_missing_agents_transaction(target)
+                applying._replace_from_builder(
+                    ROOT,
+                    resolved_target,
+                    action,
+                    migration_id=plan.migration_id,
+                    directory_nonce=str(journal["directory_nonce"]),
+                    record_directory=record_directory,
+                )
+                deepest = ".agents/skills/wiki-ingest"
+
+                def stop(stage: str, relative: str) -> None:
+                    if stage == stop_stage and relative == deepest:
+                        raise StopDuringDirectoryRollback()
+
+                with mock.patch.object(
+                    applying,
+                    "_directory_step",
+                    side_effect=stop,
+                ):
+                    with self.assertRaises(StopDuringDirectoryRollback):
+                        applying._rollback(
+                            resolved_target,
+                            journal_root,
+                            journal,
+                        )
+
+                persisted = json.loads((journal_root / "journal.json").read_text())
+                self.assertEqual("rolling-back", persisted["state"])
+                self.assertEqual(
+                    "rolled-back",
+                    recover_migration(target, plan.migration_id),
+                )
+                self.assertEqual(before, _tree_digest(target))
+                with self.assertRaisesRegex(ValueError, "not found"):
+                    recover_migration(target, plan.migration_id)
 
     def test_directory_marker_partial_write_never_reaches_target(self):
         with tempfile.TemporaryDirectory() as tmpdir:

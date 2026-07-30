@@ -42,13 +42,13 @@
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "edb6149d2420f291169ca1432c6bedb48b9b7b4fd3acc9053b06e967d705d140"
+      "sha256": "27ed48fc9ec218f03fcce15439777f3a05290a08092ac79a74e31b4f59e5fe70"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "fff968a915106c29dc455a4b4b4c0b8ecd64be1cb379f0b41781b30323f5313a"
+      "sha256": "69fb585b1b13f53b4a52a2ab317880be90337f108a20799759aa1ae4ce9520ea"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
@@ -84,7 +84,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "2d7c1cd31ea4f81dfd131e6296b0957c078ee330640b958c2f1998b247dbea64"
+      "sha256": "f177c4a81e5a118271beeca28c20ca3ad95c24bcc7bbdd53fb617e56811d0237"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -108,7 +108,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "fecbbaa01022d4ba9acaca5c74c2d6f2875123028194d8d406ca85c9d7f48311"
+      "sha256": "a971d3674ec8384005fcff0eaeb13cfb831129eab9601a022425a993e1858451"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/authority.py",
       "policy": "replace-if-unmodified",
-      "sha256": "053658482dc7b5f14317de3d7eeec45344140cfcc0129c40d316162a1204aab7"
+      "sha256": "eb521bd97b97051c722d0890e3e21815c36b2525f6d56152ecd9e05ecd5d069d"
     },
     "tools/wiki/lib/draft.py": {
       "mode": "0644",
@@ -205,6 +205,12 @@
       "path": "tools/wiki/lib/source_registry.py",
       "policy": "replace-if-unmodified",
       "sha256": "c3ebd9c6f5ebdebcdee43ab5fd52fb3f247e5e56dcf3e0fafee5c098931b5d20"
+    },
+    "tools/wiki/lib/vault_manifest.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/vault_manifest.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "c974a57962d9dd1843056d2c0c15d6fa162f5f101b78bf69f68393619ab6dba6"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",

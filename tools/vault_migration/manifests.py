@@ -73,8 +73,14 @@ def create_manifest(
         candidate = _safe_relative_path(target, relative)
         if not candidate.exists() or candidate.is_symlink() or not candidate.is_file():
             continue
-        if sha256_file(candidate) == managed.sha256:
-            managed_files[relative] = managed
+        if sha256_file(candidate) != managed.sha256:
+            continue
+        observed_mode = f"{candidate.stat().st_mode & 0o7777:04o}"
+        if observed_mode != managed.mode:
+            raise ValueError(
+                f"Managed file mode does not match the catalog: {relative}"
+            )
+        managed_files[relative] = managed
 
     return VaultManifest(
         schema_version=catalog.schema_version,

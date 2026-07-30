@@ -49,6 +49,10 @@ python3 tools/vault_migration/cli.py apply \
 `review-required` 검토가 필요함을 뜻합니다. apply는 wiki 지식을 병합하거나
 index/map을 재생성하지 않습니다. Vault Graph는 읽기 전용 소비자이며 Vault를
 수정하거나 migration하지 않습니다.
+남은 migration recovery artifact가 하나라도 있으면 모든 apply는 target write 전에
+차단되고, outstanding migration별 정확한 `recover --migration-id` 명령을 출력합니다.
+apply와 recover는 전체 실행 동안 하나의 target-wide process lock도 유지하므로 동시
+migration 명령은 target을 쓰지 않고 실패합니다.
 
 apply가 `Migration committed, cleanup pending`을 출력하면 version 1 파일과
 manifest는 이미 commit된 상태입니다. 출력된 정확한 `recover --migration-id`

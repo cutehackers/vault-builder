@@ -10,6 +10,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 from tools.wiki.lib.draft import apply_batch_draft, apply_draft
 from tools.wiki.lib.authority import (
@@ -30,6 +31,7 @@ from tools.wiki.lib.lint import (
 )
 from tools.wiki.lib.maps import build_navigation_maps
 from tools.wiki.lib.schema import validate_schema
+from tools.wiki.lib.vault_manifest import validate_v1_manifest
 
 
 VALID_PAGE = """---
@@ -134,6 +136,7 @@ def _write_contract_manifest(root: Path, version: int = 1) -> None:
     manifest.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "contract_version": version,
                 "builder_revision": "test",
                 "generated_at": "2026-07-30T00:00:00Z",
@@ -143,6 +146,113 @@ def _write_contract_manifest(root: Path, version: int = 1) -> None:
         )
         + "\n"
     )
+
+
+def _valid_v1_manifest() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "contract_version": 1,
+        "builder_revision": "test",
+        "generated_at": "2026-07-30T00:00:00Z",
+        "managed_files": {
+            "AGENTS.md": {
+                "path": "AGENTS.md",
+                "sha256": "a" * 64,
+                "mode": "0644",
+                "policy": "replace-if-unmodified",
+            }
+        },
+        "last_migration_id": "0123456789abcdef",
+    }
+
+
+def _invalid_v1_manifests() -> dict[str, dict[str, object]]:
+    cases: dict[str, dict[str, object]] = {}
+
+    def mutate(name: str, change: Callable[[dict[str, object]], None]) -> None:
+        value = json.loads(json.dumps(_valid_v1_manifest()))
+        change(value)
+        cases[name] = value
+
+    mutate("missing-top-level", lambda value: value.pop("builder_revision"))
+    mutate("unknown-top-level", lambda value: value.__setitem__("unknown", True))
+    mutate("boolean-schema", lambda value: value.__setitem__("schema_version", True))
+    mutate("boolean-contract", lambda value: value.__setitem__("contract_version", True))
+    mutate("empty-revision", lambda value: value.__setitem__("builder_revision", ""))
+    mutate("bad-timestamp", lambda value: value.__setitem__("generated_at", "2026-02-30T00:00:00Z"))
+
+    def unsafe_path(value: dict[str, object]) -> None:
+        managed = value["managed_files"]
+        assert isinstance(managed, dict)
+        item = managed.pop("AGENTS.md")
+        assert isinstance(item, dict)
+        item["path"] = "../AGENTS.md"
+        managed["../AGENTS.md"] = item
+
+    mutate("unsafe-path", unsafe_path)
+
+    for name, invalid_path in (
+        ("nul-path", "bad\u0000path"),
+        ("newline-path", "bad\npath"),
+        ("tab-path", "bad\tpath"),
+        ("control-path", "bad\u001fpath"),
+    ):
+        def control_path(
+            value: dict[str, object],
+            *,
+            invalid_path: str = invalid_path,
+        ) -> None:
+            managed = value["managed_files"]
+            assert isinstance(managed, dict)
+            item = managed.pop("AGENTS.md")
+            assert isinstance(item, dict)
+            item["path"] = invalid_path
+            managed[invalid_path] = item
+
+        mutate(name, control_path)
+
+    def nested_unknown(value: dict[str, object]) -> None:
+        managed = value["managed_files"]
+        assert isinstance(managed, dict)
+        item = managed["AGENTS.md"]
+        assert isinstance(item, dict)
+        item["unknown"] = True
+
+    mutate("nested-unknown", nested_unknown)
+
+    def nested_mismatch(value: dict[str, object]) -> None:
+        managed = value["managed_files"]
+        assert isinstance(managed, dict)
+        item = managed["AGENTS.md"]
+        assert isinstance(item, dict)
+        item["path"] = "README.md"
+
+    mutate("nested-path-mismatch", nested_mismatch)
+
+    for name, field, invalid in (
+        ("bad-hash", "sha256", "A" * 64),
+        ("bad-mode", "mode", "0600"),
+        ("bad-policy", "policy", "unknown"),
+    ):
+        def change_nested(
+            value: dict[str, object],
+            *,
+            field: str = field,
+            invalid: object = invalid,
+        ) -> None:
+            managed = value["managed_files"]
+            assert isinstance(managed, dict)
+            item = managed["AGENTS.md"]
+            assert isinstance(item, dict)
+            item[field] = invalid
+
+        mutate(name, change_nested)
+
+    mutate(
+        "bad-migration-id",
+        lambda value: value.__setitem__("last_migration_id", "not-valid"),
+    )
+    return cases
 
 
 def _write_role_page(root: Path, relative: str, page_type: str) -> Path:
@@ -219,6 +329,57 @@ def _claim_page_text(source_count: int, body: str) -> str:
 
 
 class WikiAuthorityContractTest(unittest.TestCase):
+    def test_shared_v1_manifest_validator_rejects_complete_corruption_matrix(self):
+        self.assertEqual(_valid_v1_manifest(), validate_v1_manifest(_valid_v1_manifest()))
+        optional_id = _valid_v1_manifest()
+        optional_id.pop("last_migration_id")
+        self.assertIsNone(validate_v1_manifest(optional_id)["last_migration_id"])
+
+        for name, manifest in _invalid_v1_manifests().items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate_v1_manifest(manifest)
+
+    def test_lint_rejects_complete_v1_manifest_corruption_matrix(self):
+        for name, manifest in _invalid_v1_manifests().items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _minimal_vault(root)
+                path = root / ".vault-builder" / "manifest.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(manifest) + "\n")
+
+                self.assertIn(
+                    "invalid-vault-builder-manifest",
+                    {issue.code for issue in lint_repo(root).issues},
+                )
+
+    def test_validate_page_rejects_complete_v1_manifest_corruption_matrix(self):
+        from tools.wiki import cli
+
+        for name, manifest in _invalid_v1_manifests().items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _minimal_vault(root)
+                path = root / ".vault-builder" / "manifest.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps(manifest) + "\n")
+                original_root = cli.ROOT
+                try:
+                    cli.ROOT = root
+                    with contextlib.redirect_stdout(io.StringIO()) as output:
+                        result = cli.main(
+                            ["validate-page", str(root / "wiki" / "index.md")]
+                        )
+                finally:
+                    cli.ROOT = original_root
+
+                self.assertEqual(1, result)
+                self.assertIn(
+                    "invalid-vault-builder-manifest",
+                    output.getvalue(),
+                )
+                self.assertNotIn("Traceback", output.getvalue())
+
     def test_classifies_source_generated_and_canonical_pages(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2069,6 +2230,44 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertTrue((target / "README-kr.md").exists())
             self.assertFalse((tmp / "wiki").exists())
             self.assertIn(f"cd {resolved_target}", init_result.stdout)
+
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    def test_generated_release_gate_rejects_complete_v1_manifest_corruption_matrix(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                0,
+                init_result.returncode,
+                init_result.stdout + init_result.stderr,
+            )
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            for name, manifest in _invalid_v1_manifests().items():
+                with self.subTest(name=name):
+                    manifest_path.write_text(json.dumps(manifest) + "\n")
+                    gate = subprocess.run(
+                        ["scripts/release_gate.sh"],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(
+                        0,
+                        gate.returncode,
+                        gate.stdout + gate.stderr,
+                    )
+                    self.assertIn(
+                        "invalid-vault-builder-manifest",
+                        gate.stdout + gate.stderr,
+                    )
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_can_include_stenc_when_requested(self):

@@ -221,8 +221,20 @@ def _catalog_actions(
                 "Managed path must be a readable regular file inside the Vault.",
             )
             continue
-        if state["sha256"] == desired.sha256:
+        if (
+            state["sha256"] == desired.sha256
+            and state["mode"] == desired.mode
+        ):
             actions[relative] = _action(relative, "unchanged", state, desired, "Already matches the target contract.")
+            continue
+        if state["sha256"] == desired.sha256:
+            actions[relative] = _action(
+                relative,
+                "replace",
+                state,
+                desired,
+                "Managed bytes match the target contract but the file mode drifted.",
+            )
             continue
         known_hashes = _known_hashes(relative, v0_catalog, manifest_files)
         if state["sha256"] in known_hashes:

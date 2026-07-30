@@ -14,6 +14,11 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Literal
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - supported migrations are POSIX-only
+    fcntl = None  # type: ignore[assignment]
+
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
 from .durability import fsync_directory as _strict_fsync_directory
 from .managed_paths import MANAGED_PATHS
@@ -48,6 +53,15 @@ _DIRECTORY_MARKER_FILENAME = ".vault-builder-migration.json"
 _PREPARING_PREFIX = ".preparing-"
 _CLEANUP_PREFIX = ".cleanup-"
 _ROLLBACK_CLEANUP_PREFIX = ".rollback-cleanup-"
+_PREPARING_ARTIFACT_RE = re.compile(
+    r"^\.preparing-([0-9a-f]{16})-(?:keep|remove)-recovery-(?:keep|remove)-state$"
+)
+_CLEANUP_ARTIFACT_RE = re.compile(
+    r"^\.cleanup-([0-9a-f]{16})-(?:keep|remove)-recovery$"
+)
+_ROLLBACK_CLEANUP_ARTIFACT_RE = re.compile(
+    r"^\.rollback-cleanup-([0-9a-f]{16})-(?:keep|remove)-recovery-(?:keep|remove)-state$"
+)
 
 
 class MigrationApplyError(RuntimeError):
@@ -180,6 +194,20 @@ def apply_plan(
     """Apply one audit plan, restoring exact prior state if any later step fails."""
     builder = _validate_root(builder_root, "Builder root")
     target = _target_root(target_root)
+    lock_descriptor = _acquire_migration_lock(target)
+    try:
+        return _apply_plan_locked(builder, target, plan, run_gate)
+    finally:
+        _release_migration_lock(lock_descriptor)
+
+
+def _apply_plan_locked(
+    builder: Path,
+    target: Path,
+    plan: MigrationPlan,
+    run_gate: Callable[[Path], None] | None,
+) -> VaultManifest:
+    _require_no_outstanding_migrations(target)
     checked_plan, actions = _verify_preconditions(builder, target, plan)
     try:
         journal_root, journal = _prepare_journal(target, checked_plan, actions)
@@ -191,6 +219,23 @@ def apply_plan(
             rollback_completed=exc.cleanup_error is None,
             rollback_error=exc.cleanup_error,
         ) from (exc.cleanup_error or exc.original_error)
+    try:
+        for action in actions:
+            _stage_managed_candidate(builder, journal_root, action)
+        _verify_current_actions(target, actions)
+    except BaseException as exc:
+        cleanup_error: BaseException | None = None
+        try:
+            _cleanup_preparing(journal_root, journal)
+        except BaseException as cleanup_exc:
+            cleanup_error = cleanup_exc
+        raise MigrationApplyError(
+            exc,
+            target=target,
+            migration_id=checked_plan.migration_id,
+            rollback_completed=cleanup_error is None,
+            rollback_error=cleanup_error,
+        ) from (cleanup_error or exc)
     gate = run_gate or _run_release_gate
     try:
         _write_journal_state(journal_root, journal, "applying")
@@ -214,6 +259,7 @@ def apply_plan(
                 migration_id=checked_plan.migration_id,
                 directory_nonce=str(journal["directory_nonce"]),
                 record_directory=record_directory,
+                staged_ready=True,
             )
         _write_journal_state(journal_root, journal, "validating")
 
@@ -236,6 +282,7 @@ def apply_plan(
         _publish_candidate_manifest(
             target,
             journal_root,
+            journal,
             candidate_bytes,
             candidate_sha256,
         )
@@ -301,6 +348,17 @@ def recover_migration(
     if not isinstance(migration_id, str) or not _MIGRATION_ID_RE.fullmatch(migration_id):
         raise ValueError("migration_id must be 16 lowercase hexadecimal characters.")
     target = _target_root(target_root)
+    lock_descriptor = _acquire_migration_lock(target)
+    try:
+        return _recover_migration_locked(target, migration_id)
+    finally:
+        _release_migration_lock(lock_descriptor)
+
+
+def _recover_migration_locked(
+    target: Path,
+    migration_id: str,
+) -> Literal["rolled-back", "cleanup-completed"]:
     journal_root = _journal_root(target, migration_id, create=False)
     preparing_roots = tuple(
         path
@@ -333,6 +391,9 @@ def recover_migration(
             return "cleanup-completed"
         raise ValueError("Migration recovery journal not found.")
     journal = _load_journal(target, journal_root, migration_id)
+    if journal["state"] == "complete":
+        raise ValueError("Migration recovery journal is complete and cannot be recovered.")
+    _validate_recovery_manifest_fence(target, journal)
     if journal["state"] == "preparing":
         _cleanup_preparing(journal_root, journal)
         return "rolled-back"
@@ -351,10 +412,53 @@ def recover_migration(
         )
         _cleanup_rolled_back(journal_root, journal)
         return "rolled-back"
-    if journal["state"] == "complete":
-        raise ValueError("Migration recovery journal is complete and cannot be recovered.")
     _rollback(target, journal_root, journal)
     return "rolled-back"
+
+
+def _acquire_migration_lock(target: Path) -> int:
+    if fcntl is None:
+        raise RuntimeError(
+            "Vault migration locking is unavailable on this platform."
+        )
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(target, flags)
+    except OSError as exc:
+        raise ValueError("Vault target root is unreadable.") from exc
+    try:
+        fcntl.flock(
+            descriptor,
+            fcntl.LOCK_EX | fcntl.LOCK_NB,
+        )
+    except OSError as exc:
+        os.close(descriptor)
+        if exc.errno in {errno.EACCES, errno.EAGAIN}:
+            raise ValueError(
+                "Another Vault migration operation is active; retry after "
+                "it completes."
+            ) from exc
+        raise RuntimeError("Vault migration locking failed.") from exc
+    held = os.fstat(descriptor)
+    current = target.stat()
+    if (
+        not stat.S_ISDIR(held.st_mode)
+        or held.st_dev != current.st_dev
+        or held.st_ino != current.st_ino
+    ):
+        _release_migration_lock(descriptor)
+        raise ValueError("Vault target root changed while acquiring its lock.")
+    return descriptor
+
+
+def _release_migration_lock(descriptor: int) -> None:
+    try:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _verify_preconditions(builder: Path, target: Path, plan: MigrationPlan) -> tuple[MigrationPlan, tuple[MigrationAction, ...]]:
@@ -412,6 +516,58 @@ def _verify_preconditions(builder: Path, target: Path, plan: MigrationPlan) -> t
     return checked, tuple(sorted(actions, key=lambda action: action.path))
 
 
+def _require_no_outstanding_migrations(target: Path) -> None:
+    migration_ids = _outstanding_migration_ids(target)
+    if not migration_ids:
+        return
+    heading = (
+        "Multiple outstanding migrations block apply; recover all of them:"
+        if len(migration_ids) > 1
+        else "An outstanding migration blocks apply; recover it:"
+    )
+    commands = [
+        f"- {_recover_command(target, migration_id)}"
+        for migration_id in migration_ids
+    ]
+    raise ValueError("\n".join([heading, *commands]))
+
+
+def _outstanding_migration_ids(target: Path) -> tuple[str, ...]:
+    migration_ids: set[str] = set()
+    recovery = _safe_target_path(
+        target,
+        ".vault-builder/recovery",
+        reject_leaf_symlink=False,
+    )
+    try:
+        recovery_state = recovery.lstat()
+    except FileNotFoundError:
+        recovery_state = None
+    if recovery_state is not None:
+        if stat.S_ISLNK(recovery_state.st_mode) or not stat.S_ISDIR(
+            recovery_state.st_mode
+        ):
+            raise ValueError("Vault recovery directory must be a regular directory.")
+        for artifact in recovery.iterdir():
+            if _MIGRATION_ID_RE.fullmatch(artifact.name):
+                migration_ids.add(artifact.name)
+                continue
+            cleanup_match = _CLEANUP_ARTIFACT_RE.fullmatch(artifact.name)
+            if cleanup_match is not None:
+                migration_ids.add(cleanup_match.group(1))
+
+    for artifact in target.iterdir():
+        for pattern in (
+            _PREPARING_ARTIFACT_RE,
+            _ROLLBACK_CLEANUP_ARTIFACT_RE,
+        ):
+            match = pattern.fullmatch(artifact.name)
+            if match is not None:
+                migration_ids.add(match.group(1))
+                break
+    return tuple(sorted(migration_ids))
+
+
 def _verify_candidate_files(builder: Path, target: Path, actions: tuple[MigrationAction, ...]) -> None:
     for action in actions:
         path = _safe_target_path(target, action.path, reject_leaf_symlink=False)
@@ -453,8 +609,7 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
     entries: list[dict[str, object]] = []
     backups: list[tuple[str, bytes, str]] = []
     for action in actions:
-        path = _safe_target_path(target, action.path, reject_leaf_symlink=False)
-        existed = path.exists()
+        existed, contents = _snapshot_current_action(target, action)
         entry: dict[str, object] = {
             "path": action.path,
             "existed": existed,
@@ -464,12 +619,9 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
             "applied_mode": action.desired_mode,
         }
         if existed:
-            if path.is_symlink() or not path.is_file():
-                raise ValueError(
-                    "Migration target changed after audit; run audit again."
-                )
+            assert contents is not None
             backups.append(
-                (action.path, path.read_bytes(), str(action.current_mode))
+                (action.path, contents, str(action.current_mode))
             )
         entries.append(entry)
     journal: dict[str, object] = {
@@ -479,6 +631,7 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
         "state": "preparing",
         "entries": entries,
         "manifest": None,
+        "manifest_precondition": _manifest_precondition(target),
         "directory_nonce": secrets.token_hex(32),
         "directories": [],
         "state_directory_existed": state_existed,
@@ -543,6 +696,103 @@ def _prepare_journal(target: Path, plan: MigrationPlan, actions: tuple[Migration
         raise _JournalPreparationFailure(exc, cleanup_error) from (cleanup_error or exc)
 
 
+def _snapshot_current_action(
+    target: Path,
+    action: MigrationAction,
+) -> tuple[bool, bytes | None]:
+    path = _safe_target_path(
+        target,
+        action.path,
+        reject_leaf_symlink=False,
+    )
+    if action.current_sha256 is None or action.current_mode is None:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return False, None
+        except OSError as exc:
+            raise ValueError(
+                "Migration target changed after audit; run audit again."
+            ) from exc
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        )
+
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(
+                "Migration target changed after audit; run audit again."
+            )
+        _snapshot_step("after-open", action.path)
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        contents = b"".join(chunks)
+        _snapshot_step("after-read", action.path)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+    if _snapshot_identity(before) != _snapshot_identity(after):
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        )
+    try:
+        leaf = path.lstat()
+    except OSError as exc:
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        ) from exc
+    if (
+        not stat.S_ISREG(leaf.st_mode)
+        or leaf.st_dev != after.st_dev
+        or leaf.st_ino != after.st_ino
+    ):
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        )
+    digest = hashlib.sha256(contents).hexdigest()
+    mode = f"{after.st_mode & 0o7777:04o}"
+    if digest != action.current_sha256 or mode != action.current_mode:
+        raise ValueError(
+            "Migration target changed after audit; run audit again."
+        )
+    return True, contents
+
+
+def _snapshot_identity(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _snapshot_step(_stage: str, _relative: str) -> None:
+    """Failure and concurrent-change injection seam for stable snapshots."""
+
+
 def _journal_prepare_step(_stage: str) -> None:
     """Failure-injection seam after durable journal preparation."""
 
@@ -557,8 +807,8 @@ def _record_manifest_publication_intent(
     journal: dict[str, object],
     candidate_sha256: str,
 ) -> None:
-    manifest_path = _safe_target_path(target, _MANIFEST_RELATIVE, reject_leaf_symlink=False)
-    existed = manifest_path.exists()
+    current, contents = _validate_manifest_precondition(target, journal)
+    existed = bool(current["existed"])
     manifest: dict[str, object] = {
         "existed": existed,
         "sha256": None,
@@ -569,11 +819,9 @@ def _record_manifest_publication_intent(
         "publication_state": "intent",
     }
     if existed:
-        if manifest_path.is_symlink() or not manifest_path.is_file():
-            raise ValueError("Vault builder manifest must be a regular file.")
-        contents = manifest_path.read_bytes()
-        manifest["sha256"] = hashlib.sha256(contents).hexdigest()
-        manifest["mode"] = _observed_mode(manifest_path)
+        assert contents is not None
+        manifest["sha256"] = current["sha256"]
+        manifest["mode"] = current["mode"]
         manifest["backup_state"] = "intent"
         manifest["backup_staged_path"] = _MANIFEST_BACKUP_STAGE
     journal["manifest"] = manifest
@@ -633,6 +881,7 @@ def _manifest_step(_stage: str) -> None:
 def _publish_candidate_manifest(
     target: Path,
     journal_root: Path,
+    journal: dict[str, object],
     contents: bytes,
     expected_sha256: str,
 ) -> None:
@@ -645,6 +894,7 @@ def _publish_candidate_manifest(
     _create_staged_file(journal_root, staged, contents, _MANIFEST_MODE)
     _manifest_step("after-stage")
     _manifest_step("before-publication")
+    _validate_manifest_precondition(target, journal)
     _publish_staged_file(
         staged,
         destination,
@@ -662,10 +912,13 @@ def _replace_from_builder(
     migration_id: str,
     directory_nonce: str,
     record_directory: Callable[[str, str], None],
+    staged_ready: bool = False,
 ) -> None:
-    source = _safe_relative_path(builder, action.path)
     destination = _safe_target_path(target, action.path, reject_leaf_symlink=False)
     journal_root = _journal_root(target, migration_id, create=False)
+    staged = _journal_path(journal_root, f"staged/managed/{action.path}")
+    if not staged_ready:
+        _stage_managed_candidate(builder, journal_root, action)
     _ensure_managed_parent(
         target,
         destination,
@@ -674,14 +927,7 @@ def _replace_from_builder(
         directory_nonce=directory_nonce,
         record_directory=record_directory,
     )
-    staged = _journal_path(journal_root, f"staged/managed/{action.path}")
-    _create_staged_file(
-        journal_root,
-        staged,
-        source.read_bytes(),
-        action.desired_mode or "0644",
-    )
-    _managed_step("after-stage", action.path)
+    _snapshot_current_action(target, action)
     _publish_staged_file(
         staged,
         destination,
@@ -690,6 +936,33 @@ def _replace_from_builder(
     )
     if sha256_file(destination) != action.desired_sha256 or _observed_mode(destination) != action.desired_mode:
         raise ValueError(f"Atomic replacement verification failed: {action.path}")
+
+
+def _stage_managed_candidate(
+    builder: Path,
+    journal_root: Path,
+    action: MigrationAction,
+) -> None:
+    source = _safe_relative_path(builder, action.path)
+    staged = _journal_path(
+        journal_root,
+        f"staged/managed/{action.path}",
+    )
+    _create_staged_file(
+        journal_root,
+        staged,
+        source.read_bytes(),
+        action.desired_mode or "0644",
+    )
+    _managed_step("after-stage", action.path)
+
+
+def _verify_current_actions(
+    target: Path,
+    actions: tuple[MigrationAction, ...],
+) -> None:
+    for action in actions:
+        _snapshot_current_action(target, action)
 
 
 def _managed_step(_stage: str, _relative: str) -> None:
@@ -997,6 +1270,7 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
     entries = _journal_entries(journal)
     originals = _journal_originals(journal_root, create=False)
     manifest = _journal_manifest(journal, allow_none=True)
+    _validate_recovery_manifest_fence(target, journal)
     _validate_original_tree(journal_root, entries, manifest)
     _validate_entry_recovery_targets(target, entries)
     if manifest is not None:
@@ -1020,8 +1294,26 @@ def _rollback(target: Path, journal_root: Path, journal: dict[str, object]) -> N
         _restore_manifest(target, journal_root, originals, manifest)
     for entry in reversed(entries):
         _restore_entry(target, journal_root, originals, entry)
+
+    def record_directory_state(relative: str, state: str) -> None:
+        record = next(
+            item
+            for item in _directory_records(journal)
+            if item["path"] == relative
+        )
+        record["state"] = state
+        _write_journal_state(journal_root, journal, "rolling-back")
+
     for record in sorted(directories, key=lambda item: len(PurePosixPath(str(item["path"])).parts), reverse=True):
-        _recover_directory(target, journal_root, str(journal["migration_id"]), str(journal["directory_nonce"]), record)
+        _recover_directory(
+            target,
+            journal_root,
+            str(journal["migration_id"]),
+            str(journal["directory_nonce"]),
+            entries,
+            record,
+            record_directory_state,
+        )
     _verify_restored(target, originals, entries, manifest)
     _write_journal_state(journal_root, journal, "rollback-cleanup-pending")
     try:
@@ -1250,7 +1542,244 @@ def _journal_required_keys() -> frozenset[str]:
 
 
 def _journal_optional_keys() -> frozenset[str]:
-    return _journal_required_keys() | frozenset({"state_directory_existed", "recovery_directory_existed"})
+    return _journal_required_keys() | frozenset(
+        {
+            "manifest_precondition",
+            "state_directory_existed",
+            "recovery_directory_existed",
+        }
+    )
+
+
+def _manifest_precondition(target: Path) -> dict[str, object]:
+    precondition, _ = _stable_manifest_snapshot(target)
+    return precondition
+
+
+def _stable_manifest_snapshot(
+    target: Path,
+) -> tuple[dict[str, object], bytes | None]:
+    manifest_path = _safe_target_path(
+        target,
+        _MANIFEST_RELATIVE,
+        reject_leaf_symlink=False,
+    )
+    try:
+        state = manifest_path.lstat()
+    except FileNotFoundError:
+        return (
+            {
+                "existed": False,
+                "last_migration_id": None,
+                "mode": None,
+                "sha256": None,
+            },
+            None,
+        )
+    except OSError as exc:
+        raise ValueError("Vault builder manifest is unreadable.") from exc
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
+        raise ValueError("Vault builder manifest must be a regular file.")
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(manifest_path, flags)
+    except OSError as exc:
+        raise ValueError("Vault builder manifest is unreadable.") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("Vault builder manifest must be a regular file.")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        contents = b"".join(chunks)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise ValueError("Vault builder manifest is unreadable.") from exc
+    finally:
+        os.close(descriptor)
+    if _snapshot_identity(before) != _snapshot_identity(after):
+        raise ValueError("Vault builder manifest changed during snapshot.")
+    try:
+        leaf = manifest_path.lstat()
+    except OSError as exc:
+        raise ValueError("Vault builder manifest changed during snapshot.") from exc
+    if (
+        not stat.S_ISREG(leaf.st_mode)
+        or leaf.st_dev != after.st_dev
+        or leaf.st_ino != after.st_ino
+    ):
+        raise ValueError("Vault builder manifest changed during snapshot.")
+    try:
+        manifest = VaultManifest.from_json(contents.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Vault builder manifest is invalid.") from exc
+    return (
+        {
+            "existed": True,
+            "last_migration_id": manifest.last_migration_id,
+            "mode": f"{after.st_mode & 0o7777:04o}",
+            "sha256": hashlib.sha256(contents).hexdigest(),
+        },
+        contents,
+    )
+
+
+def _validate_manifest_precondition(
+    target: Path,
+    journal: dict[str, object],
+) -> tuple[dict[str, object], bytes | None]:
+    expected = _journal_manifest_precondition(journal)
+    if expected is None:
+        raise ValueError(
+            "Migration recovery manifest precondition is missing."
+        )
+    current, contents = _stable_manifest_snapshot(target)
+    if current != expected:
+        raise ValueError(
+            "Vault builder manifest changed after migration preparation."
+        )
+    return current, contents
+
+
+def _journal_manifest_precondition(
+    journal: dict[str, object],
+) -> dict[str, object] | None:
+    raw = journal.get("manifest_precondition")
+    if raw is None:
+        return None
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {"existed", "last_migration_id", "mode", "sha256"}
+        or not isinstance(raw.get("existed"), bool)
+    ):
+        raise ValueError("Migration recovery manifest precondition is invalid.")
+    existed = bool(raw["existed"])
+    digest = raw.get("sha256")
+    mode = raw.get("mode")
+    last_migration_id = raw.get("last_migration_id")
+    if existed:
+        if (
+            not isinstance(digest, str)
+            or not _HEX_RE.fullmatch(digest)
+            or not isinstance(mode, str)
+            or not _MODE_RE.fullmatch(mode)
+        ):
+            raise ValueError(
+                "Migration recovery manifest precondition is invalid."
+            )
+    elif digest is not None or mode is not None or last_migration_id is not None:
+        raise ValueError("Migration recovery manifest precondition is invalid.")
+    if last_migration_id is not None and (
+        not isinstance(last_migration_id, str)
+        or not _MIGRATION_ID_RE.fullmatch(last_migration_id)
+    ):
+        raise ValueError("Migration recovery manifest precondition is invalid.")
+    return {
+        "existed": existed,
+        "last_migration_id": last_migration_id,
+        "mode": mode,
+        "sha256": digest,
+    }
+
+
+def _validate_recovery_manifest_fence(
+    target: Path,
+    journal: dict[str, object],
+) -> None:
+    precondition = _journal_manifest_precondition(journal)
+    transaction_manifest = _journal_manifest(journal, allow_none=True)
+    manifest_path = _safe_target_path(
+        target,
+        _MANIFEST_RELATIVE,
+        reject_leaf_symlink=False,
+    )
+    try:
+        state = manifest_path.lstat()
+    except FileNotFoundError:
+        state = None
+    if state is None:
+        prior_absent = (
+            precondition is not None and not precondition["existed"]
+        ) or (
+            precondition is None
+            and (
+                transaction_manifest is None
+                or not transaction_manifest["existed"]
+            )
+        )
+        if prior_absent:
+            return
+        raise ValueError(
+            "Stale migration recovery is fenced by the current manifest state."
+        )
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISREG(state.st_mode):
+        raise ValueError(
+            "Stale migration recovery is fenced by an unsafe manifest state."
+        )
+    try:
+        current = load_manifest(target)
+    except ValueError as exc:
+        raise ValueError(
+            "Refusing to overwrite an unknown Vault builder manifest."
+        ) from exc
+    if current is None:
+        raise ValueError(
+            "Stale migration recovery is fenced by the current manifest state."
+        )
+    digest = sha256_file(manifest_path)
+    mode = _observed_mode(manifest_path)
+    prior_matches = (
+        precondition is not None
+        and precondition["existed"]
+        and digest == precondition["sha256"]
+        and mode == precondition["mode"]
+        and current.last_migration_id == precondition["last_migration_id"]
+    )
+    if precondition is None and transaction_manifest is not None:
+        prior_matches = (
+            transaction_manifest["existed"]
+            and digest == transaction_manifest["sha256"]
+            and mode == transaction_manifest["mode"]
+        )
+    candidate_matches = (
+        transaction_manifest is not None
+        and digest == transaction_manifest["candidate_sha256"]
+        and mode == _MANIFEST_MODE
+        and current.last_migration_id == journal["migration_id"]
+    )
+    known_digest_with_wrong_mode = (
+        precondition is not None
+        and precondition["existed"]
+        and digest == precondition["sha256"]
+        and mode != precondition["mode"]
+    ) or (
+        transaction_manifest is not None
+        and (
+            (
+                transaction_manifest["existed"]
+                and digest == transaction_manifest["sha256"]
+                and mode != transaction_manifest["mode"]
+            )
+            or (
+                digest == transaction_manifest["candidate_sha256"]
+                and mode != _MANIFEST_MODE
+            )
+        )
+    )
+    if known_digest_with_wrong_mode:
+        raise ValueError(
+            "Refusing to overwrite an unknown Vault builder manifest."
+        )
+    if not prior_matches and not candidate_matches:
+        raise ValueError(
+            "Stale migration recovery is fenced by a later Vault builder manifest."
+        )
 
 
 def _journal_entries(journal: dict[str, object]) -> tuple[dict[str, object], ...]:
@@ -1516,6 +2045,7 @@ def _recover_preparing_root(
             != state_existed
         ):
             raise ValueError("Migration preparation root is invalid.")
+        _validate_recovery_manifest_fence(target, journal)
     else:
         allowed = {".journal.json.next"}
         for path in preparing_root.iterdir():
@@ -1759,6 +2289,7 @@ def _resume_cleanup_tombstone(
         rolled_back=rolled_back,
         remove_state=remove_state,
     )
+    _validate_recovery_manifest_fence(target, journal)
     if rolled_back:
         _finish_rollback_ancestry(
             target,
@@ -2027,7 +2558,12 @@ def _validate_directory_records(
         if not isinstance(raw, dict) or set(raw) != {"existed", "path", "state"}:
             raise ValueError("Migration recovery directory records are invalid.")
         relative, existed, lifecycle = raw.get("path"), raw.get("existed"), raw.get("state")
-        if not isinstance(relative, str) or existed is not False or lifecycle not in {"intent", "created"}:
+        if (
+            not isinstance(relative, str)
+            or existed is not False
+            or lifecycle
+            not in {"intent", "created", "marker-removed", "removed"}
+        ):
             raise ValueError("Migration recovery directory records are invalid.")
         if relative in paths or relative not in allowed:
             raise ValueError("Migration recovery directory records are invalid.")
@@ -2039,17 +2575,55 @@ def _validate_directory_records(
                 raise ValueError(
                     f"Recovery verification failed: directory {relative}"
                 )
-        elif lifecycle == "created" and not (
-            cleanup_pending and _regular_directory_without_marker(directory)
-        ):
-            _validate_directory_marker_identity(
+        elif cleanup_pending:
+            if lifecycle not in {"intent", "created"}:
+                raise ValueError(
+                    "Migration recovery directory records are invalid."
+                )
+            if lifecycle == "created" and not _regular_directory_without_marker(
+                directory
+            ):
+                _validate_directory_marker_identity(
+                    journal_root,
+                    directory,
+                    migration_id,
+                    nonce,
+                    relative,
+                    require_expected_contents=False,
+                )
+        elif lifecycle in {"created", "marker-removed", "removed"}:
+            _validate_staged_directory_marker(
                 journal_root,
-                directory,
                 migration_id,
                 nonce,
                 relative,
-                require_expected_contents=False,
             )
+            if lifecycle == "removed":
+                if directory.exists() or directory.is_symlink():
+                    raise ValueError(
+                        f"Recovery verification failed: directory {relative}"
+                    )
+            elif directory.exists() or directory.is_symlink():
+                if _marker_exists(directory):
+                    _validate_directory_marker_identity(
+                        journal_root,
+                        directory,
+                        migration_id,
+                        nonce,
+                        relative,
+                        require_expected_contents=False,
+                    )
+                elif not (
+                    _directory_children_restored(target, entries, relative)
+                    and _regular_empty_directory(directory)
+                ):
+                    raise ValueError(
+                        f"Migration directory contains unexpected content: {relative}"
+                    )
+            elif not _directory_children_restored(target, entries, relative):
+                raise ValueError(
+                    f"Recovery verification failed: directory {relative}"
+                )
         elif directory.exists() and _marker_exists(directory):
             _validate_directory_marker_identity(
                 journal_root,
@@ -2107,14 +2681,39 @@ def _recover_directory(
     journal_root: Path,
     migration_id: str,
     nonce: str,
+    entries: tuple[dict[str, object], ...],
     record: dict[str, object],
+    record_state: Callable[[str, str], None],
 ) -> None:
     relative = str(record["path"])
+    lifecycle = str(record["state"])
     directory = _safe_target_path(target, relative, reject_leaf_symlink=False)
+    children_restored = _directory_children_restored(
+        target,
+        entries,
+        relative,
+    )
     if not directory.exists():
-        if record["state"] == "created":
-            raise ValueError(f"Migration directory marker is invalid: {relative}")
+        if lifecycle in {"created", "marker-removed", "removed"}:
+            _validate_staged_directory_marker(
+                journal_root,
+                migration_id,
+                nonce,
+                relative,
+            )
+            if not children_restored:
+                raise ValueError(
+                    f"Recovery verification failed: directory {relative}"
+                )
+            if lifecycle != "removed":
+                record_state(relative, "removed")
         return
+    if lifecycle == "removed":
+        raise ValueError(f"Recovery verification failed: directory {relative}")
+    if not children_restored:
+        raise ValueError(
+            f"Recovery verification failed: directory {relative}"
+        )
     marker = (
         _validate_directory_marker_identity(
             journal_root,
@@ -2127,8 +2726,13 @@ def _recover_directory(
         if _marker_exists(directory)
         else None
     )
-    if record["state"] == "created" and marker is None:
-        raise ValueError(f"Migration directory marker is invalid: {relative}")
+    if lifecycle in {"created", "marker-removed"} and marker is None:
+        _validate_staged_directory_marker(
+            journal_root,
+            migration_id,
+            nonce,
+            relative,
+        )
     try:
         children = list(directory.iterdir())
     except OSError as exc:
@@ -2138,13 +2742,67 @@ def _recover_directory(
             raise ValueError(f"Migration directory contains unexpected content: {relative}")
         directory.rmdir()
         _fsync_directory(directory.parent)
+        _directory_step("after-rollback-directory-removal", relative)
+        record_state(relative, "removed")
         return
     if children != [marker]:
         raise ValueError(f"Migration directory contains unexpected content: {relative}")
     marker.unlink()
     _fsync_directory(directory)
+    _directory_step("after-rollback-marker-removal", relative)
+    record_state(relative, "marker-removed")
     directory.rmdir()
     _fsync_directory(directory.parent)
+    _directory_step("after-rollback-directory-removal", relative)
+    record_state(relative, "removed")
+
+
+def _directory_children_restored(
+    target: Path,
+    entries: tuple[dict[str, object], ...],
+    directory: str,
+) -> bool:
+    prefix = PurePosixPath(directory)
+    matched = False
+    for entry in entries:
+        relative = PurePosixPath(str(entry["path"]))
+        try:
+            relative.relative_to(prefix)
+        except ValueError:
+            continue
+        matched = True
+        path = _safe_target_path(
+            target,
+            relative.as_posix(),
+            reject_leaf_symlink=False,
+        )
+        try:
+            state = path.lstat()
+        except FileNotFoundError:
+            if entry["existed"]:
+                return False
+            continue
+        if (
+            not entry["existed"]
+            or stat.S_ISLNK(state.st_mode)
+            or not stat.S_ISREG(state.st_mode)
+            or sha256_file(path) != entry["sha256"]
+            or _observed_mode(path) != entry["mode"]
+        ):
+            return False
+    return matched
+
+
+def _regular_empty_directory(directory: Path) -> bool:
+    try:
+        state = directory.lstat()
+        return (
+            stat.S_ISDIR(state.st_mode)
+            and not stat.S_ISLNK(state.st_mode)
+            and not any(directory.iterdir())
+        )
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def _marker_exists(directory: Path) -> bool:

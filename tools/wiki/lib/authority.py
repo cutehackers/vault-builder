@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from enum import Enum
 from pathlib import Path
 
 from .frontmatter import Page
 from .schema import Issue
+from .vault_manifest import parse_v1_manifest_json
 
 
 class PageRole(str, Enum):
@@ -34,17 +34,10 @@ def authority_contract_version(root: Path) -> int | None:
     if not path.is_file() or path.is_symlink():
         raise ValueError("Vault builder manifest must be a regular file.")
     try:
-        manifest = json.loads(path.read_text())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        manifest = parse_v1_manifest_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
         raise ValueError("Vault builder manifest is invalid.") from exc
-    if not isinstance(manifest, dict):
-        raise ValueError("Vault builder manifest must be a JSON object.")
-    value = manifest.get("contract_version")
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError("Vault builder manifest contract_version must be an integer.")
-    if value != 1:
-        raise ValueError("Vault builder manifest supported contract version is 1.")
-    return value
+    return int(manifest["contract_version"])
 
 
 def classify_page_role(root: Path, page: Page) -> PageRole:

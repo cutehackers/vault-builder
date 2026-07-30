@@ -52,6 +52,11 @@ Exit `0` means no blocking actions, `1` means failure, and `2` means the
 read-only audit succeeded but needs human review (`review-required`). Apply
 never merges wiki knowledge or rebuilds indexes/maps. Vault Graph is a
 read-only consumer and never edits or migrates a Vault.
+If any migration recovery artifact remains, every apply is blocked before
+target writes and prints the exact `recover --migration-id` command for each
+outstanding migration.
+Apply and recover also hold one target-wide process lock for their full
+operation, so concurrent migration commands fail without writing the target.
 
 If apply reports `Migration committed, cleanup pending`, the version 1 files
 and manifest are already committed. Run the exact printed `recover

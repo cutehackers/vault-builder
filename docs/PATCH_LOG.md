@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-30 - Final Migration Contract Correction
+**Trigger:** Final whole-branch contract review after durability correction.
+**Scope:** Global migration serialization, stale-recovery fencing, resumable directory rollback, managed-file mode identity, and generated-Vault manifest validation.
+**Core Values Protected:** Single-writer migration safety, exact rollback, mode-preserving ownership, and one shared contract schema.
+**Changes Applied:** Hold one target-root process lock across apply/recover; block apply on every outstanding migration artifact and report all recovery commands; bind nofollow/fstat managed and manifest snapshots plus immediate publication checks to audited hash/mode/last migration ID; fence recovery to recorded prior/candidate manifest states; journal directory-removal progress across hard stops; classify and repair mode-only drift while restoring prior modes; reuse a complete v1 manifest validator that rejects control-bearing paths in builder and generated Vault tooling.
+**Verification:** Concurrent apply and process-crash lock regressions; managed and manifest pre-snapshot, mid-snapshot, intent, and pre-publication races; two-migration and stale-journal regressions; marker/rmdir hard stops; mode audit/apply/rollback/manifest tests; direct, lint, validate-page, generated-gate corruption matrices; full builder, wiki, catalog, acceptance, fresh, and migrated gates.
+
 ## 2026-07-30 - Migration Durability And Cleanup Lifecycle Correction
 **Trigger:** Final whole-branch durability re-review after the integration correction.
 **Scope:** Directory-entry persistence, journal-contained publication staging, preparation/rollback authority, and committed cleanup recovery.

@@ -10,6 +10,11 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Literal, Mapping
 
+from tools.wiki.lib.vault_manifest import (
+    parse_v1_manifest_json,
+    validate_v1_manifest,
+)
+
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -240,6 +245,7 @@ class VaultManifest:
         object.__setattr__(self, "managed_files", _validate_managed_files(dict(self.managed_files), "managed_files"))
         if self.last_migration_id is not None and not _MIGRATION_ID_RE.fullmatch(self.last_migration_id):
             raise ValueError("last_migration_id must be 16 lowercase hexadecimal characters.")
+        validate_v1_manifest(self.to_dict())
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -253,13 +259,7 @@ class VaultManifest:
 
     @classmethod
     def from_dict(cls, value: object) -> "VaultManifest":
-        data = _require_exact_keys(
-            value,
-            frozenset(
-                {"schema_version", "contract_version", "builder_revision", "generated_at", "managed_files", "last_migration_id"}
-            ),
-            "manifest",
-        )
+        data = validate_v1_manifest(value)
         migration_id = data["last_migration_id"]
         if migration_id is not None:
             migration_id = _require_string(migration_id, "last_migration_id")
@@ -277,7 +277,7 @@ class VaultManifest:
 
     @classmethod
     def from_json(cls, value: str) -> "VaultManifest":
-        return cls.from_dict(_parse_json(value, "manifest"))
+        return cls.from_dict(parse_v1_manifest_json(value))
 
 
 @dataclass(frozen=True)
