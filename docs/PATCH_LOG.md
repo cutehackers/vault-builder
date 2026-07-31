@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-31 - Pre-Apply Gate Sequencing Correction
+**Trigger:** Task 4 verification and independent review proved that the exact v1 tests import or read three catalog files that migration apply has not created at the Task 5 boundary.
+**Scope:** Preflight validation ordering for the local Vault authority transition.
+**Core Values Protected:** Exact catalog bytes, transactional migration authority, recoverability, and honest verification claims.
+**Changes Applied:** Record an open decision that contrasts deferring only the full target gate with pre-copying managed dependencies; recommend retaining page, authority, lint, health, raw, no-touch, and Git checks before approval, then running the full gate transactionally during and after apply.
+**Verification:** Reproduced the pre-apply import failure for missing `tools/wiki/lib/authority.py`; confirmed `README-kr.md`, `authority.py`, and `vault_manifest.py` are absent and catalog-created by migration; independent Task 4 review classified the sequencing issue as load-bearing.
+
 ## 2026-07-31 - Local Vault Transition Approval Correction
 **Trigger:** Independent design and plan review of the local Vault authority transition found ambiguous overwrite, approval, unresolved-knowledge, and provenance gates.
 **Scope:** Managed-file reconciliation, source-body ownership and provenance transition, post-audit approval, and migration commit boundaries.
