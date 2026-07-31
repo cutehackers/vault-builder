@@ -1,5 +1,12 @@
 # Patch Log
 
+## 2026-07-31 - Local Vault Transition Approval Correction
+**Trigger:** Independent review of the local Vault authority-transition design found ambiguous overwrite, approval, and unresolved-knowledge gates.
+**Scope:** Managed-file reconciliation, source-body ownership transition, post-audit approval, and migration commit boundaries.
+**Core Values Protected:** User customization preservation, explicit migration authority, single-body ownership, and recoverable history.
+**Changes Applied:** Require per-file managed dispositions, block the full transition on unclear canonical ownership, require user approval of the exact fresh migration ID, update the operation log, and separate authority, migration, and generated-view commits.
+**Verification:** Re-run independent spec review and require approval before implementation planning.
+
 ## 2026-07-30 - Final Publication And Authority Contract Correction
 **Trigger:** Post-fix whole-review found final-boundary publication races, self-invalidating audit output, non-portable paired-output claims, source-role precedence gaps, and over-broad manifest path acceptance.
 **Scope:** Managed, manifest, and rollback publication and recovery; audit artifact ownership and plan identity; role classification; shared manifest validation.
