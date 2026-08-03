@@ -1,5 +1,19 @@
 # Patch Log
 
+## 2026-07-31 - Pre-Apply Gate Sequencing Correction
+**Trigger:** Task 4 verification and independent review proved that the exact v1 tests import or read three catalog files that migration apply has not created at the Task 5 boundary.
+**Scope:** Preflight validation ordering for the local Vault authority transition.
+**Core Values Protected:** Exact catalog bytes, transactional migration authority, recoverability, and honest verification claims.
+**Changes Applied:** After explicit user approval, defer only the full target gate; retain page, authority, lint, health, raw, no-touch, and Git checks before approval, then run the full gate transactionally during and after apply. Record the accepted decision in `docs/DECISIONS.md` and require the approval brief to disclose the deferral.
+**Verification:** Reproduced the pre-apply import failure for missing `tools/wiki/lib/authority.py`; confirmed `README-kr.md`, `authority.py`, and `vault_manifest.py` are absent and catalog-created by migration; independent Task 4 review classified the sequencing issue as load-bearing; user approved the recommended ordering on 2026-08-03.
+
+## 2026-07-31 - Local Vault Transition Approval Correction
+**Trigger:** Independent design and plan review of the local Vault authority transition found ambiguous overwrite, approval, unresolved-knowledge, and provenance gates.
+**Scope:** Managed-file reconciliation, source-body ownership and provenance transition, post-audit approval, and migration commit boundaries.
+**Core Values Protected:** User customization preservation, explicit migration authority, single-body ownership, and recoverable history.
+**Changes Applied:** Require per-file managed dispositions, block the full transition on unclear canonical ownership, require raw provenance on every gap-resolution page, require user approval of the exact fresh migration ID, update the operation log, separate authority, migration, and generated-view commits, and audit again after the final generated-view commit.
+**Verification:** Independent spec review approved the corrected design; re-run independent plan review before execution handoff.
+
 ## 2026-07-30 - Final Publication And Authority Contract Correction
 **Trigger:** Post-fix whole-review found final-boundary publication races, self-invalidating audit output, non-portable paired-output claims, source-role precedence gaps, and over-broad manifest path acceptance.
 **Scope:** Managed, manifest, and rollback publication and recovery; audit artifact ownership and plan identity; role classification; shared manifest validation.
