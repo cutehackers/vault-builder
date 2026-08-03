@@ -419,38 +419,6 @@ Expected: no unrelated path appears.
 
 ### Task 5: Validate and Commit the Preflight Reconciliation
 
-## Open Decisions
-
-### Pre-Apply Release-Gate Sequencing
-
-**Context:** Task 4 correctly aligns the five review-required managed files to
-the exact version 1 catalog. The aligned `tests/test_wiki_tools.py` imports
-`tools/wiki/lib/authority.py` and `tools/wiki/lib/vault_manifest.py`, while
-`tests/test_wiki_quality_baseline.py` reads `README-kr.md`. Those three
-catalog-managed files do not exist in the legacy Vault and are intentionally
-created only by migration apply. Consequently, the full target release gate
-cannot import the aligned suite at the Task 5 boundary.
-
-**Option A — defer only the full gate (recommended):** Run page validation,
-the external authority scan, lint, health, raw-digest, no-touch, and clean-Git
-checks before the fresh audit and exact migration-ID approval. Run the full
-target release gate inside the recoverable apply transaction and again after
-apply and generated-view rebuild.
-
-**Trade-off:** The pre-apply checkpoint cannot claim a green full target gate,
-but it retains all checks executable against the legacy file set. The first
-complete-contract gate remains transactional and recoverable.
-
-**Option B — pre-copy the three dependencies:** Add the three catalog files
-before audit so the full gate can import.
-
-**Trade-off:** This bypasses the approved migration transaction for managed
-files, changes the audited action set, and weakens the boundary between
-reconciliation and migration.
-
-**Recommendation:** Approve Option A. Do not copy catalog-managed dependencies
-or weaken tests before migration.
-
 **Files:**
 - Modify: `wiki/log.md`
 - Commit: source manifests, any canonical updates, five managed files, report,
@@ -486,16 +454,17 @@ python3.12 tools/wiki/cli.py health
 
 Expected: exit 0 and no authority issue.
 
-- [ ] **Step 4: Run the full target release gate**
+- [ ] **Step 4: Record the approved pre-apply full-gate deferral**
 
-Run:
+Do not pre-copy `README-kr.md`, `tools/wiki/lib/authority.py`, or
+`tools/wiki/lib/vault_manifest.py`, and do not weaken the exact v1 tests. Record
+that the full target gate is deferred because those catalog-managed imports are
+created only by the recoverable migration transaction.
 
-```bash
-scripts/release_gate.sh
-```
-
-Expected: wiki suite passes; builder-only migration suite is not required in
-the generated Vault; lint, health, maps check, metrics, and diff guard pass.
+Expected: page validation, external authority validation, lint, health,
+raw-digest, no-touch, and clean-Git checks pass before audit. The first full
+complete-contract target gate runs during Task 7 apply, followed by explicit
+post-apply and post-generated-view gates.
 
 - [ ] **Step 5: Verify raw and unrelated content**
 
@@ -572,6 +541,11 @@ Present:
 - raw digest equality;
 - release-gate result;
 - recovery status.
+
+For the release-gate result, state that the pre-apply full gate is deferred by
+the accepted sequencing decision, cite the last green legacy baseline gate,
+and name Task 7 apply as the first complete-contract gate. Do not describe the
+pre-apply state as fully green.
 
 Do not run apply until the user explicitly approves this exact migration ID.
 
