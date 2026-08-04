@@ -12,24 +12,8 @@ Read this file first. Read the longer reference only when the task needs detail:
 
 ## Output Style & Language Rules
 
-### 1. Tone & Conciseness
-
-- Be clear, concise, and direct. Avoid unnecessary fluff, fillers, or overly polite intros/outros.
-- Focus strictly on answering the query or solving the problem.
-
-### 2. Language Switching
-
-- Match the user's input language (Respond in Korean if prompted in Korean, in English if prompted in English).
-
-### 3. Korean Natural Prose (Crucial)
-
-When responding in Korean:
-
-- **No Hybrid English-Korean Verbs/Nouns with Suffixes:** NEVER combine English terms directly with Korean particle/verb suffixes.
-  - ❌ **BAD:** "Execute합니다", "Deprecated되었습니다", "Passing하여", "Refactoring을 진행"
-  - ✅ **GOOD:** "실행합니다", "더 이상 사용되지 않습니다(Deprecated)", "전달하여", "리팩토링을 진행"
-- **Natural Grammar Structure:** Do not translate word-for-word from English thought chains. Rewrite sentences using native Korean word order (SOV) and idioms.
-- **Technical Terms:** Keep code identifiers, API/Package names, and official technical keywords in their original English form, but wrap them in proper Korean syntax.
+- Be clear, concise, and direct. Match the user's input language.
+- In Korean, keep identifiers and official technical terms in English, but do not attach Korean particles or verb endings directly to them. Use natural Korean syntax.
 
 ## Mission
 
@@ -162,37 +146,9 @@ raw_sha256: "..."
 
 ## Task Routing
 
-When asked to ingest:
+For ingest, update, or query tasks, follow the matching guide under `.agents/skills/`, read `wiki/index.md` plus relevant pages or sources, preserve locks and provenance, and use drafts with `publish-draft` for durable changes. Use workflow checkpoints and write reports when applicable.
 
-1. Follow `.agents/skills/wiki-ingest/SKILL.md` when workflow detail is needed.
-2. Read `wiki/index.md`.
-3. Hash or register the raw source with `ingest-source` or `workflow ingest`.
-4. Create a semantic draft under `scratch/drafts/` using `tools/wiki/templates/draft-upsert-page.json`.
-5. Publish it with `tools/wiki/cli.py publish-draft`.
-6. Run `health` or lint and write a report.
-
-When asked to update:
-
-1. Follow `.agents/skills/wiki-update/SKILL.md`.
-2. Read the target page, related pages, and supporting sources.
-3. Preserve human locks and record contradictions. Use `workflow update --preflight` when a deterministic checkpoint helps.
-4. File safe changes through a draft and `publish-draft`.
-
-When asked to query:
-
-1. Follow `.agents/skills/wiki-query/SKILL.md` when reusable capture or report output is requested.
-2. Read `wiki/index.md`.
-3. Read the relevant wiki pages.
-4. Inspect source pages or raw sources only when needed.
-5. Answer with synthesis and cite durable pages/sources.
-6. File reusable results back through a draft and `publish-draft` if they should become durable. Use `workflow query --prepare-report` for reusable query reports.
-
-When asked to lint or repair:
-
-1. Run `python3 tools/wiki/cli.py lint --report`.
-2. Fix deterministic issues directly when safe.
-3. Put contested or judgment-heavy items under `scratch/review/`.
-4. Append `wiki/log.md`.
+For lint or repair tasks, run `python3 tools/wiki/cli.py lint --report`, fix deterministic issues directly when safe, put judgment-heavy items under `scratch/review/`, and append `wiki/log.md`.
 
 ## Completion Gate
 
