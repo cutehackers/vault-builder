@@ -1,0 +1,2322 @@
+{
+  "actions": [
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "caf12e1545d354100b1cdf5c066fc142a5d21f22bf9fb36ee894aa3454d4ed38",
+      "desired_mode": "0644",
+      "desired_sha256": "caf12e1545d354100b1cdf5c066fc142a5d21f22bf9fb36ee894aa3454d4ed38",
+      "path": ".agents/skills/wiki-ingest/SKILL.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "0fe1fb6b00ad2a661203499593464eb76eb07d95cf837122ced45b3ce1895b17",
+      "desired_mode": "0644",
+      "desired_sha256": "0fe1fb6b00ad2a661203499593464eb76eb07d95cf837122ced45b3ce1895b17",
+      "path": ".agents/skills/wiki-query/SKILL.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "809ec116fd83ab59de2d81cb4a9302e7e7b1188bf7c6e168e286ae5aa262397a",
+      "desired_mode": "0644",
+      "desired_sha256": "809ec116fd83ab59de2d81cb4a9302e7e7b1188bf7c6e168e286ae5aa262397a",
+      "path": ".agents/skills/wiki-update/SKILL.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "aa47224e6e7cac000eb09d5b44ed4f74b3cb31718b27d3e8889ee7c689e8b3c9",
+      "desired_mode": "0644",
+      "desired_sha256": "aa47224e6e7cac000eb09d5b44ed4f74b3cb31718b27d3e8889ee7c689e8b3c9",
+      "path": ".github/workflows/release-gate.yml",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "f7a52536721516a52e0960b161e165c02c3e547846e028d3bf208cbc488e05a9",
+      "desired_mode": "0644",
+      "desired_sha256": "e81a7daedef941efd44c0372aa266d89a5346398a85db1a42b1e6804607b1bde",
+      "path": ".gitignore",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "6c485b18a262bed7fd626bbb61f5c863e12c84c2d98a957104ce344caef3a953",
+      "desired_mode": "0644",
+      "desired_sha256": "14ca567b44efc5775b2b4b0cee22f2ebbc6fc91c1cd0b33733598f53a47150f1",
+      "path": "AGENTS.md",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "create",
+      "current_mode": null,
+      "current_sha256": null,
+      "desired_mode": "0644",
+      "desired_sha256": "27ed48fc9ec218f03fcce15439777f3a05290a08092ac79a74e31b4f59e5fe70",
+      "path": "README-kr.md",
+      "reason": "Managed file is missing from the Vault."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "9cb19990c8a332f6c23325dcf9825f0757bc06abcbfe36abc454295a0a77d83e",
+      "desired_mode": "0644",
+      "desired_sha256": "69fb585b1b13f53b4a52a2ab317880be90337f108a20799759aa1ae4ce9520ea",
+      "path": "README.md",
+      "reason": "Managed file differs from all known builder hashes."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "94190f0f1a88b4805415f402966a594c262a71b023af77ca6185b0057bc339fc",
+      "desired_mode": "0644",
+      "desired_sha256": "e517f16decada8b76491d6ffcd620c7b9f89f2141cba11ca190238d56a287063",
+      "path": "docs/LLM-WIKI.md",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "c97fc3ac252fede9c34b8eceda7a04152dfaac0df38171dbb047625fdfa05561",
+      "desired_mode": "0644",
+      "desired_sha256": "c97fc3ac252fede9c34b8eceda7a04152dfaac0df38171dbb047625fdfa05561",
+      "path": "docs/USER_PROMPTS.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "817ede5fcdb9af91b79f624df5333aed10b25c608e3729973b3d51e6aea5d6b4",
+      "desired_mode": "0644",
+      "desired_sha256": "817ede5fcdb9af91b79f624df5333aed10b25c608e3729973b3d51e6aea5d6b4",
+      "path": "docs/VAULT_PROMPTS.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "2ffad2f38971a83bb64bdbf0c9ca414d9c97d222252335e179e52cfc36523514",
+      "desired_mode": "0644",
+      "desired_sha256": "2ffad2f38971a83bb64bdbf0c9ca414d9c97d222252335e179e52cfc36523514",
+      "path": "docs/agent/DRAFTS.md",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "7b0ce76550a674524b0eb51a387bb946f40531de6a3ef83a651733bb04e2a33a",
+      "desired_mode": "0644",
+      "desired_sha256": "5c69840728e606afc5ab82c0f20b73b8b0ac101fc08e0d3b95c587980f4b2333",
+      "path": "docs/agent/OPERATING-SCHEMA.md",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "eba87834a0a44bcc237410491ae54eecd78abb2f9b134edd02d1b134734f8915",
+      "desired_mode": "0644",
+      "desired_sha256": "f177c4a81e5a118271beeca28c20ca3ad95c24bcc7bbdd53fb617e56811d0237",
+      "path": "docs/usage.md",
+      "reason": "Managed file differs from all known builder hashes."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0755",
+      "current_sha256": "df8c642114c8def42eda6eea8d1fce7641b222c6602c8443cf1d81b4c85e42bb",
+      "desired_mode": "0755",
+      "desired_sha256": "7523a885536fa49cb4a2889570a9d64458c06c189227f85f0014c3ab43c4870c",
+      "path": "scripts/release_gate.sh",
+      "reason": "Managed file differs from all known builder hashes."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "desired_mode": "0644",
+      "desired_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "path": "tests/__init__.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "ac6072a56b6baf13abb81d8c12468c1719613ac65097ea47789fd2b739ca8380",
+      "desired_mode": "0644",
+      "desired_sha256": "2547fa2fe828ec225cf4979ef6ccf72c828dbb6ef5e3085c1ab8301dc6dd1182",
+      "path": "tests/test_wiki_quality_baseline.py",
+      "reason": "Managed file differs from all known builder hashes."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "c9dd405aab23b81b5f3252d8dd3d0e38979476aec15ddc6ad70f44fb0a5fd312",
+      "desired_mode": "0644",
+      "desired_sha256": "1d3432d603bdc8f3c2872212b513c14013c83deb00c7cdc2d4c540b6e15e9be0",
+      "path": "tests/test_wiki_tools.py",
+      "reason": "Managed file differs from all known builder hashes."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "7f9be9de6a809daf59eed2faef7b6acef2529799fa4b9649ac5995448cb4c348",
+      "desired_mode": "0644",
+      "desired_sha256": "c218ab01b97b77ae4467bf524ccd81a17c5ed658cd46aa70255e8f11ba69943a",
+      "path": "tools/wiki/cli.py",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "desired_mode": "0644",
+      "desired_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "path": "tools/wiki/lib/.gitkeep",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "create",
+      "current_mode": null,
+      "current_sha256": null,
+      "desired_mode": "0644",
+      "desired_sha256": "176a7360bb22ee7712865f72c2607674200c150e0e6212d8bd8a6b29b2540ce8",
+      "path": "tools/wiki/lib/authority.py",
+      "reason": "Managed file is missing from the Vault."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "8591c35baf820c9187228592e1f9d5555ba7592974428a550020b00406f71d96",
+      "desired_mode": "0644",
+      "desired_sha256": "8591c35baf820c9187228592e1f9d5555ba7592974428a550020b00406f71d96",
+      "path": "tools/wiki/lib/draft.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "dfe074543036e4edea23a0cd2265094c69fedefba1e9ad64f8e3b5e74ec19369",
+      "desired_mode": "0644",
+      "desired_sha256": "dfe074543036e4edea23a0cd2265094c69fedefba1e9ad64f8e3b5e74ec19369",
+      "path": "tools/wiki/lib/frontmatter.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "15801088742a8d11df66598325208cedec00c4cbc786e203e054deeb01437965",
+      "desired_mode": "0644",
+      "desired_sha256": "15801088742a8d11df66598325208cedec00c4cbc786e203e054deeb01437965",
+      "path": "tools/wiki/lib/hash_source.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "ba0f26b70fe39f55367afda528d24f8804fa89d08d99c1caf8bda24bce94f368",
+      "desired_mode": "0644",
+      "desired_sha256": "7473532d97841d85423d075b93ef12549ed7ffe0bd4abafa67c70a340ed065c3",
+      "path": "tools/wiki/lib/ingest.py",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "f1b12c83efa3c1b50648233b398cad14f3e797104568ae59f9ed820eca943532",
+      "desired_mode": "0644",
+      "desired_sha256": "f1b12c83efa3c1b50648233b398cad14f3e797104568ae59f9ed820eca943532",
+      "path": "tools/wiki/lib/links.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "replace",
+      "current_mode": "0644",
+      "current_sha256": "628a245fd0042c9c589df76fa4c251c55d0ad387c7188cedcf3b5747251ffa1d",
+      "desired_mode": "0644",
+      "desired_sha256": "bf6e0877604102c96d023cf5364f6af910f2f32406d452f53f33cc6d3330d0cb",
+      "path": "tools/wiki/lib/lint.py",
+      "reason": "Matches a known prior managed-file hash."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "82cf476ab3db61ec4d6c9412c8a4a8ea3e4f948abee4318d1ba23712add24264",
+      "desired_mode": "0644",
+      "desired_sha256": "82cf476ab3db61ec4d6c9412c8a4a8ea3e4f948abee4318d1ba23712add24264",
+      "path": "tools/wiki/lib/maps.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "7369515e6fbff8187d083e3c8a3e158685665fd1638f516c3bb4e2aa44162df4",
+      "desired_mode": "0644",
+      "desired_sha256": "7369515e6fbff8187d083e3c8a3e158685665fd1638f516c3bb4e2aa44162df4",
+      "path": "tools/wiki/lib/merge.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "51e800eeda70806bd77fb12c637f2d3e27dff9cad5ffcc75f8312488ab4704a9",
+      "desired_mode": "0644",
+      "desired_sha256": "51e800eeda70806bd77fb12c637f2d3e27dff9cad5ffcc75f8312488ab4704a9",
+      "path": "tools/wiki/lib/metrics.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "ba0125570e8b7c70cfe78c59a6146f5ccce9f5fc47ae4e94caad06235f3f07ae",
+      "desired_mode": "0644",
+      "desired_sha256": "ba0125570e8b7c70cfe78c59a6146f5ccce9f5fc47ae4e94caad06235f3f07ae",
+      "path": "tools/wiki/lib/paths.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "67534722fe6a6e9aca0e65920ee60b31d0f06268a729cdcb3b3d98d5057ffdf8",
+      "desired_mode": "0644",
+      "desired_sha256": "67534722fe6a6e9aca0e65920ee60b31d0f06268a729cdcb3b3d98d5057ffdf8",
+      "path": "tools/wiki/lib/review.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "88eb3f789be5710fd77a4a53650cbb9518cdd1f34b0021701737deca2a90b7f8",
+      "desired_mode": "0644",
+      "desired_sha256": "88eb3f789be5710fd77a4a53650cbb9518cdd1f34b0021701737deca2a90b7f8",
+      "path": "tools/wiki/lib/schema.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "c3ebd9c6f5ebdebcdee43ab5fd52fb3f247e5e56dcf3e0fafee5c098931b5d20",
+      "desired_mode": "0644",
+      "desired_sha256": "c3ebd9c6f5ebdebcdee43ab5fd52fb3f247e5e56dcf3e0fafee5c098931b5d20",
+      "path": "tools/wiki/lib/source_registry.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "create",
+      "current_mode": null,
+      "current_sha256": null,
+      "desired_mode": "0644",
+      "desired_sha256": "83c5512b359aa413bb93c0a63ab9ac42f310b89a266bc86e9afc6fac19d39605",
+      "path": "tools/wiki/lib/vault_manifest.py",
+      "reason": "Managed file is missing from the Vault."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "404ee4d689e685a71af16bbbecaf9facc16a856fc3de0ecab31ec1da0b69e693",
+      "desired_mode": "0644",
+      "desired_sha256": "404ee4d689e685a71af16bbbecaf9facc16a856fc3de0ecab31ec1da0b69e693",
+      "path": "tools/wiki/lib/wiki_update.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "4ff93b21ed83f48df7375cee6ad6e62d5d3748fbf9fcc69797bccb6c3759907a",
+      "desired_mode": "0644",
+      "desired_sha256": "4ff93b21ed83f48df7375cee6ad6e62d5d3748fbf9fcc69797bccb6c3759907a",
+      "path": "tools/wiki/lib/workflow.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0755",
+      "current_sha256": "6310d15733c9859db96bb07a26379ccd6ffb0c461998ed04c85eee134fd7e996",
+      "desired_mode": "0755",
+      "desired_sha256": "6310d15733c9859db96bb07a26379ccd6ffb0c461998ed04c85eee134fd7e996",
+      "path": "tools/wiki/mcp_server.py",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "3b6af5e623130e9e9d63ba6086e94cd31ba2760255417a6fbd041b72402cbde2",
+      "desired_mode": "0644",
+      "desired_sha256": "3b6af5e623130e9e9d63ba6086e94cd31ba2760255417a6fbd041b72402cbde2",
+      "path": "tools/wiki/metrics-policy.json",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "bd34d6afcd44614bd35413727e2d9f43cc3ba0355fab9354023b764f1d460fb9",
+      "desired_mode": "0644",
+      "desired_sha256": "bd34d6afcd44614bd35413727e2d9f43cc3ba0355fab9354023b764f1d460fb9",
+      "path": "tools/wiki/templates/draft-batch-upsert-pages.json",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "f389c35066899bdd402a05507e132b37adeae78d4da59ca3ed6b2857e02a9e18",
+      "desired_mode": "0644",
+      "desired_sha256": "f389c35066899bdd402a05507e132b37adeae78d4da59ca3ed6b2857e02a9e18",
+      "path": "tools/wiki/templates/draft-upsert-page.json",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "unchanged",
+      "current_mode": "0644",
+      "current_sha256": "eece3365ad21ae757ba9bec84c4f1b847a92a5d7dd4828c7fdada5a2c803ef81",
+      "desired_mode": "0644",
+      "desired_sha256": "eece3365ad21ae757ba9bec84c4f1b847a92a5d7dd4828c7fdada5a2c803ef81",
+      "path": "tools/wiki/templates/frontmatter.yaml",
+      "reason": "Already matches the target contract."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0755",
+      "current_sha256": "1de6ccdd935a9a8863ba8e4a56e53d24d09e282a209a0e0b9b23fe7327e6ac67",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "init-vault.sh",
+      "reason": "Legacy builder copy is preserved; creation is now builder-only."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d65165279105ca6773180500688df4bdc69a2c7b771752f0a46ef120b7fd8ec3",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/.DS_Store",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/assets/.gitkeep",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/imports/.gitkeep",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/.gitkeep",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "83dd27202e522942c5d5d054c13d230835e8cebe6eaeb6349bcd88d5691e50ec",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/codex-best-in-class-harness-guide-20260611.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "819bd9f4804f35e3c7185fe9665fbaaa6df0c04ff79bb7230341fbb2cb474d49",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/llm-wiki-system-models-research-20260604.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "327589c40dfe4e59c3cd474dea549b1f765a1f56e2e9fec1a472857895629211",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/moder-agent-harnes-report-20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "14401a148a0a8f7ed866785d51bc7346a264ae67775740e7fe4640545c0cbceb",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/okf-research-report-20260629.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "01edf6e747ecabd6a0cb4b7010dcae7080f2255c9deba427cd542117bb199d90",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d6b4faaa9758ef3ad9d5f12ffd37418057abfcb3cc1de766035f2f3fc11479ac",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-architecture-20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d746203bb0ba77a31c7f73c43814af3ce5ac716f79a33edb145f17d9debade14",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-core-v2-production-readiness-prd-20260602.spec.json",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "24c701560780d4474305d62884c319707c5887a825608251cd20da914accd6f9",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "6b6e18c62b939dff91537f3e76f77dd04bcd97b00dbf1a19b78a467c75978d4e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "282255acaceb9603b357a8920cb3915e51c03d9703010f61977aef31d0b7c4bf",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "ec7bb9ce380efc28d4e6d4ff1617177b719df3f2644a8d1b062ac21a549b834d",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "afa62b3ed296a8d0481639216da1902e9981da8db664bfa210a239a418f691e9",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "f1ee71f8931ee4c02398751e7d5891925ad1cb72c2c75944d4edab265c8c1f22",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "7deb892926fdf73c7dadc6c0b1446922f01773b37645600f554d67e0eeebae26",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "446b97eb247aa44299279f498cb6232b4770ce61f8f51db1d816cc251b56e5fa",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "a818216bb77c957bc49e458ae8fa0d868885462221f8e0357e43f538a38220d3",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "3e63108656fef63c9440bbd5454efa1ef58c887f3bdfa358aec3817446e813e5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "5f32e7fefb42e49565ebedfae94d177d6fee310383c2eaad55b0cb64156dcc31",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "8a279cb134f4e36d7675003117b8d692562837985b93ab32aefa4396dc04118d",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-historical-superpowers-readme-20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "839bba9a02c8c5f4f09c20724af2b8aaff05536f61acaa784297610352463458",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-product-spec-20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "aa3233fbbf7b38d9d53520f75d6215cd883b985f80e703e0416258a3414a1118",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/rail-readme-20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "f7b8f2cfe0548c5ae9c27dec903e93235115aaaa384a9a67ac489d20c16c0b15",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "97bb00084258f09ba160d67dfac050f7f8001d8789b601a46ff02253802a44e5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/skillgraph_harness_design_ko20260601.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3484b8d9b518d1225572cd976846b0f8ba52f4a4d0afb533da1d439994a4b90",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "raw/sources/vault-graph-spec-20260604.md",
+      "reason": "Raw evidence is never changed by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "f8174b680faa9da1c25a2cd031321de08889a188579b3e3f007de32e8bfec51b",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-05-30-baseline-claim-provenance.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "db5a20025b13282c055a902bff701ed372f48978b8a2ad3aac3c46bd087c6a80",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-05-31-draft-publication-boundary.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "6bc518050046cc801fb97b47ab59f722a6b5b0643732d090e9693ce343369cd8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-05-31-remaining-hardening-alignment.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "22722c46939ab0af461150af8b947432ccaf00d43c0e0e70cb17b7e8a42ce670",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-05-31-review-hardening-doc-alignment.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d26d14c3f48b6d8bb889d549f195834e1305840f1ec66e09a104353441037713",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-05-31-subagent-hardening-closure.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "9738e11f0c09cbc0ccd7c60181654e03f5db8159376b6d3c6722f98361ab1c68",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-01-codex-harness-ingest-batch.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "72a73d3707bcbc60aaff05cd74960831c7443118c7960eda70ae5331cce594f1",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-01-codex-harness-source-pages-update.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "34b559f781ebde3f7ee6f3341aee37e9cab0a0ef64e2ce4f0403d1ec81a33c97",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-01-rail-historical-corpus-synthesis.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "c77bce79e23a60e7d06df1c2282486524c8215426fee8e87a36e410450b056ad",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-01-rail-modernization-direction.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "60ce83cfa9940406980a4c4e6cbba95bd3f8dcb15e644a8c350f40f1a578da77",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-02-adopt-rail-core-v2-production-readiness-direction.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "acca84afd6d945207c453cc72b1d0377c4e48924abf6040939400a0944893c79",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-02-rail-core-v2-production-readiness-source-update.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "16a92e15bcef6d6e2be654dd84bb067c0d27d9eb455830b5ac87ccc14f82373a",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-02-rail-core-v2-production-readiness-system.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "8e09beb3c70b8eed0cc880e836f88d90fc1cac4172bfe3736a605afe27bf30e5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-04-agent-context-pack.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e34d8d55dadec8f808181f78d81fa18b2628de62e49b3385e300d9a087c52538",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-04-build-vault-graph-as-read-only-projection-layer.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "283c1f8eb59676f31934297a72e1b5e78430439f3f178785797fdecb11fd3ee0",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-04-read-only-rebuildable-indexing.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "895290848d804c4683706ed4fef9aab325b2f04847bcc132df9d3b34e6b540f8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-04-vault-graph-source-update.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "f2bfd9c6c937c6bc1a3a016e9152d60a496e6cb98bf3ca7611a9d0408b3d426b",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-04-vault-graph-system.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "6805f71c3ab71986da4413b71495be94fc91e59f02f93ce518c6c65c78cced38",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-11-codex-development-harness.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "bb20e00da1933ae58501a2b10e450103dcc386e2b6106a52fb152c5ad8bae992",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-11-codex-harness-retrospective-loop.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "0ae4cc942d70b08924ab29995e96c2e420ee967a6495e1a74cb6d453144ba9e6",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-11-codex-verification-tiering.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "dc2cab96a774a7aae9c24f31fee807e2b5cffcbbf4abee3e85ed97d8ec45043c",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-11-enrich-codex-best-in-class-harness-guide-source.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "6c1187f6a84d380bf6802585da7ac4003d42a14ead84b092223e4dfe408f6942",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-11-task-contract.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "ae0fa5d69000928c6fc230d9a969b724f342c4f3122bbc621209518e1132cf5e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-15-riverpod-conditional-listen-guardrail.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "0dbb546b845f051d99daf2b309d1f07525169ef1cfebcb4cc4f5991875420463",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-22-wonderous-ux-patterns-ingest-batch.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "197efc008a5ac7209b55b15228f5844abafe5ccf50f1286b160dbecf4e68c1ba",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-25-wonderous-ux-patterns-followup-batch.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "b52db76a2463330a586c080fcb3e6a9ee38889b7b5bfaded7864892a54495ebe",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/2026-06-29-okf-research-ingest-batch.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "54f405077da482014d3c8d6a829198f69126bdb90391d9876674407436677e91",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/README.md",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "4e4d8fcd5a95bf60c70f813b207420fd1d89e1d0ad421b8624f7601bf4e12b25",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/llm-wiki-system-models-batch-20260604.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "18c49a32731d47f75581ef503993226fcd939e369d9c5af07899abae462aab02",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/llm-wiki-system-models-source-update-20260604.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "cfcb06befcc9d9de4043d46b7cbb2ee16283dd4284e9f0092b943281d7b72b33",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/drafts/proandroiddev-android-google-io-2026-source-page.json",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "69a39b317e6f1656f9102b01fdcd678725b435d838c0bc50794341054d65b60c",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "scratch/review/README.md",
+      "reason": "Scratch and report evidence is preserved byte-for-byte."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "278d6e9fc015d38f6d14c4c21c235297f442f8af49af9ebe4235c8f21f034beb",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/comparisons/codex-harness-integration-models.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "aa162a729380b66dc60320e8a9c4e0d0da77c6dea3766efae6c4b7329692d651",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/comparisons/open-knowledge-format-vs-rag.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "6545b0a1f0b60f41313fffe865a2600626de673da41de4104a83c733c9ecf692",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/comparisons/rail-authority-models.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "07ad803c0bd2cfa4063af72b3e1b689086919507594fae57af74ace336c637ed",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/agent-context-pack.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "41d8b6e1270d1f043062d3d24b55750dfc7a972b33f931dd787a95b769a1c4e4",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/compiled-knowledge.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "62e7c922df2c6f952f5c3efd9ec09fa38d4ca3bbc0f9015f15059c802fd3ab24",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/data-driven-layered-parallax-illustration.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "c53625bb0023ea159ae2f64425b327b7b3e23c779687c14a8964526939906293",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/llm-maintained-wiki.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "54e03ece1ee1010b0aadf8ba5d59d00e4f03da3b487f1e1bf42c4e3e89a3f74c",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/open-knowledge-format.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "06db945f565bbf19c52033833afc6873bc45292a8578d5e6dda2aad86e76cb30",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/rail-artifact-authority.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "a30fe54e5a3260ba4f03042673ada9b605f3c6bf17737b226eb782a9628318fe",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/rail-broker-operations.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "da3020600ef16a8ba29c98e638778e2be33f1b95d0b923b2cac111b887bf5d25",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/retrieval-augmented-compiled-knowledge.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "2dfc425f4091f5b95f5d1201f2b2d774bd6a8e9b491c086dd9da5c1db1447754",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/source-of-truth.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "8430fd6d08539007fd2e8ffeca57ebada73a6c0ea4fdb322cb79a56443fdc7c4",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/concepts/task-contract.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "0389086f6279330fb1b2581b876012b3d2814b7e4cca3a4400f59886fa7af339",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/adopt-rail-core-v2-production-readiness-direction.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "1fb5265ac5f4a7f02ea9f8fda36a963ce28185461dae4240b18a77d4e52f8bd2",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/build-vault-graph-as-read-only-projection-layer.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "64ac9f86d749e6740d703ba8dc6e72a2484d40c71536ede15a2760a0aa09f085",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/keep-compiled-wiki-as-source-of-truth.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "1951af7d57ef365169d4b18a70d54f75b47facb3e2cfe43efcee69cc99dabcf4",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/rail-modernization-direction.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "2a8d0ff5971f2ee1a23bd0068b232c666e7e3d725a41712d3f9b7ab6b0444962",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/decisions/use-markdown-for-compiled-knowledge.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/entities/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "f79f976794417b934232035535bc8e4e74a01b36abc764682285e1123a68796e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/inbox.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "1383d544b7193a5b793aa984ccfa9eae65f977b90306e58de798d004b08323a5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/index.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "70b4b377114a30076a9ae0373f09e52db0975b406b16b4d3df01e035f2e2cc85",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/log.md",
+      "reason": "Operational history is preserved byte-for-byte."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/.gitkeep",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "387679dbe8623f115473700518e6a4053982d5a509430a7cd1b6c40dcb976f88",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/README.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "0796f69e5b84ebebad66b8b4be82f59fd27f2a8c4f08c46a72a3b067d04f5b82",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/decision-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "a78c687c5ce97eaffe2655b696e78d9ec6d2ceb8b21d0df57d499069c93f4b29",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/lifecycle-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "ee349d758d96531a7628025fa8374c95576ba3d9161c2951f7900db0dea18b6a",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/review-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "d2601e482ebeb80fd203a5ac06ec6caec0cf96f202a676599b280459e496e262",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/source-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "9034c9a10fdb06a2e6eb0660b26229da734e553608baf17c6b23deb96fbc5563",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/topic-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "rebuild-suggested",
+      "current_mode": "0644",
+      "current_sha256": "d90fb0cdfa5072a6a5860a19c3ac25316841c78e73e35065b8bbe97996b0956f",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/maps/wiki-operating-map.md",
+      "reason": "Generated wiki views require an explicit rebuild."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "428553e0142d1366bb8f6b5dffd4004f04729149aad3617901e6ffd78654ece8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/overview.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "44aee2dc6ed1ccc7f53889caac7015f7131d8448d5d0d384a7aee728d4207ec2",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/codex-best-in-class-harness-guide-20260611.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "1b0b4cceb508e71ddd5fd3f8c860946374bebf3fc3c40f3c5845f42ea775b0a4",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/llm-wiki-system-models-research-20260604.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "e7488a162ba61e3128247ce9f49232ad5c0522cb8369330f28e8634a6fe4273e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/moder-agent-harnes-report-20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "eb9da8fdd880a8cd448aa450c3067c6de7454dcdb33056e52f3fc0da09d752c6",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/okf-research-report-20260629.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "7c77adc9b9a9c239005703038cff262784e4315dfb8e9cf4b7738d05da782932",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "d1c1f57500ba4ddeccacd69f5aa45e671c22a18fa840b6124d62555c2a442e47",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-architecture-20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "ee0e1e3706ffb923d754655e296902462867911ff6d59b4130d42e07dda78fab",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-core-v2-production-readiness-prd-20260602-spec.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "0f9986631c5b7bacbe8720d302bb91948dbe7e8c1cb678927436cc9733269126",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "86fa922523f2419b6ace7f3a3ca25845cfa9b3bef12b371d761bb55f8d52b294",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "c43b5200f593bd96130afc42d3d457647a7ea261e34968d94b3b82adb01305d9",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "9c081429e557eceee9cec543a520b8b2b075424f1af047f6f422b9a99378fcb2",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "2d1dacbae20b6d8863ece811b78a372f78b922f5a0c846dd1dc1a12288abf3e8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "bb2addd5c346ceb95d6f5bf81f493e704faf21d4fe002d0c2c5d5d584e7ac49f",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "520b311dbdff024d1993d2de2e789195546251cafac109a311bccd2c7211ba64",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "15dfc02e91ae33cc78edc88407c886912d3caec758e0ada1af9466439a75b003",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "9afa580cc18b8ed3e86d9dfcddeee95f928f5e4db8e627cac1ecee5fe6f90f46",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "0ef02b6e63fd9fe5750dc2707d82107c082ebea0bbe7a10c00aa95ec855f36e9",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "7837e3f67b7cd6e0de305a547ea4897ed37998cff1d677b45821820b34bed490",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "2452c93f7e1770da2ceb3734cb2e4a027f2bac061e5cf8afff01d83c6b0c0fe9",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-historical-superpowers-readme-20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "77abdc5204cb27e16faadc68ea12c8af8a20e67dee404cb3a6668e2b53ebddb8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-product-spec-20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "1e05e522ba1e72f50def7448839c727a93666c8bd341cdd5097e57f776c8a29c",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/rail-readme-20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "e54ddcba8198f37a764ee6cefbf360361f2910966b0e480fc8a960b995c3fbc3",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "2868f105cf36c4a471fbaa4d45f4d389ce5333b7fa658118505e14c9b83e3a45",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/skillgraph-harness-design-ko20260601.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "review-required",
+      "current_mode": "0644",
+      "current_sha256": "12fa70f8a6b583efab862c2ca04e0e953bc9cdd4f894c9a075f7e51c0214bca6",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/sources/vault-graph-spec-20260604.md",
+      "reason": "Authority review required: source-manifest-missing-section, source-manifest-semantic-body."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d3d404c8b9f90b42714f927c5d7360056fa98414d738eb1383317959f322019f",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/codex-development-harness.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "ef20d9d94d681a0361c4606f8f8c351a5013b78be578bbacf5a5b79f67038f07",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/hybrid-compiled-wiki-retrieval-layer.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "5f74dfdae29af862b39a3457d45fb8dd1b096823632433feb7c25719c5f468d3",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/modern-agent-harness.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "a1c902f94bdba59a7c530cf8ebd77be6af4483f5d802d4a453153a8944ad211f",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/race981-wonderous-ux-adaptation.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "71d605fba760af2714694e9a0f40befabef296f957d6d0a5f59e83023f15d7ea",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/rail-core-v2-production-readiness.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "cc7ec4b1fe18bd110d70ac3227df21f1b8d9af164f85d483d0543081e2e3826f",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/skill-first-sdk-free-codex-harness.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "af72f7536ea8397f5060da3ec33655d7e0a417ddaf3d2fa2b9d07f619bf19aaa",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/systems/vault-graph.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "8f935391340b724714fd422508914d5f58e0eeb6b40e544185deb15baba045e2",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/timelines/rail-harness-evolution-202604-202605.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/.gitkeep",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e05f93fc782c39d5f7a87bfb47afa6329048065181b74600d6f10d702fd2cac7",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/codex-harness-retrospective-loop.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "39f3178d59c604cbabd7155246e32d6784f2f8ccaece5afb79c5aca39f17ea81",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/codex-verification-tiering.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "8d1497f00b64e4d96de6c6a301bcf209dbfaa59ac477db48fd080e1fd9fb748b",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/flutter-animation-performance-guards.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "faeb6620813fff18161446b0c08c87746516a497b8b909c09dba87a7112d3aea",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/frame-critical-flutter-interaction-state.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "435fa7e739aab519e14bd641f0001effb63052784078ecacaea984ff8d7ebdb7",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/hero-freeze-fade-route-transition.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "77f336a903a308088e94cae38dc2e946cf12ec2afb053a08855f6fc586e722f5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/ingest-new-source.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "2394b082eba5c021be55f92aeed53f7be4d77e7120c40ef50e32399d73ab83b5",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/okf-bundle-authoring.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "edd67bfc4fd06256c8c417183ac2fd40c2c327cbb6c38a946f4e2f8661eb4bac",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/read-only-rebuildable-indexing.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "e0fbc494a2e9653c42d9d01e95f2ab67443642afee8fef2e2045db33d8c0f51e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/research-to-durable-capture.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "14b6bff10dc1e7597008b4c5026b4a4326edab4918021a3103b76d10a65d0cb8",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/riverpod-conditional-listen-guardrail.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "d92e0de524ebc0bdd71e993e546f509176cdf1a2d339312b1b028bb12330221e",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/scroll-driven-editorial-parallax.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    },
+    {
+      "action": "preserve",
+      "current_mode": "0644",
+      "current_sha256": "515b12482e928717463341c41b637fa992c5dd7af1d88f51f460b541defa0157",
+      "desired_mode": null,
+      "desired_sha256": null,
+      "path": "wiki/workflows/wiki-linting.md",
+      "reason": "User-owned wiki knowledge is never rewritten by migration."
+    }
+  ],
+  "authority_issues": [
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/codex-best-in-class-harness-guide-20260611.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/codex-best-in-class-harness-guide-20260611.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/codex-best-in-class-harness-guide-20260611.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/codex-best-in-class-harness-guide-20260611.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/llm-wiki-system-models-research-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/llm-wiki-system-models-research-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/llm-wiki-system-models-research-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/llm-wiki-system-models-research-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/moder-agent-harnes-report-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/moder-agent-harnes-report-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/moder-agent-harnes-report-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/moder-agent-harnes-report-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/okf-research-report-20260629.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/okf-research-report-20260629.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/okf-research-report-20260629.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/okf-research-report-20260629.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/proandroiddev-android-google-io-2026-20260520.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-architecture-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-architecture-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-architecture-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-architecture-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-core-v2-production-readiness-prd-20260602-spec.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-core-v2-production-readiness-prd-20260602-spec.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-core-v2-production-readiness-prd-20260602-spec.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-core-v2-production-readiness-prd-20260602-spec.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-15-rail-go-product-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-27-actor-backend-port-and-result-projection.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-plan-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-plan-2026-05-04-control-plane-brokered-actor-architecture.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-15-rail-go-product-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-21-codex-boundary-actor-backend-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-27-actor-backend-port-and-result-projection-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-04-29-python-actor-runtime-rail-redesign.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-03-artifact-goal-context-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-04-control-plane-brokered-actor-architecture-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-spec-2026-05-18-rail-runner-schema-actor-runtime-design.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-historical-superpowers-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-historical-superpowers-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-historical-superpowers-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-historical-superpowers-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-product-spec-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-product-spec-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-product-spec-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-product-spec-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/rail-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/rail-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/rail-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/rail-readme-20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/sgp-981-app-research-wonderous-ux-patterns-20260622.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/skillgraph-harness-design-ko20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/skillgraph-harness-design-ko20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/skillgraph-harness-design-ko20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/skillgraph-harness-design-ko20260601.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Durable Knowledge Links.",
+      "path": "wiki/sources/vault-graph-spec-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-missing-section",
+      "line": null,
+      "message": "Source manifest is missing ## Registration.",
+      "path": "wiki/sources/vault-graph-spec-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may contain only Summary, Registration, and Durable Knowledge Links sections.",
+      "path": "wiki/sources/vault-graph-spec-20260604.md",
+      "severity": "error"
+    },
+    {
+      "code": "source-manifest-semantic-body",
+      "line": null,
+      "message": "Source manifests may not contain copied claim tables.",
+      "path": "wiki/sources/vault-graph-spec-20260604.md",
+      "severity": "error"
+    }
+  ],
+  "builder_revision": "contract-v1",
+  "current_contract_version": null,
+  "migration_id": "687b40b5b0ddd675",
+  "schema_version": 1,
+  "target_contract_version": 1,
+  "target_fingerprint": "33bfd7eaa6f10346b4ea799d009acc364240f7330d48af8c00f259406a258482"
+}

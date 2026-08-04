@@ -142,7 +142,6 @@ copy_file "docs/VAULT_PROMPTS.md"
 copy_tree ".github"
 copy_tree ".agents"
 copy_tree "docs/agent"
-copy_file "scripts/release_gate.sh"
 copy_tree "tools/wiki"
 copy_tree "tests"
 copy_tree "wiki"
@@ -160,8 +159,6 @@ touch "${TARGET_DIR}/raw/sources/.gitkeep"
 touch "${TARGET_DIR}/raw/assets/.gitkeep"
 touch "${TARGET_DIR}/raw/imports/.gitkeep"
 touch "${TARGET_DIR}/scratch/reports/.gitkeep"
-
-chmod +x "${TARGET_DIR}/scripts/release_gate.sh" 2>/dev/null || true
 
 choose_python() {
   local candidate

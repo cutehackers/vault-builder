@@ -520,16 +520,16 @@ class ContractCatalogTest(unittest.TestCase):
 
     def test_legacy_catalog_reads_git_bytes_and_mode(self):
         catalog = build_catalog(ROOT, 0, "47cbf83", source_ref="47cbf83")
-        managed = catalog.managed_files["scripts/release_gate.sh"]
+        managed = catalog.managed_files["tools/wiki/cli.py"]
         contents = subprocess.run(
-            ["git", "show", "47cbf83:scripts/release_gate.sh"],
+            ["git", "show", "47cbf83:tools/wiki/cli.py"],
             cwd=ROOT,
             capture_output=True,
             check=True,
         ).stdout
 
         self.assertEqual(hashlib.sha256(contents).hexdigest(), managed.sha256)
-        self.assertEqual("0755", managed.mode)
+        self.assertEqual("0644", managed.mode)
 
     def test_plan_deeply_freezes_authority_issues(self):
         plan = MigrationPlan(
@@ -1107,7 +1107,7 @@ class MigrationApplyTest(unittest.TestCase):
 
                 def gate(_: Path) -> None:
                     if fail_gate:
-                        raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+                        raise subprocess.CalledProcessError(1, ["python3", "tools/wiki/cli.py", "lint", "--report"])
                     marker = target / ".agents" / ".vault-builder-migration.json"
                     self.assertTrue(marker.is_file())
                     lint = subprocess.run(
@@ -1223,7 +1223,7 @@ class MigrationApplyTest(unittest.TestCase):
             first_plan = audit_vault(ROOT, target)
 
             def fail_gate(_: Path) -> None:
-                raise subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(9, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with mock.patch.object(applying, "_rollback", side_effect=OSError("rollback exploded")):
                 with self.assertRaises(applying.MigrationApplyError):
@@ -1490,7 +1490,7 @@ class MigrationApplyTest(unittest.TestCase):
 
                 def fail_gate(root: Path) -> None:
                     if (load_manifest(root) is not None) == fail_after_manifest:
-                        raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+                        raise subprocess.CalledProcessError(1, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
                 with self.assertRaises(applying.MigrationApplyError):
                     apply_plan(ROOT, target, plan, run_gate=fail_gate)
@@ -1500,7 +1500,7 @@ class MigrationApplyTest(unittest.TestCase):
     def test_mode_only_apply_repairs_and_failed_apply_restores_modes(self):
         cases = (
             ("AGENTS.md", 0o755, "0644"),
-            ("scripts/release_gate.sh", 0o644, "0755"),
+            (".github/workflows/release-gate.yml", 0o755, "0644"),
         )
         for relative, drift_mode, desired_mode in cases:
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmpdir:
@@ -1530,7 +1530,7 @@ class MigrationApplyTest(unittest.TestCase):
                 def fail_gate(_: Path) -> None:
                     raise subprocess.CalledProcessError(
                         1,
-                        ["bash", "scripts/release_gate.sh"],
+                        ["python3", "tools/wiki/cli.py", "lint", "--report"],
                     )
 
                 with self.assertRaises(applying.MigrationApplyError):
@@ -1715,14 +1715,14 @@ class MigrationApplyTest(unittest.TestCase):
             plan = audit_vault(ROOT, target)
 
             def fail_gate(_: Path) -> None:
-                raise subprocess.CalledProcessError(7, ["bash", "scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(7, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with self.assertRaises(applying.MigrationApplyError) as raised:
                 apply_plan(ROOT, target, plan, run_gate=fail_gate)
 
             failure = raised.exception
             self.assertTrue(failure.rollback_completed)
-            self.assertEqual("bash scripts/release_gate.sh", failure.failed_command)
+            self.assertEqual("python3 tools/wiki/cli.py lint --report", failure.failed_command)
             self.assertEqual(7, failure.exit_code)
             self.assertEqual(
                 f"python3 tools/vault_migration/cli.py audit --target {target.resolve()}",
@@ -1756,7 +1756,7 @@ class MigrationApplyTest(unittest.TestCase):
             plan = audit_vault(ROOT, target)
 
             def fail_gate(_: Path) -> None:
-                raise subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(9, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with mock.patch.object(applying, "_rollback", side_effect=OSError("rollback exploded")):
                 with self.assertRaises(applying.MigrationApplyError) as raised:
@@ -1764,7 +1764,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             failure = raised.exception
             self.assertFalse(failure.rollback_completed)
-            self.assertEqual("bash scripts/release_gate.sh", failure.failed_command)
+            self.assertEqual("python3 tools/wiki/cli.py lint --report", failure.failed_command)
             self.assertEqual(9, failure.exit_code)
             self.assertEqual(
                 f"python3 tools/vault_migration/cli.py recover --target {target.resolve()} --migration-id {plan.migration_id}",
@@ -1812,7 +1812,7 @@ class MigrationApplyTest(unittest.TestCase):
             def fail_gate(_: Path) -> None:
                 nonlocal gate_failed
                 gate_failed = True
-                raise subprocess.CalledProcessError(13, ["bash", "scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(13, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with mock.patch.object(
                 applying,
@@ -1867,7 +1867,7 @@ class MigrationApplyTest(unittest.TestCase):
             def fail_gate(_: Path) -> None:
                 nonlocal gate_failed
                 gate_failed = True
-                raise subprocess.CalledProcessError(14, ["bash", "scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(14, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with mock.patch.object(
                 applying,
@@ -3279,7 +3279,7 @@ class MigrationApplyTest(unittest.TestCase):
                     if path == journal_path:
                         continue
                     before_journal_artifacts[path.relative_to(journal_root).as_posix()] = snapshot(path)
-                raise subprocess.CalledProcessError(12, ["scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(12, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with self.assertRaises(applying.MigrationApplyError) as raised:
                 apply_plan(ROOT, target, plan, run_gate=fail_gate)
@@ -5153,12 +5153,12 @@ class VaultMigrationCliTest(unittest.TestCase):
                 (
                     "gate",
                     applying.MigrationApplyError(
-                        subprocess.CalledProcessError(7, ["bash", "scripts/release_gate.sh"]),
+                        subprocess.CalledProcessError(7, ["python3", "tools/wiki/cli.py", "lint", "--report"]),
                         target=target,
                         migration_id=plan.migration_id,
                         rollback_completed=True,
                     ),
-                    ("Failed command: bash scripts/release_gate.sh", "Exit code: 7", "Automatic rollback: completed", "audit --target"),
+                    ("Failed command: python3 tools/wiki/cli.py lint --report", "Exit code: 7", "Automatic rollback: completed", "audit --target"),
                 ),
                 (
                     "non-command",
@@ -5173,14 +5173,14 @@ class VaultMigrationCliTest(unittest.TestCase):
                 (
                     "rollback-failed",
                     applying.MigrationApplyError(
-                        subprocess.CalledProcessError(9, ["bash", "scripts/release_gate.sh"]),
+                        subprocess.CalledProcessError(9, ["python3", "tools/wiki/cli.py", "lint", "--report"]),
                         target=target,
                         migration_id=plan.migration_id,
                         rollback_completed=False,
                         rollback_error=OSError("rollback exploded"),
                     ),
                     (
-                        "Failed command: bash scripts/release_gate.sh",
+                        "Failed command: python3 tools/wiki/cli.py lint --report",
                         "Exit code: 9",
                         "Automatic rollback: failed",
                         f"recover --target {target} --migration-id {plan.migration_id}",
@@ -5272,7 +5272,7 @@ class VaultMigrationCliTest(unittest.TestCase):
 
 
 class VaultMigrationAcceptanceTest(unittest.TestCase):
-    def test_fresh_vault_has_v1_manifest_and_passes_its_release_gate(self):
+    def test_fresh_vault_has_v1_manifest_and_passes_quality_checks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
 
@@ -5287,7 +5287,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             self.assertFalse((target / "tools" / "vault_migration").exists())
             self.assertFalse((target / "init-vault.sh").exists())
             self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
-            _run(["bash", "scripts/release_gate.sh"], target)
+            _run(["python3", "tools/wiki/cli.py", "lint", "--report"], target)
 
     def test_legacy_vault_migrates_without_changing_user_role_bytes_or_modes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5316,7 +5316,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             self.assertEqual(manifest, load_manifest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
             self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
-            _run(["bash", "scripts/release_gate.sh"], target)
+            _run(["python3", "tools/wiki/cli.py", "lint", "--report"], target)
 
     def test_legacy_source_manifest_violation_blocks_without_changing_tree(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5367,7 +5367,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             plan = audit_vault(ROOT, target)
 
             def fail_gate(_: Path) -> None:
-                raise subprocess.CalledProcessError(1, ["scripts/release_gate.sh"])
+                raise subprocess.CalledProcessError(1, ["python3", "tools/wiki/cli.py", "lint", "--report"])
 
             with self.assertRaises(applying.MigrationApplyError):
                 apply_plan(ROOT, target, plan, run_gate=fail_gate)

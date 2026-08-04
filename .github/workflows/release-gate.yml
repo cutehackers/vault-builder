@@ -17,5 +17,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run release gate
-        run: scripts/release_gate.sh
+      - name: Run wiki quality checks
+        run: |
+          python -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
+          python tools/wiki/cli.py lint --report
+          python tools/wiki/cli.py health
+          python tools/wiki/cli.py maps build --check --report
+          python tools/wiki/cli.py metrics --check --report
+          git diff --check

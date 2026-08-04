@@ -56,8 +56,8 @@ Vault owns raw evidence and durable canonical wiki knowledge.
 | `wiki/index.md`, `wiki/maps/`, `wiki/log.md`, `scratch/reports/` | Generated Vault | Generated views, event references, and audit artifacts are not claim authorities. |
 | `.vault-builder/manifest.json` | Migration tool | Operational metadata, never durable knowledge. |
 
-Creation and migration tooling remains builder-only. Generated Vaults keep
-`scripts/release_gate.sh`, but never contain nested builder creation or
+Creation and migration tooling remains builder-only. Generated Vaults keep the
+deterministic wiki validation tools, but never contain nested builder creation or
 migration machinery. Vault Graph is a read-only, rebuildable consumer: it may
 read roles and provenance, but never becomes a source of truth or edits a Vault.
 
@@ -104,14 +104,12 @@ The default generated vault is intentionally compact. This repository may also c
 │   ├── drafts/
 │   ├── reports/
 │   └── review/
-├── scripts/
-│   └── release_gate.sh
 ├── tests/
 └── tools/
     └── wiki/
 ```
 
-The manifest and release gate remain in the generated Vault. Creation
+The manifest and deterministic wiki validation tools remain in the generated Vault. Creation
 (`init-vault.sh`) and migration (`tools/vault_migration/`) stay builder-only
 and are not part of this generated topology.
 
@@ -136,9 +134,9 @@ They are not part of the default vault topology and are not required for ordinar
 | `tools/wiki/` | Deterministic validation, mutation gates, workflow checkpoints, MCP wrappers, maps, and metrics tooling | Yes |
 | `.agents/skills/` | Repo-local workflow guides for ingest, update, and query work | Yes |
 | `docs/` | Human and agent-facing operating documentation; `docs/LLM-WIKI.md` is the architecture source | Yes |
-| `scripts/` | Repo-level completion and release-gate wrappers | Yes |
+| `scripts/` | Builder-only bootstrap helpers | No |
 | `tests/` | Deterministic regression coverage for the wiki tool contract | Yes |
-| `.github/workflows/` | CI wiring for the same release gate | Yes |
+| `.github/workflows/` | CI wiring for the deterministic wiki checks | Yes |
 | `docs/stenc/`, `tools/stenc/` | Optional Stenc docs/tools only when the user explicitly opts in | Optional |
 
 ### Existing Vault Migration
@@ -178,7 +176,7 @@ The validator does not decide whether a claim is true. It checks whether the pag
 
 Stenc is optional. It is available only as a user-selected fixed-format spec/plan workflow.
 
-The default vault does not include Stenc docs or tools. `init-vault.sh --with-stenc` includes the optional bundle when the template has it, and `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` runs optional Stenc validation/render checks.
+The default vault does not include Stenc docs or tools. `init-vault.sh --with-stenc` includes the optional bundle when the template has it. Stenc validation remains an explicit, separate workflow.
 
 Do not make Stenc a prerequisite for ordinary wiki maintenance, documentation updates, or completion claims. Active architecture, usage, and agent-operation documentation must remain valid without Stenc. Existing Stenc JSON documents may record historical implementation plans, but they do not override `AGENTS.md`, this file, or the live CLI contract.
 
@@ -286,9 +284,9 @@ A wiki operation is not complete until these conditions are satisfied:
 - `wiki/log.md` is appended for meaningful operations.
 - A report is written under `scratch/reports/` for non-trivial ingest, lint, audit, or repair work.
 - `tools/wiki` validation passes before claiming completion.
-- `scripts/release_gate.sh` passes before claiming repo-level readiness.
+- the deterministic `tools/wiki` validation commands pass before claiming repo-level readiness.
 
-Stenc validation is not part of the ordinary completion gate. Run `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` only when the user explicitly chooses the Stenc workflow.
+Stenc validation is not part of the ordinary completion checks.
 
 ## Recommended Skill Workflows
 
@@ -381,7 +379,7 @@ Current checks:
 - maintenance metrics dashboard for pending reviews, contested claims, stale sources, orphan pages, provenance coverage, deprecated links, and last health report
 - configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`
 - report and generated query-capture draft path confinement under `scratch/reports/` and `scratch/drafts/`
-- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks only when explicitly enabled, and `git diff --check` in a temporary repo copy
+- deterministic checks for tests, lint, health, map freshness, metrics thresholds, and `git diff --check`
 
 Intentional limits:
 
@@ -530,17 +528,7 @@ Optional Stenc documents under `docs/stenc/content/` may record fixed-format spe
 For architecture or wiki-maintenance work, done means:
 
 ```bash
-scripts/release_gate.sh
-```
-
-The release gate runs wiki tests, lint, health, map freshness, and metrics in a
-temporary repo copy. When builder migration tests exist, it runs them from the
-builder checkout so their historical Git fixtures remain available, then checks
-the working tree diff for whitespace issues:
-
-```bash
 python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
-python3 -m unittest builder_tests/test_vault_migration.py # builder checkout only
 python3 tools/wiki/cli.py lint --report
 python3 tools/wiki/cli.py health
 python3 tools/wiki/cli.py maps build --check --report
@@ -550,12 +538,8 @@ git diff --check
 
 Stenc validation/render checks are optional and run only when explicitly enabled by the user:
 
-```bash
-WIKI_ENABLE_STENC=1 scripts/release_gate.sh
-```
-
 Do not require Stenc validation for ordinary LLM Wiki documentation management.
 
-The same gate is wired into `.github/workflows/release-gate.yml`.
+The same deterministic checks are wired into `.github/workflows/release-gate.yml`.
 
 No completion claim should be made without fresh verification output.

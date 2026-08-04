@@ -156,54 +156,6 @@ class WikiQualityBaselineTest(unittest.TestCase):
         self.assertIn("health", agents)
         self.assertTrue((ROOT / "docs" / "agent" / "OPERATING-SCHEMA.md").exists())
 
-    def test_release_gate_script_declares_full_validation_contract(self):
-        gate = ROOT / "scripts" / "release_gate.sh"
-
-        self.assertTrue(gate.exists(), "scripts/release_gate.sh must exist")
-        self.assertTrue(gate.stat().st_mode & 0o111, "release gate must be executable")
-
-        text = gate.read_text()
-        for token in [
-            "set -euo pipefail",
-            "PYTHON_BIN=\"$(choose_python)\"",
-            "wiki_tests=(",
-            "tests/test_wiki_quality_baseline.py",
-            "tests/test_wiki_tools.py",
-            'if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then',
-            "wiki_tests+=(builder_tests/test_vault_migration.py)",
-            '"$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"',
-            'run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"',
-            "$PYTHON_BIN tools/wiki/cli.py lint --report",
-            "$PYTHON_BIN tools/wiki/cli.py health",
-            "$PYTHON_BIN tools/wiki/cli.py maps build --check --report",
-            "$PYTHON_BIN tools/wiki/cli.py metrics --check --report",
-            "WIKI_ENABLE_STENC",
-            "Stenc checks skipped",
-            "validate-stenc-doc.js",
-            "setup-project.js",
-            "check-rendered-pages.js",
-            "mktemp -d",
-            "rsync -a",
-            'git -C "$ROOT" rev-parse --show-toplevel',
-            "No Git worktree detected",
-            "check_workspace_whitespace",
-            'git -C "$ROOT" diff --no-ext-diff --binary -- .',
-            "Release gate changed tracked output",
-            'git -C "$ROOT" diff --check -- .',
-        ]:
-            self.assertIn(token, text)
-
-        self.assertNotIn("$HOME/.codex/skills/stenc", text)
-        self.assertIn("scripts/release_gate.sh", (ROOT / ".github" / "workflows" / "release-gate.yml").read_text())
-
-        for doc in [
-            "README.md",
-            "AGENTS.md",
-            "docs/LLM-WIKI.md",
-            "docs/usage.md",
-        ]:
-            self.assertIn("scripts/release_gate.sh", (ROOT / doc).read_text())
-
     def test_authority_and_migration_docs_use_the_public_contract(self):
         docs = "\n".join(
             (ROOT / relative).read_text()
@@ -225,11 +177,6 @@ class WikiQualityBaselineTest(unittest.TestCase):
             "Vault Graph",
         ]:
             self.assertIn(token, docs)
-
-    def test_release_gate_runs_builder_tests_only_when_available(self):
-        text = (ROOT / "scripts" / "release_gate.sh").read_text()
-        self.assertIn("builder_tests/test_vault_migration.py", text)
-        self.assertIn('if [ -f "builder_tests/test_vault_migration.py" ]', text)
 
     def test_repo_local_wiki_skill_docs_exist_and_preserve_boundary(self):
         skill_paths = [

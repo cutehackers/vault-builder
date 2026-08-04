@@ -120,8 +120,8 @@ The important rule: LLM output is only a proposal until validation accepts it.
 - Keep important claims tied to source material or prior durable wiki pages.
 - Preserve `human-locked` pages and sections.
 - Record contradictions instead of silently resolving them.
-- Completion is checked through `scripts/release_gate.sh`; agents and CI handle
-  that gate before wiki work is considered complete.
+- Completion is checked through the deterministic wiki commands documented in
+  `AGENTS.md`; agents and CI run those checks before wiki work is considered complete.
 - Use the skills as the public interface; deterministic tools are the
   implementation layer behind them.
 

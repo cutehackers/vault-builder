@@ -30,7 +30,6 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "docs/agent/DRAFTS.md",
         "docs/agent/OPERATING-SCHEMA.md",
         "docs/usage.md",
-        "scripts/release_gate.sh",
         "tests/__init__.py",
         "tests/test_wiki_quality_baseline.py",
         "tests/test_wiki_tools.py",

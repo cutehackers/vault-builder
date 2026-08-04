@@ -270,7 +270,7 @@ def _apply_plan_locked(
             rollback_completed=cleanup_error is None,
             rollback_error=cleanup_error,
         ) from (cleanup_error or exc)
-    gate = run_gate or _run_release_gate
+    validation = run_gate or _run_validation
     try:
         _write_journal_state(journal_root, journal, "applying")
 
@@ -298,7 +298,7 @@ def _apply_plan_locked(
         _write_journal_state(journal_root, journal, "validating")
 
         # Gate one deliberately runs before authority-v1 metadata exists.
-        gate(target)
+        validation(target)
         _verify_candidate_files(builder, target, actions)
 
         candidate = replace(
@@ -3272,8 +3272,16 @@ def _mark_rollback_failed(journal_root: Path, journal: dict[str, object]) -> Non
         pass
 
 
-def _run_release_gate(target_root: Path) -> None:
-    subprocess.run(["bash", "scripts/release_gate.sh"], cwd=target_root, text=True, check=True)
+def _run_validation(target_root: Path) -> None:
+    commands = (
+        ["python3", "-m", "unittest", "tests/test_wiki_quality_baseline.py", "tests/test_wiki_tools.py"],
+        ["python3", "tools/wiki/cli.py", "lint", "--report"],
+        ["python3", "tools/wiki/cli.py", "health"],
+        ["python3", "tools/wiki/cli.py", "maps", "build", "--check", "--report"],
+        ["python3", "tools/wiki/cli.py", "metrics", "--check", "--report"],
+    )
+    for command in commands:
+        subprocess.run(command, cwd=target_root, text=True, check=True)
 
 
 def _recover_command(target: Path, migration_id: str) -> str:

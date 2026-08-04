@@ -10,6 +10,27 @@ Read this file first. Read the longer reference only when the task needs detail:
 - Draft guide: `docs/agent/DRAFTS.md`
 - Human guide: `README.md`
 
+## Output Style & Language Rules
+
+### 1. Tone & Conciseness
+
+- Be clear, concise, and direct. Avoid unnecessary fluff, fillers, or overly polite intros/outros.
+- Focus strictly on answering the query or solving the problem.
+
+### 2. Language Switching
+
+- Match the user's input language (Respond in Korean if prompted in Korean, in English if prompted in English).
+
+### 3. Korean Natural Prose (Crucial)
+
+When responding in Korean:
+
+- **No Hybrid English-Korean Verbs/Nouns with Suffixes:** NEVER combine English terms directly with Korean particle/verb suffixes.
+  - ❌ **BAD:** "Execute합니다", "Deprecated되었습니다", "Passing하여", "Refactoring을 진행"
+  - ✅ **GOOD:** "실행합니다", "더 이상 사용되지 않습니다(Deprecated)", "전달하여", "리팩토링을 진행"
+- **Natural Grammar Structure:** Do not translate word-for-word from English thought chains. Rewrite sentences using native Korean word order (SOV) and idioms.
+- **Technical Terms:** Keep code identifiers, API/Package names, and official technical keywords in their original English form, but wrap them in proper Korean syntax.
+
 ## Mission
 
 Do not treat this as a passive RAG folder.
@@ -39,23 +60,28 @@ raw source
 
 ## Directory Map
 
-| Path | Meaning |
-|---|---|
-| `raw/` | Immutable source material. |
-| `wiki/` | Durable compiled knowledge. |
-| `scratch/drafts/` | LLM proposals before validation. |
-| `scratch/reports/` | Lint, ingest, audit, query, and repair reports. |
-| `scratch/review/` | Human-judgment queue. |
-| `tools/wiki/` | Deterministic quality tooling. |
-| `.agents/skills/` | Agent workflow guides for `wiki-ingest`, `wiki-update`, and `wiki-query`. |
-| `docs/agent/` | Detailed agent reference. |
+| Path               | Meaning                                                                   |
+| ------------------ | ------------------------------------------------------------------------- |
+| `raw/`             | Immutable source material.                                                |
+| `wiki/`            | Durable compiled knowledge.                                               |
+| `scratch/drafts/`  | LLM proposals before validation.                                          |
+| `scratch/reports/` | Lint, ingest, audit, query, and repair reports.                           |
+| `scratch/review/`  | Human-judgment queue.                                                     |
+| `tools/wiki/`      | Deterministic quality tooling.                                            |
+| `.agents/skills/`  | Agent workflow guides for `wiki-ingest`, `wiki-update`, and `wiki-query`. |
+| `docs/agent/`      | Detailed agent reference.                                                 |
 
 ## Required Commands
 
-Run the full release gate:
+Run the deterministic wiki checks:
 
 ```bash
-scripts/release_gate.sh
+python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
+python3 tools/wiki/cli.py lint --report
+python3 tools/wiki/cli.py health
+python3 tools/wiki/cli.py maps build --check --report
+python3 tools/wiki/cli.py metrics --check --report
+git diff --check
 ```
 
 Validate one page:
@@ -177,4 +203,4 @@ A wiki task is not complete until:
 - source drift is checked when source pages have hashes,
 - index/log/report updates are present when required,
 - human locks are preserved,
-- `scripts/release_gate.sh` exits successfully.
+- deterministic wiki checks exit successfully.
