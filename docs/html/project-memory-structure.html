@@ -1,0 +1,655 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>프로젝트 메모리 구조</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column. 흐름 → 시나리오 → 구조 → 동작 순서 → 운영 → 설치·삭제 → 실행 순서 → 결정 필요. Zone colors follow each storage area everywhere. */
+:root {
+  --bg: #f3f5f7;
+  --surface: #fcfcfd;
+  --ink: #12161b;
+  --ink-2: #4a5260;
+  --muted: #858c97;
+  --line: #dde1e7;
+  --axis: #c0c6cf;
+  --accent: #1f5fb0;
+  --accent-soft: #e0eafa;
+  --z1: #1a9b6c; --z1-soft: #e2f4ec;
+  --z2: #2a72d4; --z2-soft: #e3edfb;
+  --z3: #e0662f; --z3-soft: #fcebe2;
+  --del: #b42f2f; --del-soft: #fbe7e7;
+  --keep: #23803a; --keep-soft: #e3f3e6;
+  --warn-bg: #fff3d9; --warn-ink: #7a5200;
+  --display: "Black Han Sans", "IBM Plex Sans KR", system-ui, sans-serif;
+  --body: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1215; --surface: #171b20; --ink: #eceff3; --ink-2: #b7bec8; --muted: #8a919c; --line: #2a3037; --axis: #3d444d;
+  --accent: #82b3f0; --accent-soft: #1c2d45;
+  --z1: #34c08d; --z1-soft: #15302a; --z2: #5c9cf0; --z2-soft: #182a44; --z3: #f08a55; --z3-soft: #3a2218;
+  --del: #f07878; --del-soft: #3a1c1c; --keep: #5cc874; --keep-soft: #183021;
+  --warn-bg: #3a2e12; --warn-ink: #f2c66a; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1215; --surface: #171b20; --ink: #eceff3; --ink-2: #b7bec8; --muted: #8a919c; --line: #2a3037; --axis: #3d444d;
+  --accent: #82b3f0; --accent-soft: #1c2d45;
+  --z1: #34c08d; --z1-soft: #15302a; --z2: #5c9cf0; --z2-soft: #182a44; --z3: #f08a55; --z3-soft: #3a2218;
+  --del: #f07878; --del-soft: #3a1c1c; --keep: #5cc874; --keep-soft: #183021;
+  --warn-bg: #3a2e12; --warn-ink: #f2c66a; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 1000px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 72px; display: grid; gap: 56px; }
+h1, h2 { font-family: var(--display); font-weight: 400; letter-spacing: 0.01em; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; }
+h2 { font-size: 26px; line-height: 1.25; }
+h3 { font-size: 16px; font-weight: 700; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--muted); }
+.lead { color: var(--ink-2); font-size: 16px; }
+section { display: grid; gap: 20px; min-width: 0; }
+.sec-head { display: grid; gap: 8px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; min-width: 0; }
+.note { font-size: 13px; color: var(--muted); }
+.callout { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+
+header { display: grid; gap: 16px; }
+.strata { display: flex; gap: 4px; }
+.strata i { height: 8px; width: 40px; border-radius: 2px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.fact { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 2px; }
+.fact b { font-family: var(--display); font-weight: 400; font-size: 26px; }
+.fact span { color: var(--ink-2); font-size: 13px; }
+
+.chip { display: inline-block; font-size: 11px; font-weight: 600; line-height: 1; padding: 4px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface); white-space: nowrap; }
+.chip.have { border-color: var(--axis); }
+.chip.new { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.chip.later { border-style: dashed; color: var(--muted); }
+
+.flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.step { position: relative; padding: 14px 14px 16px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 6px; align-content: start; border-top-width: 4px; }
+.step + .step { border-left: none; }
+.step:first-child { border-radius: 10px 0 0 10px; }
+.step:last-child { border-radius: 0 10px 10px 0; }
+.step[data-zone="z1"] { border-top-color: var(--z1); }
+.step[data-zone="z2"] { border-top-color: var(--z2); }
+.step[data-zone="z3"] { border-top-color: var(--z3); }
+.step .n { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.step h3 { font-size: 15px; }
+.step p { font-size: 13px; color: var(--ink-2); }
+.step.lit { background: var(--accent-soft); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+@media (max-width: 820px) {
+  .flow { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .step, .step:first-child, .step:last-child { border-radius: 8px; border-left: 1px solid var(--line); }
+}
+
+.scen { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.card { font: inherit; text-align: left; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; align-content: start; cursor: pointer; }
+.card:hover { border-color: var(--accent); }
+.card[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.card.later { border-style: dashed; }
+.card .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.card .who { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; font-size: 14px; }
+.card .who dt { font-size: 12px; color: var(--muted); padding-top: 2px; }
+.card .who dd { margin: 0; }
+.card .who dd.auto { color: var(--ink-2); }
+.card .steps-used { display: flex; gap: 4px; flex-wrap: wrap; }
+.card .steps-used span { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; color: var(--ink-2); }
+
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-size: 13px; padding: 6px 12px; border: none; background: transparent; color: var(--ink-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+
+.arch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 820px) { .arch { grid-template-columns: 1fr; } }
+.zone { border: 1.5px solid; border-radius: 12px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+.zone.z1 { border-color: var(--z1); background: var(--z1-soft); }
+.zone.z2 { border-color: var(--z2); background: var(--z2-soft); }
+.zone.z3 { border-color: var(--z3); background: var(--z3-soft); }
+.zone .zh { display: grid; gap: 0; }
+.zone .zh small { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.item { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 3px; transition: opacity .2s; }
+.item[data-status="new"] { border-style: dashed; border-color: var(--accent); }
+.item[data-status="later"] { border-style: dashed; }
+.item .t { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-weight: 600; font-size: 14px; }
+.item .d { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.arch[data-filter="have"] .item:not([data-status="have"]),
+.arch[data-filter="new"] .item:not([data-status="new"]),
+.arch[data-filter="later"] .item:not([data-status="later"]) { opacity: 0.25; }
+
+.seq-scroll { overflow-x: auto; }
+.seq-svg { display: block; min-width: 660px; width: 100%; height: auto; }
+.seq-notes { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); }
+
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.tbl-scroll { overflow-x: auto; }
+td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.route { display: grid; gap: 8px; }
+.route .r { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; font-size: 14px; }
+.route .r .arrow { color: var(--muted); font-family: var(--mono); }
+.route .r .to { font-weight: 600; }
+
+.install { display: grid; gap: 10px; }
+.irow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+@media (max-width: 680px) { .irow { grid-template-columns: 1fr; } }
+.istep { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 2px 10px; transition: opacity .2s, border-color .2s; }
+.istep .k { grid-row: span 2; font-family: var(--mono); font-weight: 600; color: var(--accent); }
+.istep b { font-size: 14px; }
+.istep span { font-size: 13px; color: var(--ink-2); }
+.ifail { border-radius: 8px; padding: 10px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; transition: opacity .2s; }
+.ifail.on { background: var(--del-soft); color: var(--del); }
+.ifail.ok { color: var(--muted); border: 1px dashed var(--line); }
+.install[data-mode="ok"] .ifail.on { opacity: 0.35; }
+.install[data-mode="ok"] .istep { border-color: var(--accent); }
+.install[data-mode="fail"] .istep:not(.canfail) { opacity: 0.4; }
+.install[data-mode="fail"] .istep.canfail { border-color: var(--del); }
+.install .done { justify-self: start; font-size: 13px; font-weight: 600; color: var(--keep); background: var(--keep-soft); border-radius: 999px; padding: 4px 12px; transition: opacity .2s; }
+.install[data-mode="fail"] .done { opacity: 0.35; }
+
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.sgroup { display: grid; gap: 6px; }
+.sgroup + .sgroup { margin-top: 12px; }
+.sgroup h4 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.sgroup.del h4 { color: var(--del); }
+.sgroup.part h4 { color: var(--warn-ink); }
+.sgroup.keep h4 { color: var(--keep); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pills span { font-family: var(--mono); font-size: 12.5px; border-radius: 6px; padding: 3px 8px; }
+.del .pills span { background: var(--del-soft); color: var(--del); text-decoration: line-through; text-decoration-thickness: 1px; }
+.part .pills span { background: var(--warn-bg); color: var(--warn-ink); }
+.keep .pills span { background: var(--keep-soft); color: var(--keep); }
+.rules { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.rules li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; font-size: 14px; color: var(--ink-2); }
+.rules li code { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; padding-top: 2px; }
+.rules li b { color: var(--ink); font-weight: 600; }
+.cmds { display: flex; flex-wrap: wrap; gap: 8px; }
+.cmds code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12.5px; }
+
+.phases { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .phases { grid-template-columns: 1fr; } }
+.phase { border-radius: 12px; padding: 16px; display: grid; gap: 10px; align-content: start; border: 1px solid var(--line); background: var(--surface); }
+.phase.now { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+.phase .ph { display: grid; }
+.phase .ph small { font-size: 12px; color: var(--ink-2); }
+.task { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.task b { font-size: 14px; }
+.task span { font-size: 12.5px; color: var(--ink-2); }
+.task .dep { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+
+.review ul { margin: 0; padding: 0; display: grid; gap: 10px; }
+.review li { list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; }
+.review code { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+.review p { font-size: 14px; color: var(--ink-2); }
+.review h3 { font-size: 15px; margin-bottom: 2px; }
+
+#tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12px; padding: 6px 8px; border-radius: 6px; max-width: 260px; line-height: 1.4; }
+@media (prefers-reduced-motion: reduce) { .item, .istep, .ifail, .done { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="strata" aria-hidden="true"><i style="background:var(--z1)"></i><i style="background:var(--z2)"></i><i style="background:var(--z3)"></i></div>
+    <div class="eyebrow">VAULT · 프로젝트 메모리 설계</div>
+    <h1>프로젝트 메모리 구조</h1>
+    <p class="lead">프로젝트 세션은 저장소 밖 자동 메모리에만 기록합니다. vault가 그 기록을 검증해 정리하고, 프로젝트별 요약으로 만들어 다음 세션이 시작될 때 돌려줍니다. 프로젝트 저장소의 파일은 하나도 바꾸지 않습니다.</p>
+    <div class="facts">
+      <div class="fact"><b>0개</b><span>프로젝트 저장소에서 바꾸는 파일. CLAUDE.md 포함</span></div>
+      <div class="fact"><b>3 계층</b><span>L1 빠른 메모리 · L2 vault 장기 메모리 · L3 프로젝트 요약</span></div>
+      <div class="fact"><b>1~2천 토큰</b><span>세션마다 hook이 넣어 주는 요약의 크기 상한</span></div>
+    </div>
+  </header>
+
+  <section id="flow">
+    <div class="sec-head">
+      <div class="eyebrow">전체 흐름</div>
+      <h2>작업 중 한 말이 다음 세션의 기억이 되기까지</h2>
+      <p>1~3은 기록이 vault로 가는 길, 4~6은 요약이 세션으로 돌아오는 길입니다. 아래 시나리오 카드를 누르면 그 시나리오가 쓰는 단계가 여기에 표시됩니다.</p>
+    </div>
+    <div class="flow" id="flowSteps">
+      <div class="step" data-step="1" data-zone="z2"><span class="n">1 · 작업 중</span><h3>기록</h3><p>교정과 결정이 L1 자동 메모리에 쌓임</p><span><span class="chip have">있음</span></span></div>
+      <div class="step" data-step="2" data-zone="z3"><span class="n">2 · 정리할 때</span><h3>읽어 오기</h3><p>정리 skill이 새 메모를 읽음</p><span><span class="chip new">신규</span></span></div>
+      <div class="step" data-step="3" data-zone="z3"><span class="n">3 · 정리할 때</span><h3>검증 후 반영</h3><p>ingest-source, publish-draft로 vault에 반영</p><span><span class="chip have">있음</span></span></div>
+      <div class="step" data-step="4" data-zone="z3"><span class="n">4 · 정리할 때</span><h3>요약 생성</h3><p>프로젝트별 요약 페이지를 다시 만듦</p><span><span class="chip new">신규</span></span></div>
+      <div class="step" data-step="5" data-zone="z2"><span class="n">5 · 세션 시작</span><h3>요약 읽기</h3><p>SessionStart hook이 연결된 vault의 요약을 읽음</p><span><span class="chip new">신규</span></span></div>
+      <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 요약이 세션 맥락으로 들어감</p><span><span class="chip have">있음</span></span></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--z1)"></i>프로젝트 저장소</span>
+      <span><i style="background:var(--z2)"></i>사용자 영역 ~/.claude</span>
+      <span><i style="background:var(--z3)"></i>vault 저장소</span>
+    </div>
+  </section>
+
+  <section id="scenarios">
+    <div class="sec-head">
+      <div class="eyebrow">사용 시나리오</div>
+      <h2>사용자 행동은 짧고, 기록과 불러오기는 자동입니다</h2>
+    </div>
+    <div class="scen" id="scen">
+      <button type="button" class="card" id="sc1" data-steps="1" aria-pressed="false">
+        <div class="top"><h3>평소 작업</h3><span class="chip have">매일</span></div>
+        <dl class="who"><dt>사용자</dt><dd>교정이나 결정을 말한다</dd><dt>자동</dt><dd class="auto">L1 메모리에 기록. 저장소 파일은 그대로</dd></dl>
+        <div class="steps-used"><span>1</span></div>
+      </button>
+      <button type="button" class="card" id="sc2" data-steps="5,6" aria-pressed="false">
+        <div class="top"><h3>다음 날 이어서</h3><span class="chip have">매일</span></div>
+        <dl class="who"><dt>사용자</dt><dd>설명 없이 세션을 시작한다</dd><dt>자동</dt><dd class="auto">MEMORY.md 로드, hook이 프로젝트 요약을 넣음</dd></dl>
+        <div class="steps-used"><span>5</span><span>6</span></div>
+      </button>
+      <button type="button" class="card" id="sc3" data-steps="2,3,4" aria-pressed="false">
+        <div class="top"><h3>주 1회 정리</h3><span class="chip have">주 1회</span></div>
+        <dl class="who"><dt>사용자</dt><dd>vault 세션에서 "메모리 정리"를 요청한다</dd><dt>자동</dt><dd class="auto">기록 규칙대로 개인·팀·프로젝트 vault에 반영. 사용자는 모순 목록만 판단, 팀 vault는 PR 검토</dd></dl>
+        <div class="steps-used"><span>2</span><span>3</span><span>4</span></div>
+      </button>
+      <button type="button" class="card" id="sc4" data-steps="5,6" aria-pressed="false">
+        <div class="top"><h3>새 프로젝트 연결</h3><span class="chip have">프로젝트당 1회</span></div>
+        <dl class="who"><dt>사용자</dt><dd>연결 설정에 저장소 → vault 한 줄을 추가한다</dd><dt>자동</dt><dd class="auto">개인 vault 지식이 새 프로젝트 세션에도 들어옴</dd></dl>
+        <div class="steps-used"><span>5</span><span>6</span></div>
+      </button>
+      <button type="button" class="card" id="sc5" data-steps="1,2,3,4,5,6" aria-pressed="false">
+        <div class="top"><h3>미룬 일 이어받기</h3><span class="chip have">수시</span></div>
+        <dl class="who"><dt>사용자</dt><dd>"나중에 X 하자"라고 말한다</dd><dt>자동</dt><dd class="auto">정리 때 vault의 wiki/inbox.md로 가고, 요약에 남은 일로 표시</dd></dl>
+        <div class="steps-used"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span></div>
+      </button>
+      <button type="button" class="card later" id="sc6" data-steps="" aria-pressed="false">
+        <div class="top"><h3>오래된 결정 질문</h3><span class="chip later">나중</span></div>
+        <dl class="who"><dt>사용자</dt><dd>요약에 없는 오래된 결정을 묻는다</dd><dt>자동</dt><dd class="auto">vault 검색으로 출처를 붙여 답함. Vault Graph 이후</dd></dl>
+        <div class="steps-used"><span>검색</span></div>
+      </button>
+    </div>
+  </section>
+
+  <section id="structure">
+    <div class="sec-head">
+      <div class="eyebrow">기술 구조</div>
+      <h2>세 영역과 각 영역에 있는 부품</h2>
+      <p>점선 테두리는 새로 만들 부품입니다. 버튼으로 지금 있는 것, 새로 만들 것, 나중에 할 것만 골라 볼 수 있습니다.</p>
+    </div>
+    <div class="bar">
+      <div class="seg" role="group" aria-label="부품 상태로 거르기">
+        <button type="button" id="f-all" aria-pressed="true">전체</button>
+        <button type="button" id="f-have" aria-pressed="false">있음</button>
+        <button type="button" id="f-new" aria-pressed="false">신규</button>
+        <button type="button" id="f-later" aria-pressed="false">나중</button>
+      </div>
+    </div>
+    <div class="arch" id="arch" data-filter="all">
+      <div class="zone z1">
+        <div class="zh"><h3>프로젝트 저장소</h3><small>파일 수정 없음</small></div>
+        <div class="item" data-status="have"><div class="t">Claude Code 세션 <span class="chip have">있음</span></div><div class="d">sgp-981-app, bake, vault-builder 등 각 저장소에서 작업</div></div>
+        <div class="item" data-status="have"><div class="t">저장소 파일 <span class="chip have">있음</span></div><div class="d">CLAUDE.md와 코드. 이 구조는 건드리지 않음</div></div>
+      </div>
+      <div class="zone z2">
+        <div class="zh"><h3>사용자 영역</h3><small>~/.claude</small></div>
+        <div class="item" data-status="have"><div class="t">L1 자동 메모리 <span class="chip have">있음</span></div><div class="d">projects/&lt;저장소&gt;/memory/ · 세션 시작 때 MEMORY.md 자동 로드</div></div>
+        <div class="item" data-status="new"><div class="t">SessionStart hook <span class="chip new">신규</span></div><div class="d">vault-builder/hook.sh · settings.json에는 이 스크립트를 가리키는 항목 1개만</div></div>
+        <div class="item" data-status="new"><div class="t">연결 설정 <span class="chip new">신규</span></div><div class="d">vault-builder/vault-map.json · 저장소 → vault 목록</div></div>
+      </div>
+      <div class="zone z3">
+        <div class="zh"><h3>vault 저장소</h3><small>개인 · 팀 · 프로젝트, L2 장기 메모리</small></div>
+        <div class="item" data-status="new"><div class="t">정리 skill <span class="chip new">신규</span></div><div class="d">L1 메모를 읽어 메모마다 vault를 고르고 각 vault CLI를 부름</div></div>
+        <div class="item" data-status="have"><div class="t">검증 파이프라인 <span class="chip have">있음</span></div><div class="d">cli.py ingest-source · publish-draft · maps build · query</div></div>
+        <div class="item" data-status="new"><div class="t">project 필드와 요약 <span class="chip new">신규</span></div><div class="d">wiki 페이지 frontmatter의 project · wiki/maps/projects/&lt;p&gt;.md</div></div>
+        <div class="item" data-status="have"><div class="t">MCP 서버 <span class="chip have">있음</span></div><div class="d">tools/wiki/mcp_server.py · 읽기 도구는 아직 없음</div></div>
+        <div class="item" data-status="later"><div class="t">통합 검색 <span class="chip later">나중</span></div><div class="d">Vault Graph · 여러 vault를 한 번에 검색</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sequence">
+    <div class="sec-head">
+      <div class="eyebrow">동작 순서</div>
+      <h2>누가 누구에게 무엇을 넘기는가</h2>
+      <p>세 가지 상황의 순서도입니다. 화살표 위 번호 순서로 읽고, 화살표에 마우스를 올리면 자세한 설명이 나옵니다.</p>
+    </div>
+    <div class="panel" style="display:grid;gap:14px">
+      <div class="bar">
+        <div class="seg" role="group" aria-label="순서도 고르기">
+          <button type="button" id="q-a" aria-pressed="true">A · 기록과 세션 시작</button>
+          <button type="button" id="q-b" aria-pressed="false">B · 정리와 ingest</button>
+          <button type="button" id="q-c" aria-pressed="false">C · 멀티 vault 검색</button>
+        </div>
+        <div class="legend"><span><i style="border:1px dashed var(--accent);background:var(--accent-soft)"></i>신규 부품</span><span><i style="border:1px dashed var(--muted)"></i>나중</span><span><i style="background:var(--warn-ink)"></i>현재 막힌 곳</span></div>
+      </div>
+      <div class="seq-scroll"><svg class="seq-svg" id="seqSvg" role="img" aria-label="동작 순서도"></svg></div>
+      <ol class="seq-notes" id="seqNotes"></ol>
+    </div>
+  </section>
+
+  <section id="layers">
+    <div class="sec-head">
+      <div class="eyebrow">계층별 역할</div>
+      <h2>쓰는 속도가 다른 세 계층</h2>
+    </div>
+    <div class="panel tbl-scroll">
+      <table>
+        <thead><tr><th>계층</th><th>위치</th><th>쓰는 주체</th><th>읽히는 시점</th><th>맡는 일</th></tr></thead>
+        <tbody>
+          <tr><td><span class="sw" style="background:var(--z2)"></span><b>L1 빠른 메모리</b></td><td><code>~/.claude/projects/&lt;저장소&gt;/memory/</code></td><td>프로젝트 세션, 작업 중 수시로</td><td>세션 시작 때 자동</td><td>떠올리기, 기록하기, 이어하기</td></tr>
+          <tr><td><span class="sw" style="background:var(--z3)"></span><b>L2 장기 메모리</b></td><td>vault 저장소 (개인 · 팀 · 프로젝트)</td><td>정리 skill, 일괄로</td><td>L3 요약과 검색을 통해</td><td>프로젝트 간 공유, 정확성과 이력</td></tr>
+          <tr><td><span class="sw" style="background:var(--z3)"></span><b>L3 프로젝트 요약</b></td><td><code>wiki/maps/projects/&lt;p&gt;.md</code></td><td>vault 도구가 자동 생성</td><td>hook이 세션 시작 때 주입</td><td>장기 메모리 떠올리기</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="ops">
+    <div class="sec-head">
+      <div class="eyebrow">운영 방식</div>
+      <h2>저장소는 그대로, vault는 여러 개</h2>
+    </div>
+    <div class="two">
+      <div class="panel" style="display:grid;gap:12px;align-content:start">
+        <h3>저장소를 수정하지 않는 방법</h3>
+        <div class="tbl-scroll"><table>
+          <thead><tr><th>대안</th><th>방법</th><th>판단</th></tr></thead>
+          <tbody>
+            <tr><td><code>대안1</code></td><td>자동 메모리. 기록 규칙이 필요하면 <code>~/.claude/CLAUDE.md</code> 한 곳에</td><td><span class="chip new">사용</span></td></tr>
+            <tr><td><code>대안2</code></td><td><code>~/.claude/settings.json</code>의 SessionStart hook이 요약을 출력</td><td><span class="chip new">사용</span></td></tr>
+            <tr><td><code>대안3</code></td><td>저장소 폴더의 <code>CLAUDE.local.md</code>. git에는 안 올라가지만 폴더에 파일이 생김</td><td><span class="chip later">사용 안 함</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">vault 저장소 안에 생기는 CLAUDE.md는 이 원칙의 대상이 아닙니다.</p>
+      </div>
+      <div class="panel" style="display:grid;gap:12px;align-content:start">
+        <h3>메모가 가는 vault</h3>
+        <div class="route">
+          <div class="r"><span>그 프로젝트의 결정과 이력</span><span class="arrow">→</span><span class="to">프로젝트 vault</span></div>
+          <div class="r"><span>팀이 합의한 내용</span><span class="arrow">→</span><span class="to">팀 vault · PR로만</span></div>
+          <div class="r"><span>다른 곳에서도 쓸 지식</span><span class="arrow">→</span><span class="to">개인 vault</span></div>
+        </div>
+        <p class="note">vault 사이의 링크는 검증에서 깨지므로, 다른 vault의 내용은 원본을 raw/에 복사해 ingest합니다. 프로젝트 세션은 연결된 vault들의 요약을 함께 받습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="sec-head">
+      <div class="eyebrow">vault-builder 설치와 삭제</div>
+      <h2>중간에 실패하면 설치 전 상태로 돌아갑니다</h2>
+      <p>vault를 처음 만들 때는 vault-builder를 씁니다. 설치는 임시 폴더에서 조립한 뒤 한 번에 옮기고, vault 밖 변경은 마지막에 합니다.</p>
+    </div>
+    <div class="panel" style="display:grid;gap:14px">
+      <div class="bar">
+        <h3>설치 흐름</h3>
+        <div class="seg" role="group" aria-label="경로 고르기">
+          <button type="button" id="i-ok" aria-pressed="true">성공 경로</button>
+          <button type="button" id="i-fail" aria-pressed="false">실패 경로</button>
+        </div>
+      </div>
+      <div class="install" id="installFlow" data-mode="ok">
+        <div class="irow"><div class="istep canfail"><span class="k">1</span><b>사전 검사</b><span>Python 3.10 이상, 경로, 기존 파일</span></div><div class="ifail on">실패하면 대상 경로를 만들지 않음</div></div>
+        <div class="irow"><div class="istep canfail"><span class="k">2</span><b>임시 폴더에서 조립과 자체 검사</b><span>복사, manifest 초안, 검증</span></div><div class="ifail on">실패하면 임시 폴더만 지움. 대상 경로는 생기지 않음</div></div>
+        <div class="irow"><div class="istep"><span class="k">3</span><b>rename 한 번으로 이동</b><span>vault가 한 번에 나타남</span></div><div class="ifail ok">이 시점부터 vault 사용 가능</div></div>
+        <div class="irow"><div class="istep canfail"><span class="k">4</span><b>vault 밖 변경</b><span>hook, 연결 설정, MCP 등록</span></div><div class="ifail on">실패하면 vault 밖 변경과 vault까지 되돌림</div></div>
+        <div class="irow"><div class="istep"><span class="k">5</span><b>manifest 기록</b><span>vault 밖 변경까지 hash와 함께</span></div><div class="ifail ok">uninstall과 doctor가 이 기록을 씀</div></div>
+        <span class="done">설치 완료</span>
+      </div>
+      <p class="note">1~2단계는 현재 진행 중인 bake 작업의 "init Python 검사 순서" 수정과 같은 일입니다.</p>
+    </div>
+
+    <div class="panel" style="display:grid;gap:14px">
+      <h3>uninstall이 지우는 것과 남기는 것</h3>
+      <div class="scope">
+        <div>
+          <div class="eyebrow" style="margin-bottom:8px">vault 저장소</div>
+          <div class="sgroup del"><h4>지움</h4><div class="pills"><span>tools/</span><span>.agents/skills/</span><span>CLAUDE.md</span><span>.mcp.json</span><span>manifest</span></div></div>
+          <div class="sgroup part"><h4>남기고 목록만 출력</h4><div class="pills"><span>사용자가 고친 관리 파일</span></div></div>
+          <div class="sgroup keep"><h4>남김 · 지식</h4><div class="pills"><span>raw/</span><span>wiki/</span><span>scratch/</span><span>git 이력</span></div></div>
+        </div>
+        <div>
+          <div class="eyebrow" style="margin-bottom:8px">사용자 영역 ~/.claude</div>
+          <div class="sgroup del"><h4>지움</h4><div class="pills"><span>vault-builder/hook.sh</span><span>vault-map.json</span></div></div>
+          <div class="sgroup part"><h4>항목만 지움</h4><div class="pills"><span>settings.json의 hook 1개</span><span>MCP 등록 1개</span></div></div>
+          <div class="sgroup keep"><h4>남김</h4><div class="pills"><span>settings.json 나머지</span><span>memory/</span></div></div>
+        </div>
+      </div>
+      <p class="note">hook과 연결 설정은 여러 vault가 함께 쓰므로, 마지막 vault를 지울 때만 제거합니다. 지식을 지우는 것은 별도의 명시 옵션으로만 가능합니다.</p>
+    </div>
+
+    <div class="two">
+      <div class="panel" style="display:grid;gap:12px;align-content:start">
+        <h3>설치·삭제 원칙</h3>
+        <ul class="rules">
+          <li><code>원칙1</code><span><b>원자적 설치.</b> 위 설치 흐름. 실패하면 이전 상태로 되돌림</span></li>
+          <li><code>원칙2</code><span><b>manifest가 vault 밖 변경까지 기록.</b> 파일과 hash를 함께</span></li>
+          <li><code>원칙3</code><span><b>vault 밖은 builder 소유 파일만.</b> settings.json에는 항목 1개</span></li>
+          <li><code>원칙4</code><span><b>지식은 지우지 않음.</b> raw/, wiki/, scratch/, git 이력</span></li>
+          <li><code>원칙5</code><span><b>사용자가 고친 관리 파일은 남김.</b> 목록만 출력</span></li>
+          <li><code>원칙6</code><span><b>--dry-run으로 계획 먼저.</b> audit/apply와 같은 방식</span></li>
+          <li><code>원칙7</code><span><b>vault별 manifest는 독립.</b> 공유 파일은 마지막 vault 삭제 때만</span></li>
+        </ul>
+      </div>
+      <div class="panel" style="display:grid;gap:12px;align-content:start">
+        <h3>명령</h3>
+        <div class="cmds"><code>install &lt;경로&gt; [--name]</code><code>uninstall &lt;경로&gt; [--dry-run]</code><code>doctor &lt;경로&gt;</code><code>audit / apply</code></div>
+        <p class="note">audit와 apply는 지금도 있습니다. install, uninstall, doctor는 새로 만듭니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="plan">
+    <div class="sec-head">
+      <div class="eyebrow">실행 순서</div>
+      <h2>vault-builder 기반 정리가 먼저입니다</h2>
+    </div>
+    <div class="phases">
+      <div class="phase now">
+        <div class="ph"><h3>1단계 · 지금</h3><small>bake 진행 중 · 구현 계획 승인 대기</small></div>
+        <div class="task"><b>vault-builder 기반 정리</b><span>release gate 복원, contract hash 불일치 수정, Python 검사 순서, Claude Code 연동 파일</span></div>
+      </div>
+      <div class="phase">
+        <div class="ph"><h3>2단계 · 다음 spec</h3><small>메모리 기능 · 1단계 뒤</small></div>
+        <div class="phase-grid">
+          <div class="task"><b>요약 페이지</b><span>project 필드 추가, 요약 생성</span></div>
+          <div class="task"><b>정리 skill</b><span>메모리 → vault</span></div>
+          <div class="task"><b>SessionStart hook</b><span>연결 설정, 멀티 vault 문서</span><span class="dep">요약 페이지와 정리 skill 뒤</span></div>
+          <div class="task"><b>install / uninstall</b><span>원칙1~7</span></div>
+          <div class="task"><b>현재 vault migration</b><span>1단계 결과를 지금 vault에 적용</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="ph"><h3>3단계 · 나중</h3><small>Vault Graph</small></div>
+        <div class="task"><b>읽기 전용 통합 검색</b><span>여러 vault를 한 번에, 출처 포함</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="review" class="review">
+    <div class="sec-head">
+      <div class="eyebrow">확인 필요</div>
+      <h2>결정이 필요한 지점</h2>
+    </div>
+    <ul>
+      <li><code>질문1</code><div><h3>원칙1(원자적 설치)을 지금 bake spec에 넣을까</h3><p>1~2단계는 이미 spec의 Python 검사 순서 수정과 같은 일입니다. 3~5단계의 vault 밖 변경은 hook이 아직 없어서, 지금 넣으면 범위가 커집니다.</p></div></li>
+      <li><code>위험1</code><div><h3>worktree마다 자동 메모리 폴더가 따로 생길 수 있음</h3><p>확인하지 못했습니다. 따로 생기면 정리 skill이 같은 저장소의 worktree 메모리를 합쳐서 읽어야 합니다.</p></div></li>
+      <li><code>위험2</code><div><h3>hook 출력이 세션마다 토큰을 씀</h3><p>요약 1~2천 토큰 상한이 충분한지 실제 요약으로 확인해야 합니다.</p></div></li>
+      <li><code>위험3</code><div><h3>MCP에 읽기 도구가 없음</h3><p>멀티 vault 검색은 지금 vault 폴더를 직접 읽어야 합니다. wiki_search, wiki_read_page 또는 Vault Graph로 해결합니다. Vault Graph는 설계만 있고 구현 저장소는 찾지 못했습니다.</p></div></li>
+    </ul>
+  </section>
+
+  <p class="note">출처: 이 대화의 vault와 vault-builder 점검 결과, bake spec(2026-10-26), 포크 세션의 시나리오·설치 설계.</p>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+(function () {
+  var tip = document.getElementById('tip');
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target.closest && e.target.closest('[data-tip]');
+    if (!t) { tip.hidden = true; return; }
+    tip.textContent = t.getAttribute('data-tip'); tip.hidden = false;
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (tip.hidden) return;
+    var x = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+    tip.style.left = x + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+  });
+
+  function group(ids, fn) {
+    var els = ids.map(function (id) { return document.getElementById(id); });
+    els.forEach(function (el, i) {
+      el.addEventListener('click', function () {
+        els.forEach(function (o) { o.setAttribute('aria-pressed', o === el ? 'true' : 'false'); });
+        fn(i);
+      });
+    });
+    fn(0);
+  }
+
+  var arch = document.getElementById('arch');
+  var filters = ['all', 'have', 'new', 'later'];
+  group(['f-all', 'f-have', 'f-new', 'f-later'], function (i) { arch.dataset.filter = filters[i]; });
+
+  var inst = document.getElementById('installFlow');
+  group(['i-ok', 'i-fail'], function (i) { inst.dataset.mode = i ? 'fail' : 'ok'; });
+
+  var steps = document.querySelectorAll('#flowSteps .step');
+  var cards = document.querySelectorAll('#scen .card');
+  cards.forEach(function (c) {
+    c.addEventListener('click', function () {
+      var on = c.getAttribute('aria-pressed') !== 'true';
+      cards.forEach(function (o) { o.setAttribute('aria-pressed', 'false'); });
+      var used = on ? c.dataset.steps.split(',').filter(Boolean) : [];
+      if (on) c.setAttribute('aria-pressed', 'true');
+      steps.forEach(function (s) { s.classList.toggle('lit', used.indexOf(s.dataset.step) >= 0); });
+    });
+  });
+
+  var SEQ = {
+    a: {
+      lanes: ['사용자', 'Claude 세션', 'memory/', 'hook', 'vault들'], kinds: ['', '', '', 'new', ''],
+      rows: [
+        { f: 0, t: 1, l: '교정·결정을 말함', d: '평소 작업 중 교정이나 결정을 말합니다.' },
+        { f: 1, t: 2, l: '메모 쓰기', d: '~/.claude/projects/<저장소>/memory/에 메모를 씁니다. 저장소 파일은 바뀌지 않습니다.' },
+        { div: '다음 날 세션 시작' },
+        { f: 1, t: 3, l: 'SessionStart 이벤트', d: 'Claude Code가 세션을 시작하면서 hook을 실행합니다.' },
+        { f: 3, t: 4, l: '요약 파일 읽기', d: '연결 설정에서 찾은 vault마다 wiki/maps/projects/<p>.md를 읽습니다.' },
+        { f: 3, t: 1, l: 'stdout = 맥락', d: 'hook의 출력이 세션 맥락으로 들어갑니다.' },
+        { f: 2, t: 1, l: 'MEMORY.md 자동 로드', d: 'L1 메모리 색인은 Claude Code가 원래 자동으로 읽습니다.' }
+      ],
+      notes: ['hook 동작: <code>git remote get-url origin</code>으로 저장소를 알아냅니다.', '<code>~/.claude/vault-builder/vault-map.json</code>에서 연결된 vault를 찾습니다.', '각 vault의 <code>wiki/maps/projects/&lt;p&gt;.md</code>를 출력합니다.']
+    },
+    b: {
+      lanes: ['사용자', '정리 skill', 'memory/', 'vault CLI', 'wiki · git'], kinds: ['', 'new', '', '', ''],
+      rows: [
+        { f: 0, t: 1, l: '"메모리 정리"', d: 'vault 세션에서 정리를 요청합니다. 주 1회가 기준입니다.' },
+        { f: 1, t: 2, l: '새 메모 읽기', d: '지난 정리 이후의 메모만 읽습니다.' },
+        { f: 1, t: 3, l: 'raw/imports 복사 + ingest-source', d: 'ingest-source는 raw/ 아래 파일만 받으므로 먼저 복사합니다. 명령은 지금도 있습니다.' },
+        { f: 1, t: 3, l: 'draft 작성 + publish-draft', d: 'publish-draft가 검증한 것만 wiki에 반영됩니다. 명령은 지금도 있습니다.' },
+        { f: 3, t: 4, l: '검증 통과분 반영', d: '통과한 페이지만 wiki에 씁니다.' },
+        { f: 3, t: 0, l: '모순 → 검토 목록', d: '모순은 scratch/review로 가고, 사용자는 이 목록만 판단합니다.' },
+        { f: 1, t: 3, l: 'maps build + 요약 생성', d: 'maps build는 있고, 프로젝트 요약 생성은 새로 만듭니다.', k: 'new' },
+        { f: 3, t: 4, l: '요약 파일 갱신', d: 'wiki/maps/projects/<p>.md를 다시 씁니다.' },
+        { f: 1, t: 4, l: '커밋 (팀 vault는 PR)', d: '팀 vault는 PR로만 반영하고 CI로 검증합니다.' }
+      ],
+      notes: ['vault가 여러 개면 정리 skill이 메모마다 vault를 고르고, 그 vault의 CLI를 부릅니다.', '정리 skill과 프로젝트 요약 생성만 새로 만들고, 나머지 명령은 지금 있는 것을 씁니다.']
+    },
+    c: {
+      lanes: ['사용자', 'Claude 세션', 'vault-개인 MCP', 'vault-팀 MCP', 'Vault Graph'], kinds: ['', '', '', '', 'later'],
+      rows: [
+        { f: 0, t: 1, l: '질문', d: '요약에 없는 오래된 결정을 묻습니다.' },
+        { f: 1, t: 2, l: 'query_prepare', d: 'wiki_workflow_query_prepare로 보고서 틀을 만듭니다.' },
+        { f: 1, t: 3, l: 'query_prepare', d: 'vault마다 따로 호출해야 합니다.' },
+        { f: 1, t: 2, l: '페이지 직접 읽기', d: '지금 MCP에는 읽기 도구가 없어 vault 폴더에 직접 접근해야 합니다. wiki_search, wiki_read_page로 해결할 예정입니다.', k: 'warn' },
+        { f: 1, t: 0, l: '출처 붙은 답', d: '읽은 페이지를 출처로 붙여 답합니다.' },
+        { f: 1, t: 2, l: 'query_capture → draft', d: '다시 쓸 답은 draft로 남기고, B와 같은 검증을 거칩니다.' },
+        { div: '나중 · Vault Graph 이후' },
+        { f: 1, t: 4, l: 'search 한 번', d: '한 번의 검색으로 여러 vault를 찾습니다.', k: 'later' },
+        { f: 4, t: 1, l: '여러 vault 결과', d: '결과마다 출처 vault가 붙습니다.', k: 'later' }
+      ],
+      notes: ['지금은 vault마다 따로 묻고, 페이지를 직접 읽어야 합니다.', 'Vault Graph가 생기면 7~8단계 한 번으로 바뀝니다.']
+    }
+  };
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var svg = document.getElementById('seqSvg');
+  function el(name, attrs, text) {
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function draw(key) {
+    var d = SEQ[key];
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var lx = function (i) { return 90 + i * 180; };
+    var y = 96, layout = [];
+    d.rows.forEach(function (r) { if (r.div) { y += 8; layout.push(y); y += 34; } else { layout.push(y); y += 46; } });
+    var H = y + 4;
+    svg.setAttribute('viewBox', '0 0 900 ' + H);
+    var defs = el('defs', {});
+    [['ah', 'var(--ink-2)'], ['ahn', 'var(--accent)'], ['ahw', 'var(--warn-ink)'], ['ahl', 'var(--muted)']].forEach(function (m) {
+      var mk = el('marker', { id: 'seq-' + m[0], viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
+      mk.appendChild(el('path', { d: 'M0 0L10 5L0 10z', style: 'fill:' + m[1] }));
+      defs.appendChild(mk);
+    });
+    svg.appendChild(defs);
+    d.lanes.forEach(function (name, i) {
+      var kind = d.kinds[i], x = lx(i);
+      svg.appendChild(el('line', { x1: x, x2: x, y1: 58, y2: H - 6, style: 'stroke:var(--axis);stroke-width:1', 'stroke-dasharray': '3 4' }));
+      var fill = kind === 'new' ? 'var(--accent-soft)' : 'var(--surface)';
+      var stroke = kind === 'new' ? 'var(--accent)' : kind === 'later' ? 'var(--muted)' : 'var(--axis)';
+      var rect = el('rect', { x: x - 76, y: 12, width: 152, height: kind ? 46 : 40, rx: 8, style: 'fill:' + fill + ';stroke:' + stroke + ';stroke-width:1.25' });
+      if (kind) rect.setAttribute('stroke-dasharray', '5 4');
+      svg.appendChild(rect);
+      svg.appendChild(el('text', { x: x, y: kind ? 32 : 37, 'text-anchor': 'middle', style: 'fill:var(--ink);font:600 14px var(--body)' }, name));
+      if (kind) svg.appendChild(el('text', { x: x, y: 49, 'text-anchor': 'middle', style: 'fill:' + stroke + ';font:600 11px var(--body)' }, kind === 'new' ? '신규' : '나중'));
+    });
+    var n = 0;
+    d.rows.forEach(function (r, idx) {
+      var yy = layout[idx];
+      if (r.div) {
+        svg.appendChild(el('line', { x1: 14, x2: 886, y1: yy, y2: yy, style: 'stroke:var(--ink-2);stroke-width:1', 'stroke-dasharray': '6 5' }));
+        var dt = el('text', { x: 20, y: yy + 20, style: 'fill:var(--ink-2);font:600 12px var(--body)' }, r.div);
+        svg.appendChild(dt);
+        return;
+      }
+      n += 1;
+      var x1 = lx(r.f), x2 = lx(r.t), dir = x2 > x1 ? 1 : -1;
+      var col = r.k === 'warn' ? 'var(--warn-ink)' : r.k === 'later' ? 'var(--muted)' : r.k === 'new' ? 'var(--accent)' : 'var(--ink-2)';
+      var mk = r.k === 'warn' ? 'ahw' : r.k === 'later' ? 'ahl' : r.k === 'new' ? 'ahn' : 'ah';
+      var g = el('g', { 'data-tip': n + '. ' + r.d, style: 'cursor:default' });
+      var line = el('line', { x1: x1 + dir * 4, x2: x2 - dir * 6, y1: yy, y2: yy, style: 'stroke:' + col + ';stroke-width:1.6', 'marker-end': 'url(#seq-' + mk + ')' });
+      if (r.k === 'warn' || r.k === 'later') line.setAttribute('stroke-dasharray', '6 4');
+      g.appendChild(el('line', { x1: x1, x2: x2, y1: yy, y2: yy, style: 'stroke:transparent;stroke-width:14' }));
+      g.appendChild(line);
+      var mid = (x1 + x2) / 2;
+      var bg = el('rect', { rx: 4, style: 'fill:var(--surface)' });
+      g.appendChild(bg);
+      var tx = el('text', { x: mid, y: yy - 9, 'text-anchor': 'middle', style: 'fill:var(--ink);font:13px var(--body)' });
+      var num = el('tspan', { style: 'font:600 12px var(--mono);fill:' + (r.k ? col : 'var(--accent)') }, n + '  ');
+      tx.appendChild(num);
+      tx.appendChild(el('tspan', {}, r.l));
+      g.appendChild(tx);
+      svg.appendChild(g);
+      try {
+        var b = tx.getBBox();
+        bg.setAttribute('x', b.x - 6); bg.setAttribute('y', b.y - 2);
+        bg.setAttribute('width', b.width + 12); bg.setAttribute('height', b.height + 4);
+      } catch (e) {}
+    });
+    document.getElementById('seqNotes').innerHTML = d.notes.map(function (t) { return '<li>' + t + '</li>'; }).join('');
+  }
+  var keys = ['a', 'b', 'c'];
+  group(['q-a', 'q-b', 'q-c'], function (i) { draw(keys[i]); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () {
+    var cur = document.querySelector('#q-a[aria-pressed="true"], #q-b[aria-pressed="true"], #q-c[aria-pressed="true"]');
+    draw(keys[['q-a', 'q-b', 'q-c'].indexOf(cur ? cur.id : 'q-a')]);
+  });
+})();
+</script>
+
+</body></html>
