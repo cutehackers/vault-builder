@@ -584,10 +584,12 @@ def _run_audit(args: argparse.Namespace) -> int:
         outputs.append((plan_output, plan.to_json(), "Migration plan output"))
     if report_output is not None:
         outputs.append((report_output, rendered, "Audit report"))
+    # Check before writing so the audit's own report does not count as an uncommitted change.
+    uncommitted = _has_uncommitted_git_changes(target)
     if outputs:
         _write_outputs(tuple(outputs))
     print(rendered, end="")
-    if _has_uncommitted_git_changes(target):
+    if uncommitted:
         print(
             "audit: warning: target has uncommitted Git changes. Commit them before apply.",
             file=sys.stderr,

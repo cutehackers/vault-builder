@@ -4776,6 +4776,23 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, len(result.stderr.splitlines()), result.stderr)
             self.assertIn("before apply", result.stderr)
 
+    def test_audit_report_written_by_audit_does_not_trigger_uncommitted_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            _commit_all(target)
+
+            result = _run_cli(
+                "audit",
+                "--target",
+                str(target),
+                "--report",
+                str(target / "scratch" / "reports" / "migration-audit.md"),
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("", result.stderr)
+
     def test_audit_report_does_not_invalidate_the_plan_emitted_by_that_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5758,3 +5775,30 @@ class FreshVaultClaudeIntegrationTest(unittest.TestCase):
                 with self.subTest(path=relative):
                     self.assertEqual("create", actions[relative].action)
             self.assertEqual("unchanged", actions["scripts/release_gate.sh"].action)
+
+    def test_vault_without_release_gate_audits_and_plans_create(self):
+        # Vaults built between e8f998b and this change have a valid v1 manifest but no gate file.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            shutil.copytree(self.target, target, symlinks=True)
+            gateless_files = {
+                relative: managed
+                for relative, managed in self.manifest.managed_files.items()
+                if relative != "scripts/release_gate.sh"
+            }
+            write_manifest(
+                target,
+                VaultManifest(
+                    self.manifest.schema_version,
+                    self.manifest.contract_version,
+                    "gateless-revision",
+                    self.manifest.generated_at,
+                    gateless_files,
+                ),
+            )
+            (target / "scripts" / "release_gate.sh").unlink()
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual("create", actions["scripts/release_gate.sh"].action)
