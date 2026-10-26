@@ -3218,6 +3218,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         root = Path(__file__).resolve().parents[1]
         review_path = root / "scratch" / "review" / "2026-05-30-review-resolve-rollback-test.md"
         original_log = (root / "wiki" / "log.md").read_text()
+        reports_before = set((root / "scratch" / "reports").glob("*"))
         original_review = (
             "\n".join(
                 [
@@ -3271,6 +3272,9 @@ chmod +x "${target}/scripts/release_gate.sh"
         finally:
             review_path.unlink(missing_ok=True)
             (root / "wiki" / "log.md").write_text(original_log)
+            # The failed resolve writes a lint report; remove it so the test leaves the checkout clean.
+            for report in set((root / "scratch" / "reports").glob("*")) - reports_before:
+                report.unlink(missing_ok=True)
 
     def test_review_list_cli_reports_pending_and_resolved_counts(self):
         root = Path(__file__).resolve().parents[1]
