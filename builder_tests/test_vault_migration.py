@@ -7,6 +7,7 @@ import json
 import os
 import re
 import select
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,7 @@ from tools.wiki.lib.maps import build_navigation_maps
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_PYTHON = shlex.quote(sys.executable)
 
 
 def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -293,6 +295,49 @@ def _protected_hashes(root: Path) -> dict[str, tuple[str, str]]:
     return values
 
 
+def _commit_all(target: Path) -> None:
+    _run(["git", "init", "-q"], target)
+    _run(["git", "add", "-A"], target)
+    _run(
+        [
+            "git",
+            "-c",
+            "user.name=Vault Test",
+            "-c",
+            "user.email=vault-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        target,
+    )
+
+
+def _capture_inherited_output(action: Callable[[], None]) -> bytes:
+    """Return bytes written to process file descriptors 1 and 2 during action."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved_stdout = os.dup(1)
+    saved_stderr = os.dup(2)
+    with tempfile.TemporaryFile() as sink:
+        try:
+            os.dup2(sink.fileno(), 1)
+            os.dup2(sink.fileno(), 2)
+            action()
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(saved_stdout, 1)
+            os.dup2(saved_stderr, 2)
+            os.close(saved_stdout)
+            os.close(saved_stderr)
+        sink.seek(0)
+        return sink.read()
+
+
 class VaultManifestTest(unittest.TestCase):
     def test_manifest_generated_at_requires_a_real_utc_second_timestamp(self):
         manifest = VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {})
@@ -360,6 +405,46 @@ class VaultManifestTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "mode"):
                 create_manifest(ROOT, target, "test")
+
+    def test_init_rejects_old_python_before_writing_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            stub_bin = root / "bin"
+            stub_bin.mkdir()
+            for command in ("dirname", "mkdir", "cp", "find", "chmod", "touch"):
+                resolved = shutil.which(command)
+                assert resolved is not None, command
+                (stub_bin / command).symlink_to(resolved)
+            stub_python = stub_bin / "python3"
+            stub_python.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1" = "--version" ]; then echo "Python 3.9.18"; exit 0; fi\n'
+                "cat >/dev/null\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            stub_python.chmod(0o755)
+            bash = shutil.which("bash")
+            assert bash is not None
+            env = {"HOME": str(root), "PATH": str(stub_bin)}
+
+            missing_target = root / "missing"
+            empty_target = root / "empty"
+            empty_target.mkdir()
+            for target in (missing_target, empty_target):
+                with self.subTest(target=target.name):
+                    result = subprocess.run(
+                        [bash, str(ROOT / "init-vault.sh"), str(target)],
+                        cwd=root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                        env=env,
+                    )
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn("Python 3.10 or newer", result.stderr)
+            self.assertFalse(missing_target.exists())
+            self.assertEqual([], list(empty_target.iterdir()))
 
     def test_load_manifest_rejects_malformed_or_symlinked_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -697,6 +782,8 @@ class ContractCatalogTest(unittest.TestCase):
             self.assertTrue(path.is_file(), relative)
             self.assertFalse(path.is_symlink(), relative)
             self.assertEqual(managed.sha256, sha256_file(path), relative)
+            observed_mode = "0755" if path.stat().st_mode & 0o111 else "0644"
+            self.assertEqual(managed.mode, observed_mode, relative)
 
     def test_plan_json_round_trip_is_canonical(self):
         action = MigrationAction(
@@ -1240,7 +1327,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertNotEqual(first_plan.migration_id, second_plan.migration_id)
             blocked = _tree_digest(target)
             expected_command = (
-                "python3 tools/vault_migration/cli.py recover "
+                f"{_PYTHON} tools/vault_migration/cli.py recover "
                 f"--target {target.resolve()} --migration-id {first_plan.migration_id}"
             )
 
@@ -1423,11 +1510,11 @@ class MigrationApplyTest(unittest.TestCase):
 
             message = str(raised.exception)
             first = (
-                "python3 tools/vault_migration/cli.py recover "
+                f"{_PYTHON} tools/vault_migration/cli.py recover "
                 f"--target {target.resolve()} --migration-id aaaaaaaaaaaaaaaa"
             )
             second = (
-                "python3 tools/vault_migration/cli.py recover "
+                f"{_PYTHON} tools/vault_migration/cli.py recover "
                 f"--target {target.resolve()} --migration-id bbbbbbbbbbbbbbbb"
             )
             self.assertIn(first, message)
@@ -1725,7 +1812,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("python3 tools/wiki/cli.py lint --report", failure.failed_command)
             self.assertEqual(7, failure.exit_code)
             self.assertEqual(
-                f"python3 tools/vault_migration/cli.py audit --target {target.resolve()}",
+                f"{_PYTHON} tools/vault_migration/cli.py audit --target {target.resolve()}",
                 failure.audit_command,
             )
             self.assertIsNone(failure.recover_command)
@@ -1767,7 +1854,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("python3 tools/wiki/cli.py lint --report", failure.failed_command)
             self.assertEqual(9, failure.exit_code)
             self.assertEqual(
-                f"python3 tools/vault_migration/cli.py recover --target {target.resolve()} --migration-id {plan.migration_id}",
+                f"{_PYTHON} tools/vault_migration/cli.py recover --target {target.resolve()} --migration-id {plan.migration_id}",
                 failure.recover_command,
             )
             self.assertIsNone(failure.audit_command)
@@ -4516,6 +4603,107 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertTrue(directory.is_dir())
 
 
+class ReleaseGateValidationTest(unittest.TestCase):
+    def _write_gate(self, target: Path, body: str) -> None:
+        scripts = target / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "release_gate.sh").write_text("#!/usr/bin/env bash\n" + body)
+
+    def test_release_gate_failure_is_captured_and_not_inherited(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir)
+            self._write_gate(
+                target,
+                'for i in $(seq 1 40); do echo "gate-line-$i"; done\n'
+                'echo "gate-stderr-marker" >&2\n'
+                "exit 3\n",
+            )
+            failures: list[subprocess.CalledProcessError] = []
+
+            def run() -> None:
+                try:
+                    applying._run_release_gate(target)
+                except subprocess.CalledProcessError as exc:
+                    failures.append(exc)
+
+            leaked = _capture_inherited_output(run)
+
+            self.assertEqual(b"", leaked)
+            self.assertEqual(1, len(failures))
+            failure = failures[0]
+            self.assertEqual(3, failure.returncode)
+            self.assertEqual(["bash", "scripts/release_gate.sh"], failure.cmd)
+            self.assertIn("gate-line-40", failure.output)
+            self.assertIn("gate-stderr-marker", failure.output)
+
+    def test_release_gate_success_is_quiet_and_uses_running_interpreter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir)
+            self._write_gate(target, 'echo "gate ok"\nprintf "%s" "$PYTHON" > python-used.txt\n')
+            environment = {key: value for key, value in os.environ.items() if key != "PYTHON"}
+
+            with mock.patch.dict(os.environ, environment, clear=True):
+                leaked = _capture_inherited_output(lambda: applying._run_release_gate(target))
+
+            self.assertEqual(b"", leaked)
+            self.assertEqual(sys.executable, (target / "python-used.txt").read_text())
+
+    def test_release_gate_failure_error_includes_output_tail(self):
+        output = "".join(f"gate-line-{index}\n" for index in range(1, 41))
+        error = subprocess.CalledProcessError(3, ["bash", "scripts/release_gate.sh"], output=output)
+
+        failure = applying.MigrationApplyError(
+            error,
+            target=Path("/vault"),
+            migration_id="a" * 16,
+            rollback_completed=True,
+        )
+
+        lines = str(failure).splitlines()
+        self.assertIn("Failed command: bash scripts/release_gate.sh", lines)
+        self.assertIn("Exit code: 3", lines)
+        self.assertIn("  gate-line-40", lines)
+        self.assertIn("  gate-line-21", lines)
+        self.assertNotIn("  gate-line-20", lines)
+        self.assertIn(
+            f"Run read-only audit again: {_PYTHON} tools/vault_migration/cli.py audit --target /vault",
+            lines,
+        )
+
+    def test_release_gate_failure_without_output_has_no_output_section(self):
+        error = subprocess.CalledProcessError(3, ["bash", "scripts/release_gate.sh"])
+
+        failure = applying.MigrationApplyError(
+            error,
+            target=Path("/vault"),
+            migration_id="a" * 16,
+            rollback_completed=True,
+        )
+
+        self.assertNotIn("Output", str(failure))
+
+    def test_apply_default_validation_runs_target_release_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            before = _tree_digest(target)
+            plan = audit_vault(ROOT, target)
+            gate_error = subprocess.CalledProcessError(
+                5,
+                ["bash", "scripts/release_gate.sh"],
+                output="[release-gate] gate exploded\n",
+            )
+
+            with mock.patch.object(applying, "_run_release_gate", side_effect=gate_error) as gate:
+                with self.assertRaises(applying.MigrationApplyError) as raised:
+                    apply_plan(ROOT, target, plan)
+
+            gate.assert_called_once_with(target.resolve())
+            self.assertTrue(raised.exception.rollback_completed)
+            self.assertIn("[release-gate] gate exploded", str(raised.exception))
+            self.assertEqual(before, _tree_digest(target))
+
+
 class VaultMigrationCliTest(unittest.TestCase):
     def test_audit_stdout_is_deterministic_and_target_is_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4551,6 +4739,42 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertTrue(plan_path.is_file())
             self.assertTrue(MigrationPlan.from_json(plan_path.read_text()).has_blocking_actions)
             self.assertFalse((target / ".vault-builder").exists())
+
+    def test_audit_warns_once_about_uncommitted_changes_without_changing_plan_or_exit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+
+            no_git = _run_cli("audit", "--target", str(target))
+            _commit_all(target)
+            clean = _run_cli("audit", "--target", str(target))
+            (target / "uncommitted-note.md").write_text("draft\n")
+            dirty = _run_cli("audit", "--target", str(target))
+
+            self.assertEqual(0, no_git.returncode, no_git.stderr)
+            self.assertEqual("", no_git.stderr)
+            self.assertEqual(0, clean.returncode, clean.stderr)
+            self.assertEqual("", clean.stderr)
+            self.assertEqual(clean.returncode, dirty.returncode)
+            self.assertEqual(clean.stdout, dirty.stdout)
+            warnings = dirty.stderr.splitlines()
+            self.assertEqual(1, len(warnings), dirty.stderr)
+            self.assertIn("uncommitted", warnings[0])
+            self.assertIn("before apply", warnings[0])
+
+    def test_audit_uncommitted_warning_keeps_blocking_exit_code(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            _commit_all(target)
+            (target / "tools" / "wiki" / "cli.py").write_text("user customization\n")
+
+            result = _run_cli("audit", "--target", str(target))
+
+            self.assertEqual(2, result.returncode, result.stderr)
+            self.assertIn("review-required: 1", result.stdout)
+            self.assertEqual(1, len(result.stderr.splitlines()), result.stderr)
+            self.assertIn("before apply", result.stderr)
 
     def test_audit_report_does_not_invalidate_the_plan_emitted_by_that_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5272,7 +5496,7 @@ class VaultMigrationCliTest(unittest.TestCase):
 
 
 class VaultMigrationAcceptanceTest(unittest.TestCase):
-    def test_fresh_vault_has_v1_manifest_and_passes_quality_checks(self):
+    def test_fresh_vault_has_v1_manifest_and_passes_its_release_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
 
@@ -5287,7 +5511,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             self.assertFalse((target / "tools" / "vault_migration").exists())
             self.assertFalse((target / "init-vault.sh").exists())
             self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
-            _run(["python3", "tools/wiki/cli.py", "lint", "--report"], target)
+            _run(["bash", "scripts/release_gate.sh"], target)
 
     def test_legacy_vault_migrates_without_changing_user_role_bytes_or_modes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5316,7 +5540,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             self.assertEqual(manifest, load_manifest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
             self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
-            _run(["python3", "tools/wiki/cli.py", "lint", "--report"], target)
+            _run([sys.executable, "tools/wiki/cli.py", "lint", "--report"], target)
 
     def test_legacy_source_manifest_violation_blocks_without_changing_tree(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5374,3 +5598,163 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".vault-builder").exists())
+
+
+_CLAUDE_FILES = (
+    "CLAUDE.md",
+    ".claude/skills/wiki-ingest/SKILL.md",
+    ".claude/skills/wiki-update/SKILL.md",
+    ".claude/skills/wiki-query/SKILL.md",
+)
+_POINTER_SKILLS = ("wiki-ingest", "wiki-update", "wiki-query")
+
+
+def _skill_frontmatter(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    match = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    if match is None:
+        raise AssertionError(f"Missing frontmatter: {path}")
+    fields: dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+class FreshVaultClaudeIntegrationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls.target = Path(cls._tmpdir.name) / "vault"
+        # Pass a bare interpreter name found only through PATH, so .mcp.json must record an absolute path.
+        bin_dir = Path(cls._tmpdir.name) / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "vault-builder-test-python").symlink_to(sys.executable)
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "PYTHON": "vault-builder-test-python",
+        }
+        result = subprocess.run(
+            ["bash", "init-vault.sh", str(cls.target)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            cls._tmpdir.cleanup()
+            raise AssertionError(result.stdout + result.stderr)
+        manifest = load_manifest(cls.target)
+        assert manifest is not None
+        cls.manifest = manifest
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
+
+    def test_fresh_vault_release_gate_is_executable_and_in_manifest(self):
+        gate = self.target / "scripts" / "release_gate.sh"
+        self.assertTrue(gate.is_file())
+        self.assertFalse(gate.is_symlink())
+        self.assertEqual(0o755, gate.stat().st_mode & 0o7777)
+        self.assertIn("scripts/release_gate.sh", self.manifest.managed_files)
+        self.assertEqual("0755", self.manifest.managed_files["scripts/release_gate.sh"].mode)
+
+    def test_fresh_vault_claude_md_imports_agents_without_copying_it(self):
+        claude = (self.target / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("@AGENTS.md", claude.splitlines())
+        agents = (self.target / "AGENTS.md").read_text(encoding="utf-8")
+        headings = [line for line in agents.splitlines() if line.startswith("## ")]
+        self.assertTrue(headings)
+        for heading in headings:
+            self.assertNotIn(heading, claude.splitlines())
+
+    def test_fresh_vault_claude_files_are_regular_and_recorded_in_manifest(self):
+        for relative in _CLAUDE_FILES:
+            with self.subTest(path=relative):
+                path = self.target / relative
+                self.assertTrue(path.is_file())
+                self.assertFalse(path.is_symlink())
+                self.assertIn(relative, self.manifest.managed_files)
+                self.assertEqual(sha256_file(path), self.manifest.managed_files[relative].sha256)
+
+    def test_claude_pointer_skills_match_agents_skill_frontmatter(self):
+        for root in (ROOT, self.target):
+            for name in _POINTER_SKILLS:
+                with self.subTest(root=str(root), skill=name):
+                    pointer = root / ".claude" / "skills" / name / "SKILL.md"
+                    original_relative = f".agents/skills/{name}/SKILL.md"
+                    original = root / original_relative
+                    self.assertTrue(pointer.is_file())
+                    self.assertFalse(pointer.is_symlink())
+                    pointer_fields = _skill_frontmatter(pointer)
+                    original_fields = _skill_frontmatter(original)
+                    self.assertEqual(original_fields["name"], pointer_fields["name"])
+                    self.assertEqual(original_fields["description"], pointer_fields["description"])
+                    self.assertIn(original_relative, pointer.read_text(encoding="utf-8"))
+
+    def test_fresh_vault_mcp_json_uses_chosen_python_and_absolute_server_path(self):
+        config_path = self.target / ".mcp.json"
+        self.assertTrue(config_path.is_file())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        server = config["mcpServers"]["llm-wiki"]
+        command = Path(server["command"])
+        self.assertTrue(command.is_absolute(), command)
+        self.assertTrue(command.is_file(), command)
+        self.assertTrue(os.access(command, os.X_OK), command)
+        script_args = [arg for arg in server["args"] if arg.endswith("tools/wiki/mcp_server.py")]
+        self.assertEqual(1, len(script_args), server["args"])
+        script = Path(script_args[0])
+        self.assertTrue(script.is_absolute(), script)
+        self.assertTrue(script.is_file(), script)
+        self.assertEqual((self.target / "tools" / "wiki" / "mcp_server.py").resolve(), script.resolve())
+        version = subprocess.run(
+            [server["command"], "-c", "import sys; print(sys.version_info >= (3, 10))"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual("True", version.stdout.strip())
+
+    def test_fresh_vault_mcp_json_is_not_managed(self):
+        self.assertNotIn(".mcp.json", self.manifest.managed_files)
+        self.assertNotIn(".mcp.json", MANAGED_PATHS)
+
+    def test_legacy_manifest_without_claude_files_loads_and_audit_plans_create(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            shutil.copytree(self.target, target, symlinks=True)
+            legacy_files = {
+                relative: managed
+                for relative, managed in self.manifest.managed_files.items()
+                if relative not in _CLAUDE_FILES
+            }
+            self.assertIn("scripts/release_gate.sh", legacy_files)
+            write_manifest(
+                target,
+                VaultManifest(
+                    self.manifest.schema_version,
+                    self.manifest.contract_version,
+                    "legacy-revision",
+                    self.manifest.generated_at,
+                    legacy_files,
+                ),
+            )
+            for relative in _CLAUDE_FILES:
+                (target / relative).unlink()
+            shutil.rmtree(target / ".claude")
+
+            loaded = load_manifest(target)
+
+            assert loaded is not None
+            for relative in _CLAUDE_FILES:
+                self.assertNotIn(relative, loaded.managed_files)
+            plan = audit_vault(ROOT, target)
+            actions = {action.path: action for action in plan.actions}
+            for relative in _CLAUDE_FILES:
+                with self.subTest(path=relative):
+                    self.assertEqual("create", actions[relative].action)
+            self.assertEqual("unchanged", actions["scripts/release_gate.sh"].action)

@@ -2,7 +2,7 @@
 
 이 문서는 일반 사용자가 LLM Wiki의 가치를 가장 잘 이용하기 위해 쓸 수 있는 프롬프트 모음입니다.
 
-사용자는 내부 명령을 모두 외울 필요가 없습니다. 아래 프롬프트는 `wiki-ingest`, `wiki-update`, `wiki-query` 스킬을 자연스럽게 호출하도록 작성되어 있습니다. agent는 필요할 때 source registration, semantic draft, publish gate, review queue, generated maps, metrics, quality checks를 내부에서 사용합니다.
+사용자는 내부 명령을 모두 외울 필요가 없습니다. 아래 프롬프트는 `wiki-ingest`, `wiki-update`, `wiki-query` 스킬을 자연스럽게 호출하도록 작성되어 있습니다. agent는 필요할 때 source registration, semantic draft, publish gate, review queue, generated maps, metrics, release gate를 내부에서 사용합니다.
 
 ## 사용자가 기억할 기본 문장
 
@@ -208,7 +208,7 @@ durable 변경은 제안한 뒤 진행해주세요.
 
 ```text
 방금 반영한 wiki 변경이 완료된 상태인지 확인해주세요.
-검증 명령과 결과를 요약하고, 아직 quality checks를 통과하지 못했다면 완료라고 말하지 말아주세요.
+검증 명령과 결과를 요약하고, 아직 release gate를 통과하지 못했다면 완료라고 말하지 말아주세요.
 ```
 
 ## Vault 가치 극대화 프롬프트

@@ -41,5 +41,5 @@ If a page sets `quality.provenance` to `claim`, include a markdown table with `C
 - Use `review create/list/resolve` for contradiction, merge, contested-claim, and human-lock decisions that need a lifecycle and log entry.
 - Use `merge scan --report --create-review` before manual merge proposals when duplicate pages or shared aliases are suspected.
 - Use `workflow query --mode answer-and-capture` when a reusable query answer should become a draft scaffold before publication.
-- After durable publication, the deterministic wiki validation commands must succeed before the
+- After durable publication, `scripts/release_gate.sh` must succeed before the
   wiki work is reported complete.

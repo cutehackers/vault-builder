@@ -10,6 +10,7 @@ import secrets
 import shlex
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Literal
@@ -33,6 +34,8 @@ from .planning import _target_root, audit_vault, target_fingerprint
 
 _V1_CATALOG_PATH = "tools/vault_migration/contracts/v1.json"
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+_RELEASE_GATE_COMMAND = ("bash", "scripts/release_gate.sh")
+_GATE_OUTPUT_TAIL_LINES = 20
 _JOURNAL_STATES = frozenset(
     {
         "preparing",
@@ -135,6 +138,7 @@ class MigrationApplyError(RuntimeError):
         if self.failed_command is not None:
             lines.append(f"Failed command: {self.failed_command}")
             lines.append(f"Exit code: {self.exit_code}")
+            lines.extend(_output_tail_lines(original_error))
         else:
             lines.append(f"Failure: {original_error}")
         if rollback_cleanup_pending:
@@ -270,7 +274,7 @@ def _apply_plan_locked(
             rollback_completed=cleanup_error is None,
             rollback_error=cleanup_error,
         ) from (cleanup_error or exc)
-    validation = run_gate or _run_validation
+    gate = run_gate or _run_release_gate
     try:
         _write_journal_state(journal_root, journal, "applying")
 
@@ -298,7 +302,7 @@ def _apply_plan_locked(
         _write_journal_state(journal_root, journal, "validating")
 
         # Gate one deliberately runs before authority-v1 metadata exists.
-        validation(target)
+        gate(target)
         _verify_candidate_files(builder, target, actions)
 
         candidate = replace(
@@ -3272,22 +3276,39 @@ def _mark_rollback_failed(journal_root: Path, journal: dict[str, object]) -> Non
         pass
 
 
-def _run_validation(target_root: Path) -> None:
-    commands = (
-        ["python3", "-m", "unittest", "tests/test_wiki_quality_baseline.py", "tests/test_wiki_tools.py"],
-        ["python3", "tools/wiki/cli.py", "lint", "--report"],
-        ["python3", "tools/wiki/cli.py", "health"],
-        ["python3", "tools/wiki/cli.py", "maps", "build", "--check", "--report"],
-        ["python3", "tools/wiki/cli.py", "metrics", "--check", "--report"],
+def _run_release_gate(target_root: Path) -> None:
+    """Run the target's release gate with captured output.
+
+    stdout and stderr are merged and kept on the raised CalledProcessError so a
+    failure message can show the tail without leaking nested test output.
+    """
+    environment = dict(os.environ)
+    environment.setdefault("PYTHON", sys.executable)
+    subprocess.run(
+        list(_RELEASE_GATE_COMMAND),
+        cwd=target_root,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
     )
-    for command in commands:
-        subprocess.run(command, cwd=target_root, text=True, check=True)
+
+
+def _output_tail_lines(error: subprocess.CalledProcessError) -> list[str]:
+    output = error.output
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    if not isinstance(output, str) or not output.strip():
+        return []
+    tail = output.rstrip("\n").splitlines()[-_GATE_OUTPUT_TAIL_LINES:]
+    return [f"Output (last {len(tail)} lines):", *(f"  {line}" for line in tail)]
 
 
 def _recover_command(target: Path, migration_id: str) -> str:
     return shlex.join(
         [
-            "python3",
+            sys.executable,
             "tools/vault_migration/cli.py",
             "recover",
             "--target",
@@ -3301,7 +3322,7 @@ def _recover_command(target: Path, migration_id: str) -> str:
 def _audit_command(target: Path) -> str:
     return shlex.join(
         [
-            "python3",
+            sys.executable,
             "tools/vault_migration/cli.py",
             "audit",
             "--target",

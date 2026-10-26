@@ -2248,6 +2248,7 @@ class WikiToolCliTest(unittest.TestCase):
                 target / "AGENTS.md",
                 target / "README-kr.md",
                 target / ".github" / "workflows" / "release-gate.yml",
+                target / "scripts" / "release_gate.sh",
                 target / "docs" / "LLM-WIKI.md",
                 target / "docs" / "usage.md",
                 target / "docs" / "USER_PROMPTS.md",
@@ -2276,6 +2277,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "tools" / "vault_migration").exists())
             self.assertFalse((target / "init-vault.sh").exists())
             self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
+            self.assertTrue((target / "scripts" / "release_gate.sh").stat().st_mode & 0o111)
             self.assertEqual(0, lint_result.returncode, lint_result.stdout + lint_result.stderr)
             self.assertIn("No issues found", lint_result.stdout)
             self.assertEqual(0, mcp_result.returncode, mcp_result.stdout + mcp_result.stderr)
@@ -2301,11 +2303,50 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
             self.assertTrue((target / "tools" / "wiki" / "cli.py").exists())
             self.assertTrue((target / ".vault-builder" / "manifest.json").exists())
+            self.assertTrue((target / "scripts" / "release_gate.sh").exists())
             self.assertFalse((target / "init-vault.sh").exists())
             self.assertFalse((target / "scripts" / "bootstrap.sh").exists())
             self.assertTrue((target / "README-kr.md").exists())
             self.assertFalse((tmp / "wiki").exists())
             self.assertIn(f"cd {resolved_target}", init_result.stdout)
+
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    def test_generated_release_gate_rejects_complete_v1_manifest_corruption_matrix(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                0,
+                init_result.returncode,
+                init_result.stdout + init_result.stderr,
+            )
+            manifest_path = target / ".vault-builder" / "manifest.json"
+            for name, manifest in _invalid_v1_manifests().items():
+                with self.subTest(name=name):
+                    manifest_path.write_text(json.dumps(manifest) + "\n")
+                    gate = subprocess.run(
+                        ["scripts/release_gate.sh"],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(
+                        0,
+                        gate.returncode,
+                        gate.stdout + gate.stderr,
+                    )
+                    self.assertIn(
+                        "invalid-vault-builder-manifest",
+                        gate.stdout + gate.stderr,
+                    )
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_init_vault_can_include_stenc_when_requested(self):
@@ -2566,6 +2607,133 @@ PY
             self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
             self.assertTrue((target / "docs" / "stenc" / "content").exists())
             self.assertTrue((target / "tools" / "stenc" / "validate-stenc-doc.js").exists())
+
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    def test_bootstrap_full_verify_does_not_leak_bootstrap_env_to_release_gate(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_template = tmp / "fake-builder"
+            fake_template.mkdir()
+            target = tmp / "llm-wiki"
+            archive_path = tmp / "fake-builder.tar.gz"
+            (fake_template / "init-vault.sh").write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+target="${@: -1}"
+mkdir -p "${target}/scripts" "${target}/tools/wiki"
+cat > "${target}/tools/wiki/cli.py" <<'PY'
+import sys
+raise SystemExit(0)
+PY
+cat > "${target}/scripts/release_gate.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+env | grep '^VAULT_BOOTSTRAP_' > ../release-gate-env.txt || true
+env | grep '^VAULT_BUILDER_' >> ../release-gate-env.txt || true
+SH
+chmod +x "${target}/scripts/release_gate.sh"
+"""
+            )
+            tar_result = subprocess.run(
+                ["tar", "-czf", str(archive_path), "-C", str(tmp), fake_template.name],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            env = os.environ.copy()
+            env["VAULT_BUILDER_ARCHIVE_URL"] = archive_path.as_uri()
+            env["VAULT_BOOTSTRAP_VERIFY"] = "full"
+            env["VAULT_BOOTSTRAP_WITH_STENC"] = "0"
+            bootstrap_result = subprocess.run(
+                ["bash", "scripts/bootstrap.sh", str(target)],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, tar_result.returncode, tar_result.stdout + tar_result.stderr)
+            self.assertEqual(0, bootstrap_result.returncode, bootstrap_result.stdout + bootstrap_result.stderr)
+            self.assertEqual("", (tmp / "release-gate-env.txt").read_text())
+
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    def test_generated_release_gate_ignores_parent_git_worktree(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parent = Path(tmpdir) / "parent"
+            parent.mkdir()
+            target = parent / "new-wiki"
+            subprocess.run(["git", "init"], cwd=parent, text=True, capture_output=True, check=True)
+            (parent / "outside.txt").write_text("outside trailing whitespace  \n")
+
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            minimal_test = (
+                "import unittest\n\n"
+                "class MinimalReleaseGateTest(unittest.TestCase):\n"
+                "    def test_minimal(self):\n"
+                "        self.assertTrue(True)\n"
+            )
+            (target / "tests" / "test_wiki_quality_baseline.py").write_text(minimal_test)
+            (target / "tests" / "test_wiki_tools.py").write_text(minimal_test)
+            default_gate_env = os.environ.copy()
+            default_gate_env.pop("WIKI_ENABLE_STENC", None)
+            gate_result = subprocess.run(
+                ["scripts/release_gate.sh"],
+                cwd=target,
+                env=default_gate_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+            self.assertEqual(0, gate_result.returncode, gate_result.stdout + gate_result.stderr)
+            self.assertIn("No Git worktree detected", gate_result.stdout)
+            self.assertNotIn("outside.txt", gate_result.stderr)
+
+    @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    def test_release_gate_does_not_require_stenc_by_default(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "new-wiki"
+            init_result = subprocess.run(
+                ["./init-vault.sh", str(target)],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
+
+            minimal_test = (
+                "import unittest\n\n"
+                "class MinimalReleaseGateTest(unittest.TestCase):\n"
+                "    def test_minimal(self):\n"
+                "        self.assertTrue(True)\n"
+            )
+            (target / "tests" / "test_wiki_quality_baseline.py").write_text(minimal_test)
+            (target / "tests" / "test_wiki_tools.py").write_text(minimal_test)
+            default_gate_env = os.environ.copy()
+            default_gate_env.pop("WIKI_ENABLE_STENC", None)
+            gate_result = subprocess.run(
+                ["scripts/release_gate.sh"],
+                cwd=target,
+                env=default_gate_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, gate_result.returncode, gate_result.stdout + gate_result.stderr)
+            self.assertIn("Stenc checks skipped", gate_result.stdout)
 
     def test_ingest_source_cli_registers_raw_source(self):
         root = Path(__file__).resolve().parents[1]

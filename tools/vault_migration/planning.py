@@ -24,6 +24,7 @@ _REQUIRED_TOPOLOGY = (
     "wiki/index.md",
     "wiki/log.md",
     "tools/wiki/cli.py",
+    "scripts/release_gate.sh",
 )
 _LEGACY_BUILDER_COPIES = ("init-vault.sh", "scripts/bootstrap.sh")
 _SYSTEM_SYMLINK_COMPONENTS = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})

@@ -2,7 +2,7 @@
 
 이 문서는 LLM Wiki를 운영하고 관리할 때 쓰는 프롬프트 모음입니다.
 
-목표는 단순히 `ingest`나 `update`를 요청하는 것이 아니라, 현재 vault의 품질 경계인 source registry, semantic draft, publish gate, provenance, review queue, generated maps, maintenance metrics, quality checks를 일관되게 사용하게 만드는 것입니다.
+목표는 단순히 `ingest`나 `update`를 요청하는 것이 아니라, 현재 vault의 품질 경계인 source registry, semantic draft, publish gate, provenance, review queue, generated maps, maintenance metrics, release gate를 일관되게 사용하게 만드는 것입니다.
 
 ## 사용 원칙
 
@@ -10,14 +10,14 @@
 - durable 변경은 `scratch/drafts/`의 JSON draft와 `publish-draft` 또는 `publish-batch`를 거치게 합니다.
 - 의미 있는 변경은 `wiki/index.md`, `wiki/log.md`, `scratch/reports/`까지 확인하게 합니다.
 - 충돌, 병합, human-lock, 중요한 판단은 `scratch/review/`로 분리하게 합니다.
-- 완료 요청에는 결정론적 wiki 검사 명령을 포함합니다.
+- 완료 요청에는 `scripts/release_gate.sh`를 포함합니다.
 
 ## 공통 운영 프롬프트
 
 ```text
 AGENTS.md와 wiki/index.md를 먼저 읽고, 현재 vault 구조 기준으로 작업해주세요.
 raw/는 수정하지 말고, durable 변경은 scratch/drafts/ JSON draft와 publish-draft 또는 publish-batch gate를 통해서만 반영해주세요.
-변경이 의미 있으면 wiki/index.md, wiki/log.md, scratch/reports/까지 포함하고, 완료 전 결정론적 wiki 검사 명령을 실행해주세요.
+변경이 의미 있으면 wiki/index.md, wiki/log.md, scratch/reports/까지 포함하고, 완료 전 scripts/release_gate.sh를 실행해주세요.
 ```
 
 ## Source Registry 점검
@@ -214,12 +214,12 @@ drift가 있다면 어떤 raw source가 바뀌었는지, 어떤 source page와 d
 raw file은 수정하지 말고, 필요한 재검토 작업만 report 또는 review item으로 남겨주세요.
 ```
 
-## 완료 검증 요청
+## Release Gate 완료 요청
 
 ```text
 이번 wiki 변경이 완료 가능한 상태인지 검증해주세요.
 lint --report, health, maps build --check --report, metrics --check --report를 확인하고,
-최종적으로 결정론적 wiki 검사 명령을 실행해주세요.
+최종적으로 scripts/release_gate.sh를 실행해주세요.
 실패하면 원인, 관련 file, 수정 draft 또는 review item으로 나눠 보고해주세요.
 ```
 
@@ -227,7 +227,7 @@ lint --report, health, maps build --check --report, metrics --check --report를 
 
 ```text
 이번 주 wiki 운영 리뷰를 해주세요.
-새 source, 업데이트된 durable page, query capture, unresolved review, source drift, stale maps, metrics risk, quality checks 상태를 요약하고,
+새 source, 업데이트된 durable page, query capture, unresolved review, source drift, stale maps, metrics risk, release gate 상태를 요약하고,
 다음 주에 ingest/update/review해야 할 우선순위를 제안해주세요.
 ```
 
@@ -235,7 +235,7 @@ lint --report, health, maps build --check --report, metrics --check --report를 
 
 ```text
 <domain/topic>을 이 vault의 LLM-Wiki 구조로 체계적으로 구축해주세요.
-source registry 점검 -> 관련 source ingest -> taxonomy 설계 -> concept/system/workflow/decision/comparison/timeline 후보 추출 -> claim provenance table 구성 -> contradiction/review 분리 -> batch draft 작성 -> publish-batch --report -> maps build -> metrics --check -> 결정론적 wiki 검사 명령 순서로 진행해주세요.
+source registry 점검 -> 관련 source ingest -> taxonomy 설계 -> concept/system/workflow/decision/comparison/timeline 후보 추출 -> claim provenance table 구성 -> contradiction/review 분리 -> batch draft 작성 -> publish-batch --report -> maps build -> metrics --check -> scripts/release_gate.sh 순서로 진행해주세요.
 각 단계마다 변경 파일, 보고서, 남은 human decision을 명확히 알려주세요.
 ```
 
@@ -245,5 +245,5 @@ source registry 점검 -> 관련 source ingest -> taxonomy 설계 -> concept/sys
 현재 vault를 maintenance 관점에서 복구해주세요.
 lint --report, health, source-registry --report, merge scan --report --create-review, maps build --check --report, metrics --check --report를 순서대로 확인하고,
 자동으로 고칠 수 있는 구조 문제는 draft로, judgment가 필요한 문제는 scratch/review/로 분리해주세요.
-마지막에 결정론적 wiki 검사 명령으로 완료 가능 여부를 검증해주세요.
+마지막에 scripts/release_gate.sh로 완료 가능 여부를 검증해주세요.
 ```

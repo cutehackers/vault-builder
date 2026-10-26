@@ -587,7 +587,31 @@ def _run_audit(args: argparse.Namespace) -> int:
     if outputs:
         _write_outputs(tuple(outputs))
     print(rendered, end="")
+    if _has_uncommitted_git_changes(target):
+        print(
+            "audit: warning: target has uncommitted Git changes. Commit them before apply.",
+            file=sys.stderr,
+        )
     return 2 if plan.has_blocking_actions else 0
+
+
+def _has_uncommitted_git_changes(target: Path) -> bool:
+    """Return True only when Git reports changes beneath the target.
+
+    Missing Git, a non-repository target, or any Git error yields False so the
+    warning never changes audit results. --no-optional-locks keeps audit from
+    refreshing the target index.
+    """
+    try:
+        status = subprocess.run(
+            ["git", "--no-optional-locks", "-C", str(target), "status", "--porcelain", "--", "."],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return status.returncode == 0 and bool(status.stdout.strip())
 
 
 def _run_apply(args: argparse.Namespace) -> int:

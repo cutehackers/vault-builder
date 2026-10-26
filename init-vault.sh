@@ -75,6 +75,25 @@ if [[ -e "${TARGET_DIR}/wiki/index.md" || -e "${TARGET_DIR}/tools/wiki/cli.py" ]
   exit 1
 fi
 
+choose_python() {
+  local candidate
+  for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
+    if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then
+      if "${candidate}" - <<'PY' >/dev/null 2>&1; then
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+        echo "${candidate}"
+        return 0
+      fi
+    fi
+  done
+  echo "Missing required command: Python 3.10 or newer" >&2
+  exit 1
+}
+
+PYTHON_BIN="$(choose_python)"
+
 mkdir -p "${TARGET_DIR}"
 
 copy_file() {
@@ -133,6 +152,7 @@ mkdir -p "${TARGET_DIR}/docs"
 
 copy_file ".gitignore"
 copy_file "AGENTS.md"
+copy_file "CLAUDE.md"
 copy_file "README.md"
 copy_file "README-kr.md"
 copy_file "docs/LLM-WIKI.md"
@@ -141,7 +161,11 @@ copy_file "docs/USER_PROMPTS.md"
 copy_file "docs/VAULT_PROMPTS.md"
 copy_tree ".github"
 copy_tree ".agents"
+copy_file ".claude/skills/wiki-ingest/SKILL.md"
+copy_file ".claude/skills/wiki-update/SKILL.md"
+copy_file ".claude/skills/wiki-query/SKILL.md"
 copy_tree "docs/agent"
+copy_file "scripts/release_gate.sh"
 copy_tree "tools/wiki"
 copy_tree "tests"
 copy_tree "wiki"
@@ -160,24 +184,28 @@ touch "${TARGET_DIR}/raw/assets/.gitkeep"
 touch "${TARGET_DIR}/raw/imports/.gitkeep"
 touch "${TARGET_DIR}/scratch/reports/.gitkeep"
 
-choose_python() {
-  local candidate
-  for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
-    if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then
-      if "${candidate}" - <<'PY' >/dev/null 2>&1; then
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
-        echo "${candidate}"
-        return 0
-      fi
-    fi
-  done
-  echo "Missing required command: Python 3.10 or newer" >&2
-  exit 1
-}
+chmod 0755 "${TARGET_DIR}/scripts/release_gate.sh" 2>/dev/null || true
 
-PYTHON_BIN="$(choose_python)"
+# .mcp.json is machine-specific (chosen interpreter, absolute path), so it is not a managed file.
+# Record the absolute interpreter path: Claude Code may start MCP servers with a PATH that lacks it.
+PYTHON_ABS="$(command -v "${PYTHON_BIN}")"
+"${PYTHON_BIN}" - "${PYTHON_ABS}" "${TARGET_DIR}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+python_bin, target_dir = str(Path(sys.argv[1]).absolute()), Path(sys.argv[2]).resolve()
+config = {
+    "mcpServers": {
+        "llm-wiki": {
+            "command": python_bin,
+            "args": [str(target_dir / "tools" / "wiki" / "mcp_server.py")],
+        }
+    }
+}
+(target_dir / ".mcp.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+PY
+
 "${PYTHON_BIN}" "${SCRIPT_DIR}/tools/vault_migration/cli.py" manifest \
   --builder-root "${SCRIPT_DIR}" \
   --target "${TARGET_DIR}" \

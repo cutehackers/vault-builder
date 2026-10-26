@@ -117,8 +117,8 @@ raw source
 - 중요한 claim은 원본 자료나 기존 durable wiki page에 근거해야 합니다.
 - `human-locked` page와 section은 보존해야 합니다.
 - 모순은 조용히 해결하지 말고 기록해야 합니다.
-- 완료 여부는 `AGENTS.md`에 정의된 결정론적 wiki 검사 명령으로 확인합니다. 이
-  검사는 wiki 작업이 완료되었다고 판단하기 전에 agent와 CI가 실행합니다.
+- 완료 여부는 `scripts/release_gate.sh` gate로 확인합니다. 이 gate는 wiki 작업이
+  완료되었다고 판단하기 전에 agent와 CI가 처리합니다.
 - 사용자는 skill을 공개 인터페이스로 사용하고, 결정론적 도구는 그 뒤의 구현
   계층으로 보면 됩니다.
 

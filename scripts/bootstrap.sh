@@ -20,7 +20,7 @@ Environment:
   VAULT_BUILDER_REF=main           Git ref to download. Defaults to main.
   VAULT_BUILDER_ARCHIVE_URL=url    Override the downloaded tarball URL.
   VAULT_BOOTSTRAP_WITH_STENC=1     Include optional Stenc docs and helper tools.
-  VAULT_BOOTSTRAP_VERIFY=quick     quick runs lint and health. full runs tests and all wiki quality checks.
+  VAULT_BOOTSTRAP_VERIFY=quick     quick runs lint and health. full also runs scripts/release_gate.sh.
 EOF
 }
 
@@ -148,10 +148,22 @@ VAULT_BUILDER_REVISION="${REF}" \
 
   if [[ "${VERIFY_MODE}" == "full" ]]; then
     echo
-    echo "Running full wiki quality checks..."
-    "${PYTHON_BIN}" -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
-    "${PYTHON_BIN}" tools/wiki/cli.py maps build --check --report
-    "${PYTHON_BIN}" tools/wiki/cli.py metrics --check --report
+    echo "Running full release gate..."
+    release_gate_env=(
+      env
+      -u VAULT_BOOTSTRAP_VERIFY
+      -u VAULT_BOOTSTRAP_WITH_STENC
+      -u VAULT_BUILDER_ARCHIVE_URL
+      -u VAULT_BUILDER_REPO
+      -u VAULT_BUILDER_REF
+      -u VAULT_NAME
+      "PYTHON=${PYTHON_BIN}"
+    )
+    if [[ "${WITH_STENC}" -eq 1 ]]; then
+      release_gate_env+=("WIKI_ENABLE_STENC=1")
+    fi
+    release_gate_env+=(scripts/release_gate.sh)
+    "${release_gate_env[@]}"
   elif [[ "${VERIFY_MODE}" != "quick" ]]; then
     echo "Unknown VAULT_BOOTSTRAP_VERIFY value: ${VERIFY_MODE}" >&2
     echo "Use quick or full." >&2
