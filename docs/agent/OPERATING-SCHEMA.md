@@ -361,7 +361,7 @@ A durable wiki update is incomplete until:
 - Contradictions were recorded instead of erased.
 - Human-review items were moved to `scratch/review/` when judgment is required.
 - Non-trivial ingest, repair, or audit work produced a report in `scratch/reports/`.
-- The deterministic wiki validation commands succeed before reporting that durable state is final.
+- The repo-level completion gate `scripts/release_gate.sh` succeeds before reporting that durable state is final.
 
 Quality fields in frontmatter must be treated as validation state. Agents may propose them in drafts, but deterministic tooling or explicit manual review must verify them before marking pages as valid.
 
@@ -1121,7 +1121,7 @@ Check for:
 - Generated navigation maps that are stale relative to current wiki state.
 - Report paths or generated query-capture draft paths that escape `scratch/reports/` or `scratch/drafts/`.
 
-The full validation sequence also runs tests, health, `maps build --check`, `metrics --check`, and `git diff --check`.
+The full release gate also runs tests, health, `maps build --check`, `metrics --check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` in a temporary repo copy.
 
 ### 9.2 Lint Report
 
@@ -1504,7 +1504,7 @@ A wiki operation is complete only when:
 - `wiki/index.md` was updated.
 - `wiki/log.md` was appended.
 - Any uncertainty was clearly marked.
-- The deterministic wiki validation commands passed.
+- `scripts/release_gate.sh` passed.
 - The final human response states what changed.
 
 ---

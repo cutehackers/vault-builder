@@ -20,11 +20,29 @@
       "policy": "replace-if-unmodified",
       "sha256": "809ec116fd83ab59de2d81cb4a9302e7e7b1188bf7c6e168e286ae5aa262397a"
     },
+    ".claude/skills/wiki-ingest/SKILL.md": {
+      "mode": "0644",
+      "path": ".claude/skills/wiki-ingest/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "1d6efdf2d228f35054364bda17fa6004f516591654f5568522f56d2b22c0f944"
+    },
+    ".claude/skills/wiki-query/SKILL.md": {
+      "mode": "0644",
+      "path": ".claude/skills/wiki-query/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "75ac4c2308f7a0e9cd4054b2d25b5c58f67421c8cd157ec5b178c605c6014cef"
+    },
+    ".claude/skills/wiki-update/SKILL.md": {
+      "mode": "0644",
+      "path": ".claude/skills/wiki-update/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "d52e2f439020928d3878f642a3e7e6df4532101103d571b23af9ca0da08cc143"
+    },
     ".github/workflows/release-gate.yml": {
       "mode": "0644",
       "path": ".github/workflows/release-gate.yml",
       "policy": "replace-if-unmodified",
-      "sha256": "a6af4b620973440b1c5aa84ebcd3c8500b8ba2296ef3556f9e622e9b0bdd4fa3"
+      "sha256": "aa47224e6e7cac000eb09d5b44ed4f74b3cb31718b27d3e8889ee7c689e8b3c9"
     },
     ".gitignore": {
       "mode": "0644",
@@ -36,55 +54,67 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "03309691a6b0e8b40195696113f0a6a5f95a7a3df536b9038434c124cc87f51d"
+      "sha256": "36391bc63605212882d588e19dfbf0909183aba3fc07b6d9177b2a8d36f1da40"
+    },
+    "CLAUDE.md": {
+      "mode": "0644",
+      "path": "CLAUDE.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "bd0f539720dc33c9c02e41e776a182ad1671880bff5e568844de2f3ade604896"
     },
     "README-kr.md": {
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "fdf2d6e1ec106c045d9e25668e8cc6e3b58f3c45e64768bfd9c09ac78118f078"
+      "sha256": "27ed48fc9ec218f03fcce15439777f3a05290a08092ac79a74e31b4f59e5fe70"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "fee57e2c49b03cd600cbb6378b32c40b3d54c7bc54abe665011126ae291ba7eb"
+      "sha256": "69fb585b1b13f53b4a52a2ab317880be90337f108a20799759aa1ae4ce9520ea"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "4b654d94b12999cc367f8d2d6704333867dfc4219c723cf3d430484144c6cbed"
+      "sha256": "e517f16decada8b76491d6ffcd620c7b9f89f2141cba11ca190238d56a287063"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
       "path": "docs/USER_PROMPTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "4c6b43f430753f1ee7c4cd020f180532167f4f3d8d6071057a9f553555b2b621"
+      "sha256": "c97fc3ac252fede9c34b8eceda7a04152dfaac0df38171dbb047625fdfa05561"
     },
     "docs/VAULT_PROMPTS.md": {
       "mode": "0644",
       "path": "docs/VAULT_PROMPTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "581f0e7ebd878bc9c4acf39371988bb125dbc8485f0b78c4720fda9b35bc8d50"
+      "sha256": "817ede5fcdb9af91b79f624df5333aed10b25c608e3729973b3d51e6aea5d6b4"
     },
     "docs/agent/DRAFTS.md": {
       "mode": "0644",
       "path": "docs/agent/DRAFTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "45225fa91a6a485223a178d2b4d7a8d209019464d38a2245c2cb1174163f08ad"
+      "sha256": "2ffad2f38971a83bb64bdbf0c9ca414d9c97d222252335e179e52cfc36523514"
     },
     "docs/agent/OPERATING-SCHEMA.md": {
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "694b4f2d8a2780470b277daf9e6356857f9b3e8261d49b038d97c9b1daca6450"
+      "sha256": "5c69840728e606afc5ab82c0f20b73b8b0ac101fc08e0d3b95c587980f4b2333"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "adadca4e48b8c11685ad1bfd0350c3c92bb068828af49dd3c3b145dbb774035f"
+      "sha256": "f177c4a81e5a118271beeca28c20ca3ad95c24bcc7bbdd53fb617e56811d0237"
+    },
+    "scripts/release_gate.sh": {
+      "mode": "0755",
+      "path": "scripts/release_gate.sh",
+      "policy": "replace-if-unmodified",
+      "sha256": "7523a885536fa49cb4a2889570a9d64458c06c189227f85f0014c3ab43c4870c"
     },
     "tests/__init__.py": {
       "mode": "0644",
@@ -96,13 +126,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_quality_baseline.py",
       "policy": "replace-if-unmodified",
-      "sha256": "d132d179dd4de2b462f8a9a32de79053c9216f3feb58825a085c50b0a6c3f596"
+      "sha256": "11140e762ea9c1b0fa184fc0efc67a5f995985cb5ddf67d938374892935e02c9"
     },
     "tests/test_wiki_tools.py": {
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "3024a47e3d1e4ba230e260183952d14112a5429e7c4d6ea8f846b1df293d9200"
+      "sha256": "1d3432d603bdc8f3c2872212b513c14013c83deb00c7cdc2d4c540b6e15e9be0"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -204,7 +234,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/vault_manifest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "ea2e3607251bb2100f00fc2ee08fa65318afaa937c215ab856ac6b2a77682dbd"
+      "sha256": "2f62dd0637b02aaeab1d4847363f92e78eb6dc54a978a63b26077fd599bf662c"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",

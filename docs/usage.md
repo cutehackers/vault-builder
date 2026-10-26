@@ -565,7 +565,7 @@ python3 tools/wiki/cli.py merge scan --report --create-review
 python3 tools/wiki/cli.py maps build --report
 ```
 
-CI 검증에서는 stale map을 막기 위해 check mode를 사용합니다.
+CI/release gate에서는 stale map을 막기 위해 check mode를 사용합니다.
 
 ```bash
 python3 tools/wiki/cli.py maps build --check --report
@@ -648,7 +648,7 @@ schema: update agent operating contract
 
 ```bash
 git status --short
-python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
+scripts/release_gate.sh
 # Stage the files listed by git status --short.
 git add -- wiki/example.md scratch/reports/example.md
 git commit -m "wiki: update example concept"
@@ -656,13 +656,13 @@ git commit -m "wiki: update example concept"
 
 `git add` 대상은 `git status --short`에 나온 실제 변경 파일입니다. Wiki content만 바꾼 경우에는 보통 `wiki/`, `scratch/reports/`, `scratch/drafts/`, `scratch/review/`가 포함될 수 있고, workflow/tooling 개선에서는 `docs/`, `tools/`, `scripts/`, `.github/`도 함께 stage해야 합니다.
 
-CI와 로컬 검증은 tests, lint, health, maps, metrics 명령을 직접 실행합니다. 각 명령은 필요한 경우 `--report` 옵션으로 결과를 기록합니다.
+`scripts/release_gate.sh`는 임시 복사본에서 tests, lint, health, maps, metrics를 실행합니다. 검증 중 생기는 report나 test artifact가 현재 vault를 오염시키지 않으며, 같은 gate는 `.github/workflows/release-gate.yml`에서도 실행됩니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다.
 
 ## 18. 전체 명령 요약
 
 | 목적 | 명령 |
 |---|---|
-| 전체 wiki 검사 | `python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py` |
+| 전체 release gate 실행 | `scripts/release_gate.sh` |
 | 전체 wiki 검사 | `python3 tools/wiki/cli.py lint --report` |
 | 전체 wiki 상태 점검 | `python3 tools/wiki/cli.py health` |
 | page 하나 검사 | `python3 tools/wiki/cli.py validate-page wiki/overview.md` |
@@ -702,4 +702,4 @@ wiki 작업은 다음 조건을 만족해야 완료입니다.
 - 보고서가 `scratch/reports/`에 있습니다.
 - human lock을 보존했습니다.
 - contradiction을 지우지 않고 기록했습니다.
-- 결정론적 wiki 검사 명령이 통과합니다.
+- `scripts/release_gate.sh`가 통과합니다.

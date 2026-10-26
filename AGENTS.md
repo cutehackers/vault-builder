@@ -57,15 +57,10 @@ raw source
 
 ## Required Commands
 
-Run the deterministic wiki checks:
+Run the full release gate:
 
 ```bash
-python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
-python3 tools/wiki/cli.py lint --report
-python3 tools/wiki/cli.py health
-python3 tools/wiki/cli.py maps build --check --report
-python3 tools/wiki/cli.py metrics --check --report
-git diff --check
+scripts/release_gate.sh
 ```
 
 Validate one page:
@@ -159,4 +154,4 @@ A wiki task is not complete until:
 - source drift is checked when source pages have hashes,
 - index/log/report updates are present when required,
 - human locks are preserved,
-- deterministic wiki checks exit successfully.
+- `scripts/release_gate.sh` exits successfully.
