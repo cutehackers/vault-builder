@@ -44,6 +44,7 @@ EXCLUDED_NAVIGATION_PAGES = {
 ALLOWED_CLAIM_STATUSES = {"stated", "inferred", "contested", "deprecated", "superseded"}
 SUPERSEDED_BY_MARKER = "superseded by:"
 LIFECYCLE_LIST_FIELDS = {"aliases", "redirects", "supersedes", "superseded_by"}
+PROJECT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ def lint_repo(root: Path | str) -> LintResult:
         issues.extend(validate_page_links(page, wiki_root))
         issues.extend(validate_provenance(page, repo_root))
         issues.extend(validate_lifecycle(page, wiki_root))
+        issues.extend(validate_project(page))
         issues.extend(validate_human_locks(page))
         issues.extend(validate_source_hash(page, repo_root))
         if page.path.name == "log.md":
@@ -411,6 +413,39 @@ def validate_lifecycle(page: Page, wiki_root: Path) -> list[Issue]:
             )
         )
     return issues
+
+
+def validate_project(page: Page) -> list[Issue]:
+    """Check the optional project field: one project id or a list of project ids."""
+    if not page.frontmatter or "project" not in page.frontmatter:
+        return []
+
+    value = page.frontmatter["project"]
+    values = value if isinstance(value, list) else [value]
+    invalid = [item for item in values if not isinstance(item, str) or not PROJECT_ID_PATTERN.match(item)]
+    if not invalid:
+        return []
+    return [
+        Issue(
+            severity="error",
+            code="invalid-project-field",
+            path=str(page.path),
+            message=(
+                "project must be a project id or a list of project ids matching "
+                f"{PROJECT_ID_PATTERN.pattern}: {', '.join(repr(item) for item in invalid)}."
+            ),
+        )
+    ]
+
+
+def project_ids(value: object) -> list[str]:
+    """Normalize a project field value to its valid project ids, in order, without duplicates."""
+    values = value if isinstance(value, list) else [value]
+    ids: list[str] = []
+    for item in values:
+        if isinstance(item, str) and PROJECT_ID_PATTERN.match(item) and item not in ids:
+            ids.append(item)
+    return ids
 
 
 def _validate_lifecycle_target(

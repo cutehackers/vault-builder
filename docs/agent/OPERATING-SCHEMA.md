@@ -353,7 +353,10 @@ superseded_by: []
 review_after: YYYY-MM-DD
 canonical_source: "raw/..."
 raw_sha256: "..."
+project: project-id           # or [project-id, other-project-id]
 ```
+
+`project` is a project id or a list of project ids. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value as an error. `maps build` collects these pages into `wiki/maps/projects/<project id>.md`: decisions that are not deprecated go under `## Current Decisions`, pages tagged `correction` or `rule` go under `## Corrections and Rules`, and other project pages stay in the topic map and index only.
 
 ### 4.2 Quality Gate Rule
 
@@ -1348,10 +1351,13 @@ Each inbox item should follow:
 ## [YYYY-MM-DD] Short Title
 
 Status: unprocessed | processed | deferred
+Project: <project id>
 Source: ...
 Note: ...
 Next action: ...
 ```
+
+`Project:` is optional. When it is present and `Status` is `unprocessed` or `deferred`, `maps build` lists the item under `## Open Work` in `wiki/maps/projects/<project id>.md`.
 
 During lint, process or defer inbox items.
 

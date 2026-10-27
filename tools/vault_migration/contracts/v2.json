@@ -78,7 +78,7 @@
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "09861d1b0f9dbaddf785fe8b1388e19952bd5e5b371dc1c78837c70e3fb7971c"
+      "sha256": "0b90dfd14cb4ac47c65b13d489798df208c74791cf5045963dea57bdf9cc9f36"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -102,7 +102,7 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "d77b5e1fac74c34af2ab507595dfa8ef160380a596dac46203594bdbaa3cb9b0"
+      "sha256": "7a2bad8742dae4060b5c00ae0d9cfe6eebd7ff2d4ccdb5a972e0bfdb38d45ecf"
     },
     "docs/usage.md": {
       "mode": "0644",
@@ -132,7 +132,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "8a688c0837883322580e7ab5c3e96591a136a912a1613ff6d92d56fe1dc83de6"
+      "sha256": "b0bd753bcdda5ae4df12013f297a11c7aa1d2dfc648a7a9f983ac3e082df3528"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -176,6 +176,12 @@
       "policy": "replace-if-unmodified",
       "sha256": "15801088742a8d11df66598325208cedec00c4cbc786e203e054deeb01437965"
     },
+    "tools/wiki/lib/inbox.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/inbox.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "a11634df2bebb0631b03e7ff8c7893f60206cdd2138ad66366dd2d2d192f53a3"
+    },
     "tools/wiki/lib/ingest.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/ingest.py",
@@ -192,13 +198,13 @@
       "mode": "0644",
       "path": "tools/wiki/lib/lint.py",
       "policy": "replace-if-unmodified",
-      "sha256": "6f38f5f9a183a1933f44f67f89d0dd31e1dc74df380f9488cfb5754df5a5e8c5"
+      "sha256": "c9e5bc0581f03e91475dedc9ce9b9911700117e4644e57a564a8669a31a8b15d"
     },
     "tools/wiki/lib/maps.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/maps.py",
       "policy": "replace-if-unmodified",
-      "sha256": "82cf476ab3db61ec4d6c9412c8a4a8ea3e4f948abee4318d1ba23712add24264"
+      "sha256": "f96a875009145491f5af97b094845004e9c36be6d0eb3eac14ea6c8d14f99ccb"
     },
     "tools/wiki/lib/merge.py": {
       "mode": "0644",
@@ -246,7 +252,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/vault_manifest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "75666545c90f4efcc6c3bc3374b700d127c45088a2159f51afc9eccfa23d6876"
+      "sha256": "987eab1569cb1a24634a9eded7d8a7b3da837c08ec4fe868c810ac0498a025b6"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",
