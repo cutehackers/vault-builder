@@ -41,7 +41,8 @@ EXCLUDED_NAVIGATION_PAGES = {
     "maps/README",
 }
 
-ALLOWED_CLAIM_STATUSES = {"stated", "inferred", "contested", "deprecated"}
+ALLOWED_CLAIM_STATUSES = {"stated", "inferred", "contested", "deprecated", "superseded"}
+SUPERSEDED_BY_MARKER = "superseded by:"
 LIFECYCLE_LIST_FIELDS = {"aliases", "redirects", "supersedes", "superseded_by"}
 
 
@@ -78,6 +79,14 @@ class ClaimEvidenceRow:
     status: str
     evidence: str
     line: int
+
+
+@dataclass(frozen=True)
+class ClaimEvidenceTable:
+    headers: list[str]
+    rows: list[ClaimEvidenceRow]
+    start_line: int
+    end_line: int
 
 
 @dataclass(frozen=True)
@@ -550,6 +559,17 @@ def _validate_claim_level_provenance(page: Page, repo_root: Path | None, source_
                 )
             )
 
+        if status == "superseded" and SUPERSEDED_BY_MARKER not in row.evidence.lower():
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="superseded-claim-without-replacement",
+                    path=str(page.path),
+                    message="A superseded claim must name its replacement with 'Superseded by:' in its evidence.",
+                    line=row.line,
+                )
+            )
+
         evidence = row.evidence.strip()
         if not evidence:
             issues.append(
@@ -576,7 +596,9 @@ def _validate_claim_level_provenance(page: Page, repo_root: Path | None, source_
             )
             continue
         evidence_refs.update(row_refs)
-        issues.extend(_validate_claim_evidence_sources(page, evidence, repo_root, row.line))
+        issues.extend(
+            _validate_claim_evidence_sources(page, _evidence_before_replacement(evidence), repo_root, row.line)
+        )
 
     expected_source_count = _coerce_source_count(source_count)
     if expected_source_count is not None and expected_source_count != len(evidence_refs):
@@ -595,21 +617,30 @@ def _validate_claim_level_provenance(page: Page, repo_root: Path | None, source_
 
 
 def _extract_claim_evidence_rows(body: str) -> list[ClaimEvidenceRow]:
+    table = claim_evidence_table(body)
+    return table.rows if table is not None else []
+
+
+def claim_evidence_table(body: str) -> ClaimEvidenceTable | None:
+    """Return the first Claim/Status/Evidence table with its normalized headers and last line."""
     lines = body.splitlines()
+    fenced = fenced_line_flags(lines)
     for index, line in enumerate(lines):
-        if not line.lstrip().startswith("|"):
+        if fenced[index] or not line.lstrip().startswith("|"):
             continue
-        headers = [_normalize_table_header(cell) for cell in _split_markdown_table_row(line)]
+        headers = [_normalize_table_header(cell) for cell in split_markdown_table_row(line)]
         required = {"claim", "status", "evidence"}
         if not required.issubset(set(headers)):
             continue
         header_index = {header: headers.index(header) for header in required}
         rows: list[ClaimEvidenceRow] = []
+        end_line = index + 1
         for row_index in range(index + 1, len(lines)):
             row_line = lines[row_index]
             if not row_line.lstrip().startswith("|"):
                 break
-            cells = _split_markdown_table_row(row_line)
+            end_line = row_index + 1
+            cells = split_markdown_table_row(row_line)
             if _is_markdown_table_separator(cells):
                 continue
             if len(cells) <= max(header_index.values()):
@@ -622,12 +653,48 @@ def _extract_claim_evidence_rows(body: str) -> list[ClaimEvidenceRow]:
                     line=row_index + 1,
                 )
             )
-        return rows
-    return []
+        return ClaimEvidenceTable(headers=headers, rows=rows, start_line=index + 1, end_line=end_line)
+    return None
 
 
-def _split_markdown_table_row(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+def count_claim_evidence_refs(body: str) -> int:
+    """Count unique evidence refs the way the source_count check does."""
+    refs: set[str] = set()
+    for row in _extract_claim_evidence_rows(body):
+        if row.evidence.strip():
+            refs.update(_extract_claim_evidence_refs(row.evidence.strip()))
+    return len(refs)
+
+
+def split_markdown_table_row(line: str) -> list[str]:
+    """Split a table row on unescaped pipes; escaped pipes stay inside their cell."""
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith("\\|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", stripped)]
+
+
+def fenced_line_flags(lines: list[str]) -> list[bool]:
+    """Mark lines that belong to fenced code blocks, fence lines included."""
+    flags: list[bool] = []
+    fence: str | None = None
+    for line in lines:
+        if fence is None:
+            opening = re.match(r"^\s{0,3}(`{3,}|~{3,})(.*)$", line)
+            # A backtick fence's info string cannot contain a backtick, so ```code``` is inline text.
+            if opening and not (opening.group(1)[0] == "`" and "`" in opening.group(2)):
+                fence = opening.group(1)
+                flags.append(True)
+            else:
+                flags.append(False)
+            continue
+        flags.append(True)
+        closing = re.match(r"^\s{0,3}(`{3,}|~{3,})\s*$", line)
+        if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence):
+            fence = None
+    return flags
 
 
 def _normalize_table_header(value: str) -> str:
@@ -638,7 +705,14 @@ def _is_markdown_table_separator(cells: list[str]) -> bool:
     return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
 
 
+def _evidence_before_replacement(evidence: str) -> str:
+    """Text after "Superseded by:" names the replacement claim; it is not evidence."""
+    marker_at = evidence.lower().find(SUPERSEDED_BY_MARKER)
+    return evidence if marker_at == -1 else evidence[:marker_at]
+
+
 def _extract_claim_evidence_refs(evidence: str) -> set[str]:
+    evidence = _evidence_before_replacement(evidence)
     refs = {f"wiki:{target}" for target in find_wiki_links(evidence)}
     refs.update(f"raw:{ref.path}" for ref in _extract_raw_evidence_refs(evidence))
     if "Human instruction" in evidence or "explicit human instruction" in evidence.lower():

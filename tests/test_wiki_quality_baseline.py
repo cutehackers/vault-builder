@@ -172,6 +172,8 @@ class WikiQualityBaselineTest(unittest.TestCase):
             "wiki_tests+=(builder_tests/test_vault_migration.py)",
             '"$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"',
             'run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"',
+            "WIKI_GATE_FULL",
+            "llm-wiki-gate-tests.cache",
             "$PYTHON_BIN tools/wiki/cli.py lint --report",
             "$PYTHON_BIN tools/wiki/cli.py health",
             "$PYTHON_BIN tools/wiki/cli.py maps build --check --report",

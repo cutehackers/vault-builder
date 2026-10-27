@@ -1,7 +1,8 @@
 {
   "max": {
-    "pending_reviews": 0,
-    "contested_claim_rows": 0,
+    "pending_reviews": null,
+    "unresolved_review_max_age_days": 14,
+    "contested_claim_rows": null,
     "unreviewed_contested_claim_rows": 0,
     "stale_sources": 0,
     "unregistered_sources": 0,

@@ -86,7 +86,14 @@ python3 tools/wiki/cli.py workflow update --target wiki/overview.md --preflight 
 python3 tools/wiki/cli.py workflow query --question "..." --mode answer-with-report --report
 ```
 
-Apply a validated semantic draft:
+Find and read durable knowledge (MCP: `wiki_search`, `wiki_read_page`):
+
+```bash
+python3 tools/wiki/cli.py search "keywords" --type decision
+python3 tools/wiki/cli.py read wiki/decisions/example.md --section "## Decision"
+```
+
+Apply a validated semantic draft (`patch-page` drafts change one claim or section; see `docs/agent/DRAFTS.md`):
 
 ```bash
 python3 tools/wiki/cli.py publish-draft scratch/drafts/example.json --report
@@ -142,6 +149,8 @@ raw_sha256: "..."
 ## Task Routing
 
 For ingest, update, or query tasks, follow the matching guide under `.agents/skills/`, read `wiki/index.md` plus relevant pages or sources, preserve locks and provenance, and use drafts with `publish-draft` for durable changes. Use workflow checkpoints and write reports when applicable.
+
+When a newer statement from the same authority replaces an older claim, mark the old claim `superseded` instead of `contested` (`docs/agent/OPERATING-SCHEMA.md` section 2.3.1).
 
 For lint or repair tasks, run `python3 tools/wiki/cli.py lint --report`, fix deterministic issues directly when safe, put judgment-heavy items under `scratch/review/`, and append `wiki/log.md`.
 

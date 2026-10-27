@@ -185,6 +185,16 @@ If the contradiction is local, record it in the relevant page.
 
 If the contradiction is high-impact or recurring, create `wiki/claims/` and add a dedicated claim page.
 
+### 2.3.1 A Newer Statement Supersedes, It Does Not Contradict
+
+A changed decision or a correction is not a contradiction. When the same authority states something newer, such as a later human instruction replacing an earlier one, or a newer version of the same document, record the change instead of opening a review:
+
+1. Mark the old claim row `superseded` with `Superseded by: <new claim>` in its evidence. A `supersede-claim` patch edit does this in one step.
+2. Add the new claim row with its own evidence and date.
+3. Keep the old row. It is the history of why the page changed.
+
+Use `contested` and a review item only when independent sources disagree, or when it is unclear which statement is newer or which authority applies. If the whole page is replaced by another page, set the page `status` to `deprecated` and fill `superseded_by`.
+
 ### 2.4 Preserve Human Edits
 
 If a page contains this marker, do not overwrite it without explicit approval:

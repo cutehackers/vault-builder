@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import subprocess
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -79,6 +79,16 @@ def _minimal_vault(root: Path) -> None:
             "# Log\n\n## [2026-05-26] repair | Initial\n\n- Initial log entry.",
         )
     )
+
+
+def _shipped_policy_without_orphan_gate(root: Path) -> Path:
+    """The shipped metrics policy, minus the orphan gate that a bare minimal vault trips."""
+    shipped = Path(__file__).resolve().parents[1] / "tools" / "wiki" / "metrics-policy.json"
+    policy = json.loads(shipped.read_text())
+    policy["max"]["orphan_pages"] = None
+    policy_path = root / "policy.json"
+    policy_path.write_text(json.dumps(policy))
+    return policy_path
 
 
 def _has_stenc_bundle(root: Path) -> bool:
@@ -1159,6 +1169,21 @@ class WikiToolStructuralTest(unittest.TestCase):
 
 
 class WikiToolCliTest(unittest.TestCase):
+    def setUp(self):
+        # Several tests publish into this repository and restore pages, index and log themselves.
+        # Publishing also rebuilds the generated maps, so restore those here.
+        maps_root = Path(__file__).resolve().parents[1] / "wiki" / "maps"
+        original_maps = {path: path.read_bytes() for path in maps_root.glob("*.md")}
+
+        def restore_maps() -> None:
+            for path in maps_root.glob("*.md"):
+                if path not in original_maps:
+                    path.unlink()
+            for path, contents in original_maps.items():
+                path.write_bytes(contents)
+
+        self.addCleanup(restore_maps)
+
     def test_validate_page_cli_accepts_valid_page(self):
         root = Path(__file__).resolve().parents[1]
 
@@ -2524,6 +2549,8 @@ class WikiToolCliTest(unittest.TestCase):
 
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Python 3.10 or newer", result.stderr)
+            self.assertIn("uv python install 3.12", result.stderr)
+            self.assertIn("PYTHON=python3.12", result.stderr)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
     def test_bootstrap_script_uses_vault_as_default_target_directory(self):
@@ -3796,6 +3823,83 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertEqual(1, result)
         self.assertIn("Metrics policy does not exist", stderr.getvalue())
 
+    def test_metrics_cli_check_shipped_policy_warns_on_fresh_pending_review(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            policy_path = _shipped_policy_without_orphan_gate(root)
+            (root / "scratch" / "review").mkdir(parents=True)
+            today = date.today().isoformat()
+            (root / "scratch" / "review" / f"{today}-fresh-review.md").write_text(
+                f"---\nreview_id: fresh-review\n"
+                f"type: merge\nstatus: pending\ncreated: {today}\nupdated: {today}\n"
+                "summary: Fresh Review\nrelated_pages: []\nevidence: []\nresolution: \"\"\n"
+                "---\n\n# Fresh Review\n"
+            )
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    result = cli.main(["metrics", "--check", "--policy", str(policy_path)])
+            finally:
+                cli.ROOT = original_root
+
+        self.assertEqual(0, result)
+        self.assertIn("Metrics warning (not gated): pending_reviews=1", stdout.getvalue())
+
+    def test_metrics_cli_check_shipped_policy_fails_on_stale_pending_review(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            policy_path = _shipped_policy_without_orphan_gate(root)
+            (root / "scratch" / "review").mkdir(parents=True)
+            created = (date.today() - timedelta(days=30)).isoformat()
+            (root / "scratch" / "review" / f"{created}-stale-review.md").write_text(
+                f"---\nreview_id: stale-review\n"
+                f"type: merge\nstatus: pending\ncreated: {created}\nupdated: {created}\n"
+                "summary: Stale Review\nrelated_pages: []\nevidence: []\nresolution: \"\"\n"
+                "---\n\n# Stale Review\n"
+            )
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    result = cli.main(["metrics", "--check", "--policy", str(policy_path)])
+            finally:
+                cli.ROOT = original_root
+
+        self.assertEqual(1, result)
+        self.assertIn("Metrics gate: unresolved_review_max_age_days=30 (max 14)", stdout.getvalue())
+
+    def test_metrics_cli_check_rejects_invalid_policy_value(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            policy_path = root / "policy.json"
+            policy_path.write_text(json.dumps({"max": {"pending_reviews": -1}}))
+            original_root = cli.ROOT
+
+            try:
+                cli.ROOT = root
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()):
+                    result = cli.main(["metrics", "--check", "--policy", str(policy_path)])
+            finally:
+                cli.ROOT = original_root
+
+        self.assertEqual(1, result)
+        self.assertIn("must be a non-negative integer or null", stderr.getvalue())
+
     def test_mcp_server_lists_and_calls_metrics_tool(self):
         root = Path(__file__).resolve().parents[1]
         report_path = root / "scratch" / "reports" / "mcp-metrics-test.md"
@@ -5012,3 +5116,545 @@ chmod +x "${target}/scripts/release_gate.sh"
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CLAIM_PAGE_BODY = "\n".join(
+    [
+        "# Memory Decision",
+        "",
+        "## Context",
+        "",
+        "Initial context.",
+        "",
+        "## Claims",
+        "",
+        "| Claim | Status | Evidence |",
+        "|---|---|---|",
+        "| Use SQLite for local state. | stated | Human instruction |",
+        "| Keep one writer. | stated | Human instruction |",
+        "",
+        "## Notes",
+        "",
+        "First note.",
+        "",
+    ]
+)
+
+
+def _claim_page(root: Path, relative: str = "wiki/decisions/memory-decision.md") -> Path:
+    frontmatter = _frontmatter("Memory Decision")
+    frontmatter["type"] = "decision"
+    frontmatter["source_count"] = 1
+    frontmatter["quality"]["provenance"] = "claim"
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_page(frontmatter, CLAIM_PAGE_BODY))
+    return path
+
+
+def _write_draft(root: Path, draft: dict) -> Path:
+    path = root / "scratch" / "drafts" / "draft.json"
+    path.write_text(json.dumps(draft))
+    return path
+
+
+class PatchDraftTest(unittest.TestCase):
+    def test_patch_supersedes_claim_and_appends_section_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            raw = root / "raw" / "sources" / "decision-change.md"
+            raw.write_text("# Decision change\n")
+            evidence = f"raw/sources/decision-change.md#sha256={hashlib.sha256(raw.read_bytes()).hexdigest()}"
+            draft = _write_draft(
+                root,
+                {
+                    "version": 1,
+                    "operation": "patch-page",
+                    "path": "wiki/decisions/memory-decision.md",
+                    "edits": [
+                        {
+                            "op": "supersede-claim",
+                            "claim": "Use SQLite for local state.",
+                            "by": "Use DuckDB for local state.",
+                            "status": "stated",
+                            "evidence": evidence,
+                        },
+                        {"op": "append-to-section", "heading": "## Notes", "content": "Second note."},
+                    ],
+                },
+            )
+
+            apply_draft(root, draft)
+
+            page = parse_page(target)
+            self.assertIn(
+                "| Use SQLite for local state. | superseded | Human instruction; "
+                "Superseded by: Use DuckDB for local state. |",
+                page.body,
+            )
+            self.assertIn(f"| Use DuckDB for local state. | stated | {evidence} |", page.body)
+            self.assertIn("| Keep one writer. | stated | Human instruction |", page.body)
+            self.assertIn("First note.\n\nSecond note.", page.body)
+            self.assertEqual(2, page.frontmatter["source_count"])
+            self.assertEqual(date.today().isoformat(), page.frontmatter["updated"])
+            self.assertEqual([], validate_provenance(parse_page(target), root))
+
+    def test_patch_replace_section_keeps_other_sections(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            draft = _write_draft(
+                root,
+                {
+                    "version": 1,
+                    "operation": "patch-page",
+                    "path": "wiki/decisions/memory-decision.md",
+                    "edits": [{"op": "replace-section", "heading": "## Context", "content": "New context."}],
+                },
+            )
+
+            apply_draft(root, draft)
+
+            body = parse_page(target).body
+            self.assertIn("## Context\n\nNew context.\n\n## Claims", body)
+            self.assertNotIn("Initial context.", body)
+            self.assertIn("First note.", body)
+
+    def test_patch_rejects_unknown_claim_and_leaves_page(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            before = target.read_text()
+            draft = _write_draft(
+                root,
+                {
+                    "version": 1,
+                    "operation": "patch-page",
+                    "path": "wiki/decisions/memory-decision.md",
+                    "edits": [{"op": "set-claim-status", "claim": "Missing claim.", "status": "contested"}],
+                },
+            )
+
+            with self.assertRaisesRegex(ValueError, "claim must match exactly one row, found 0"):
+                apply_draft(root, draft)
+            self.assertEqual(before, target.read_text())
+
+    def test_patch_requires_existing_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            draft = _write_draft(
+                root,
+                {
+                    "version": 1,
+                    "operation": "patch-page",
+                    "path": "wiki/decisions/missing.md",
+                    "edits": [{"op": "append-to-section", "heading": "## Notes", "content": "x"}],
+                },
+            )
+
+            with self.assertRaisesRegex(ValueError, "patch-page target does not exist"):
+                apply_draft(root, draft)
+
+    def test_patch_respects_human_locked_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            page = parse_page(target)
+            locked_body = page.body.replace(
+                "First note.",
+                "<!-- human-locked:start -->\nFirst note.\n<!-- human-locked:end -->",
+            )
+            target.write_text(render_page(page.frontmatter, locked_body))
+            draft = _write_draft(
+                root,
+                {
+                    "version": 1,
+                    "operation": "patch-page",
+                    "path": "wiki/decisions/memory-decision.md",
+                    "edits": [{"op": "replace-section", "heading": "## Notes", "content": "Overwritten."}],
+                },
+            )
+
+            with self.assertRaisesRegex(ValueError, "human-locked section"):
+                apply_draft(root, draft)
+
+    def test_upsert_rejects_silent_claim_removal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            page = parse_page(target)
+            body = page.body.replace("| Keep one writer. | stated | Human instruction |\n", "")
+            draft_payload = {
+                "version": 1,
+                "operation": "upsert-page",
+                "path": "wiki/decisions/memory-decision.md",
+                "frontmatter": page.frontmatter,
+                "body": body,
+            }
+
+            with self.assertRaisesRegex(ValueError, "claim-removed"):
+                apply_draft(root, _write_draft(root, draft_payload))
+
+            draft_payload["remove_claims"] = ["Keep one writer."]
+            apply_draft(root, _write_draft(root, draft_payload))
+            self.assertNotIn("Keep one writer.", target.read_text())
+
+    def test_lint_requires_replacement_for_superseded_claim(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            target = _claim_page(root)
+            page = parse_page(target)
+            target.write_text(
+                render_page(
+                    page.frontmatter,
+                    page.body.replace("| Keep one writer. | stated |", "| Keep one writer. | superseded |"),
+                )
+            )
+
+            issues = validate_provenance(parse_page(target), root)
+
+            self.assertIn("superseded-claim-without-replacement", [issue.code for issue in issues])
+
+
+class WikiSearchReadTest(unittest.TestCase):
+    def _vault_with_pages(self, root: Path) -> None:
+        _minimal_vault(root)
+        (root / "wiki" / "decisions").mkdir(parents=True)
+        current = _claim_page(root)
+        page = parse_page(current)
+        current.write_text(
+            render_page(
+                page.frontmatter,
+                page.body.replace(
+                    "| Use SQLite for local state. | stated | Human instruction |",
+                    "| Use SQLite for local state. | superseded | Human instruction; Superseded by: Use DuckDB. |\n"
+                    "| Use DuckDB for local state. | stated | Human instruction |",
+                ),
+            )
+        )
+        old_frontmatter = _frontmatter("Old Storage Choice", "decision")
+        old_frontmatter["status"] = "deprecated"
+        old_frontmatter["superseded_by"] = ["decisions/memory-decision"]
+        (root / "wiki" / "decisions" / "old-storage.md").write_text(
+            render_page(old_frontmatter, "# Old Storage Choice\n\nDuckDB was rejected.\n")
+        )
+        korean = _frontmatter("메모리 정리 결정")
+        (root / "wiki" / "concepts" / "memory-cleanup.md").write_text(
+            render_page(korean, "# 메모리 정리 결정\n\n정리 skill은 주 1회 실행한다.\n")
+        )
+
+    def test_search_ranks_current_pages_and_skips_deprecated_and_superseded_rows(self):
+        from tools.wiki.lib.search import search_wiki
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._vault_with_pages(root)
+
+            hits = search_wiki(root, "DuckDB storage")
+            sqlite_hits = search_wiki(root, "SQLite")
+            all_hits = search_wiki(root, "DuckDB", include_deprecated=True)
+
+        self.assertEqual(["wiki/decisions/memory-decision.md"], [hit.path for hit in hits])
+        self.assertIn("Use DuckDB for local state.", hits[0].snippet)
+        self.assertEqual([], sqlite_hits)
+        self.assertIn("wiki/decisions/old-storage.md", [hit.path for hit in all_hits])
+
+    def test_search_matches_korean_words_with_particles(self):
+        from tools.wiki.lib.search import search_wiki
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._vault_with_pages(root)
+
+            hits = search_wiki(root, "정리 결정을 찾아줘")
+
+        self.assertEqual("wiki/concepts/memory-cleanup.md", hits[0].path)
+
+    def test_search_rejects_query_without_usable_terms(self):
+        from tools.wiki.lib.search import search_wiki
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            with self.assertRaisesRegex(ValueError, "Search query needs"):
+                search_wiki(root, "? !")
+
+    def test_read_returns_one_section_and_stays_under_wiki(self):
+        from tools.wiki.lib.search import read_wiki_page
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._vault_with_pages(root)
+            (root / "AGENTS.md").write_text("secret\n")
+
+            section = read_wiki_page(root, "wiki/decisions/memory-decision.md", section="## Notes")
+            whole = read_wiki_page(root, "wiki/decisions/memory-decision.md")
+            with self.assertRaisesRegex(ValueError, "must stay under wiki"):
+                read_wiki_page(root, "wiki/../AGENTS.md")
+
+        self.assertEqual("## Notes\n\nFirst note.\n", section)
+        self.assertTrue(whole.startswith("---\n"))
+
+    def test_mcp_server_lists_and_calls_search_and_read_tools(self):
+        root = Path(__file__).resolve().parents[1]
+        calls = [
+            {"name": "wiki_search", "arguments": {"query": "source of truth", "limit": 2}},
+            {"name": "wiki_read_page", "arguments": {"path": "wiki/concepts/source-of-truth.md"}},
+        ]
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+        for index, call in enumerate(calls, start=2):
+            request += json.dumps({"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": call}) + "\n"
+
+        result = subprocess.run(
+            [sys.executable, "tools/wiki/mcp_server.py"],
+            cwd=root,
+            input=request,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        responses = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        names = [tool["name"] for tool in responses[0]["result"]["tools"]]
+        self.assertIn("wiki_search", names)
+        self.assertIn("wiki_read_page", names)
+        self.assertFalse(responses[1]["result"]["isError"])
+        self.assertIn("wiki/concepts/source-of-truth.md", responses[1]["result"]["content"][0]["text"])
+        self.assertFalse(responses[2]["result"]["isError"])
+        self.assertIn("title:", responses[2]["result"]["content"][0]["text"])
+
+    def test_patch_template_uses_known_operations(self):
+        from tools.wiki.lib.draft_patch import PATCH_OPERATIONS
+
+        root = Path(__file__).resolve().parents[1]
+        template = json.loads((root / "tools" / "wiki" / "templates" / "draft-patch-page.json").read_text())
+
+        self.assertEqual("patch-page", template["operation"])
+        self.assertTrue({edit["op"] for edit in template["edits"]} <= PATCH_OPERATIONS)
+
+
+class PatchDraftEdgeCaseTest(unittest.TestCase):
+    def _page(self, root: Path, body: str, provenance: str = "claim") -> Path:
+        _minimal_vault(root)
+        frontmatter = _frontmatter("Edge Page", "decision")
+        frontmatter["source_count"] = 1
+        frontmatter["quality"]["provenance"] = provenance
+        path = root / "wiki" / "decisions" / "edge.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_page(frontmatter, body))
+        return path
+
+    def _patch(self, root: Path, edits: list) -> None:
+        draft = root / "scratch" / "drafts" / "edge.json"
+        draft.write_text(
+            json.dumps({"version": 1, "operation": "patch-page", "path": "wiki/decisions/edge.md", "edits": edits})
+        )
+        apply_draft(root, draft)
+
+    def test_replace_section_ignores_headings_inside_code_fences(self):
+        body = (
+            "# Edge\n\n## Setup\n\n```bash\n# install deps\npip install x\n```\n\n## Claims\n\n"
+            "| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction |\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = self._page(root, body)
+
+            self._patch(root, [{"op": "replace-section", "heading": "## Setup", "content": "Run make."}])
+
+            new_body = parse_page(target).body
+        self.assertIn("## Setup\n\nRun make.\n\n## Claims", new_body)
+        self.assertNotIn("pip install x", new_body)
+        self.assertNotIn("```", new_body)
+
+    def test_supersede_keeps_escaped_pipes_and_extra_columns(self):
+        body = (
+            "# Edge\n\n| Claim | Status | Evidence | Notes |\n|---|---|---|---|\n"
+            "| A. | stated | Human instruction \\| x | keep |\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = self._page(root, body)
+
+            self._patch(
+                root,
+                [{"op": "supersede-claim", "claim": "A.", "by": "B.", "status": "stated", "evidence": "Human instruction"}],
+            )
+
+            new_body = parse_page(target).body
+        self.assertIn("| A. | superseded | Human instruction \\| x; Superseded by: B. | keep |", new_body)
+        self.assertIn("| B. | stated | Human instruction |  |", new_body)
+
+    def test_replacement_text_is_not_counted_as_evidence(self):
+        body = "# Edge\n\n| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction. |\n"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = self._page(root, body)
+
+            self._patch(
+                root,
+                [
+                    {
+                        "op": "supersede-claim",
+                        "claim": "A.",
+                        "by": "See [[index]] instead.",
+                        "status": "stated",
+                        "evidence": "Human instruction",
+                    }
+                ],
+            )
+
+            page = parse_page(target)
+        self.assertIn("| A. | superseded | Human instruction; Superseded by: See [[index]] instead. |", page.body)
+        self.assertEqual(1, page.frontmatter["source_count"])
+
+    def test_claim_guard_ignores_tables_inside_code_fences(self):
+        from tools.wiki.lib.draft import _claims_preserved_errors
+
+        old = "| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction |\n"
+        new = "```\n" + old + "```\n"
+
+        errors = _claims_preserved_errors(old, new, [])
+
+        self.assertEqual(1, len(errors))
+        self.assertIn("claim-removed", errors[0])
+
+    def test_search_ignores_status_and_evidence_words_and_checks_limit(self):
+        from tools.wiki.lib.search import search_wiki
+
+        body = "# Edge\n\n| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction |\n"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._page(root, body)
+
+            state_hits = search_wiki(root, "state instruction", page_type="decision")
+            with self.assertRaisesRegex(ValueError, "limit"):
+                search_wiki(root, "edge", limit=0)
+
+        self.assertEqual([], state_hits)
+
+
+class MemoryReviewRegressionTest(unittest.TestCase):
+    def _claim_page(self, root: Path, body: str, provenance: str = "claim") -> Path:
+        _minimal_vault(root)
+        frontmatter = _frontmatter("Regression Page", "decision")
+        frontmatter["source_count"] = 1
+        frontmatter["quality"]["provenance"] = provenance
+        path = root / "wiki" / "decisions" / "regression.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_page(frontmatter, body))
+        return path
+
+    def _patch(self, root: Path, edits: list) -> None:
+        draft = root / "scratch" / "drafts" / "regression.json"
+        draft.write_text(
+            json.dumps(
+                {"version": 1, "operation": "patch-page", "path": "wiki/decisions/regression.md", "edits": edits}
+            )
+        )
+        apply_draft(root, draft)
+
+    TABLE = "# Regression\n\n## Notes\n\nNote.\n\n| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction |\n"
+
+    def test_replacement_text_with_raw_path_is_not_validated_as_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = self._claim_page(root, self.TABLE)
+
+            self._patch(
+                root,
+                [
+                    {
+                        "op": "supersede-claim",
+                        "claim": "A.",
+                        "by": "Memos are stored under raw/sources/memos before compilation.",
+                        "status": "stated",
+                        "evidence": "Human instruction",
+                    }
+                ],
+            )
+
+            self.assertEqual([], validate_provenance(parse_page(target), root))
+
+    def test_repeated_patches_do_not_grow_blank_lines(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = self._claim_page(root, self.TABLE)
+            before = target.read_text()
+
+            for note in ("One.", "Two."):
+                self._patch(root, [{"op": "append-to-section", "heading": "## Notes", "content": note}])
+
+            after = target.read_text()
+        self.assertEqual(before.count("---\n\n#"), after.count("---\n\n#"))
+        self.assertNotIn("---\n\n\n", after)
+
+    def test_claim_edits_require_claim_provenance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._claim_page(root, self.TABLE, provenance="none")
+
+            with self.assertRaisesRegex(ValueError, "need quality.provenance: claim"):
+                self._patch(
+                    root,
+                    [{"op": "append-claim", "claim": "B.", "status": "stated", "evidence": "Human instruction"}],
+                )
+
+    def test_inline_triple_backticks_do_not_open_a_fence(self):
+        from tools.wiki.lib.lint import claim_evidence_table, fenced_line_flags
+
+        lines = ["Use ```inline``` here.", "```python", "x = 1", "```python", "y = 2", "```", "after"]
+
+        self.assertEqual([False, True, True, True, True, True, False], fenced_line_flags(lines))
+        self.assertIsNotNone(claim_evidence_table("Use ```inline``` here.\n\n" + self.TABLE))
+
+    def test_metrics_ignore_fenced_example_tables(self):
+        from tools.wiki.lib.metrics import build_maintenance_metrics
+
+        body = (
+            "# Regression\n\n```\n| Claim | Status | Evidence |\n|---|---|---|\n"
+            "| Example. | contested | Human instruction |\n```\n\n"
+            "| Claim | Status | Evidence |\n|---|---|---|\n| A. | stated | Human instruction |\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._claim_page(root, body)
+
+            metrics = build_maintenance_metrics(root).metrics
+
+        self.assertEqual(0, metrics.contested_claim_rows)
+
+    def test_search_skips_generated_maps_strips_particles_and_shows_history_on_request(self):
+        from tools.wiki.lib.search import search_wiki
+
+        body = (
+            "# Regression\n\n캐시를 비운다.\n\n| Claim | Status | Evidence |\n|---|---|---|\n"
+            "| Old cache rule. | superseded | Human instruction; Superseded by: New. |\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._claim_page(root, body)
+            (root / "wiki" / "maps").mkdir()
+            map_frontmatter = _frontmatter("Topic Map", "map")
+            (root / "wiki" / "maps" / "topic-map.md").write_text(
+                render_page(map_frontmatter, "# Topic Map\n\n- 캐시를 비운다. Old cache rule.\n")
+            )
+
+            korean = search_wiki(root, "캐시는")
+            current = search_wiki(root, "cache rule")
+            history = search_wiki(root, "cache rule", include_deprecated=True)
+            short = search_wiki(root, "Go DB")
+
+        self.assertEqual(["wiki/decisions/regression.md"], [hit.path for hit in korean])
+        self.assertEqual([], current)
+        self.assertEqual(["wiki/decisions/regression.md"], [hit.path for hit in history])
+        self.assertEqual([], short)

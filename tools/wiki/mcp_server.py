@@ -17,6 +17,36 @@ from tools.wiki.cli import main as cli_main
 
 TOOLS = [
     {
+        "name": "wiki_search",
+        "description": (
+            "Search durable wiki pages by keywords in title, summary, tags and body. "
+            "Returns paths, summaries and a matching line. Deprecated pages and superseded claims are left out "
+            "unless include_deprecated is true."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "type": {"type": "string", "description": "Only pages of this frontmatter type, such as decision."},
+                "limit": {"type": "integer"},
+                "include_deprecated": {"type": "boolean"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "wiki_read_page",
+        "description": "Read one durable wiki page, or one section of it, by its path under wiki/.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Page path such as wiki/decisions/example.md."},
+                "section": {"type": "string", "description": "A heading line such as '## Decision'."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "wiki_validate_page",
         "description": "Validate one wiki markdown page.",
         "inputSchema": {
@@ -318,6 +348,8 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
 def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     dispatch: dict[str, Callable[[dict[str, Any]], list[str]]] = {
+        "wiki_search": _search_args,
+        "wiki_read_page": _read_page_args,
         "wiki_validate_page": lambda args: ["validate-page", _required(args, "path")],
         "wiki_lint": _lint_args,
         "wiki_health": lambda args: ["health"],
@@ -348,6 +380,24 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "content": [{"type": "text", "text": output.strip() or f"exit_code={exit_code}"}],
         "isError": exit_code != 0,
     }
+
+
+def _search_args(args: dict[str, Any]) -> list[str]:
+    command = ["search", _required(args, "query")]
+    if args.get("type"):
+        command.extend(["--type", str(args["type"])])
+    if args.get("limit") is not None:
+        command.extend(["--limit", str(int(args["limit"]))])
+    if args.get("include_deprecated"):
+        command.append("--include-deprecated")
+    return command
+
+
+def _read_page_args(args: dict[str, Any]) -> list[str]:
+    command = ["read", _required(args, "path")]
+    if args.get("section"):
+        command.extend(["--section", str(args["section"])])
+    return command
 
 
 def _lint_args(args: dict[str, Any]) -> list[str]:

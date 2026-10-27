@@ -29,9 +29,9 @@ This skill reasons about meaning, source support, contradictions, and draft chan
 2. Read `wiki/index.md` and related pages listed in `related` or body links.
 3. Inspect supporting `wiki/sources/` pages and raw sources when needed.
 4. Check for page-level and section-level human locks.
-5. Classify the change as simple update, contradiction handling, merge proposal, decision update, or human-review item.
+5. Classify the change as simple update, supersession, contradiction handling, merge proposal, decision update, or human-review item. A newer statement from the same authority is a supersession: mark the old claim `superseded` with a `supersede-claim` edit instead of opening a review (see `docs/agent/OPERATING-SCHEMA.md` section 2.3.1).
 6. For section-level locks, require exact content preservation between `<!-- human-locked:start -->` and `<!-- human-locked:end -->`.
-7. If content can be changed safely, write a JSON draft under `scratch/drafts/` using `tools/wiki/templates/draft-upsert-page.json`.
+7. If content can be changed safely, write a JSON draft under `scratch/drafts/`. For one decision, correction, or note on an existing page, use a patch draft from `tools/wiki/templates/draft-patch-page.json`. Use `tools/wiki/templates/draft-upsert-page.json` only for new pages or full rewrites, and keep every existing claim row unless it is listed in `remove_claims`.
 8. If a locked section needs a proposed patch, write it under `scratch/reports/`.
 9. If the issue is a contested decision, important contradiction, merge judgment, or unresolved source conflict, write it under `scratch/review/`.
 10. Publish safe drafts with `python3 tools/wiki/cli.py publish-draft <draft-path> --report`.
@@ -41,7 +41,7 @@ This skill reasons about meaning, source support, contradictions, and draft chan
 
 ## Quality Gates
 
-- Do not erase older views without recording why they changed.
+- Do not erase older views without recording why they changed. Superseded claims stay in the table.
 - Do not silently resolve contradictions.
 - Do not overwrite human-locked content.
 - Keep index and log changes tied to durable wiki changes.

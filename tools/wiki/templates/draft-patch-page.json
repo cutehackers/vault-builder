@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "operation": "patch-page",
+  "path": "wiki/decisions/example.md",
+  "edits": [
+    {
+      "op": "supersede-claim",
+      "claim": "Exact text of the claim that is no longer current.",
+      "by": "Text of the claim that replaces it.",
+      "status": "stated",
+      "evidence": "Human instruction 2026-10-27"
+    },
+    {
+      "op": "append-claim",
+      "claim": "A new claim for the same page.",
+      "status": "stated",
+      "evidence": "raw/sources/example.md#sha256=<64 hex characters>"
+    },
+    {
+      "op": "append-to-section",
+      "heading": "## Notes",
+      "content": "One short note added at the end of the section."
+    }
+  ],
+  "log": {
+    "event_type": "decision",
+    "title": "Supersede Example Claim",
+    "items": [
+      "Updated [[decisions/example]]."
+    ]
+  }
+}

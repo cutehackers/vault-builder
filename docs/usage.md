@@ -583,7 +583,7 @@ python3 tools/wiki/cli.py metrics --check --report
 python3 tools/wiki/cli.py metrics --check --policy tools/wiki/metrics-policy.json --report
 ```
 
-이 report는 pending review, contested claim rows, stale sources, orphan pages, claim-level provenance 미적용 page, deprecated linked pages, last health report를 한 번에 보여줍니다. `--check`는 `tools/wiki/metrics-policy.json`의 threshold를 기준으로 실패하며, 일시적으로 허용할 운영 부채가 있으면 별도 policy 파일을 지정할 수 있습니다. 명시한 `--policy` 파일이 없으면 실패합니다. Metrics는 상태를 보여줄 뿐 자동 repair나 judgment를 수행하지 않습니다.
+이 report는 pending review, contested claim rows, stale sources, orphan pages, claim-level provenance 미적용 page, deprecated linked pages, last health report를 한 번에 보여줍니다. `--check`는 `tools/wiki/metrics-policy.json`의 threshold를 기준으로 실패하며, 일시적으로 허용할 운영 부채가 있으면 별도 policy 파일을 지정할 수 있습니다. 값이 `null`인 항목은 gate에서 빠지고 경고로만 출력됩니다. 기본 policy는 대기 중인 review와 contested claim을 경고로만 보여주고, review 없이 남은 contested claim과 14일보다 오래 대기한 review만 실패로 처리합니다. 사람이 판단할 일이 하나 생겼다고 vault 전체가 실패하지 않게 하기 위해서입니다. 명시한 `--policy` 파일이 없으면 실패합니다. Metrics는 상태를 보여줄 뿐 자동 repair나 judgment를 수행하지 않습니다.
 
 ## 16. MCP 사용하기
 
@@ -603,6 +603,8 @@ python3 tools/wiki/mcp_server.py
 
 | MCP tool | 역할 |
 |---|---|
+| `wiki_search` | title, summary, tags, 본문에서 키워드로 page를 찾습니다. deprecated page와 superseded claim은 기본으로 빼고, `include_deprecated`를 주면 이력까지 찾습니다. 생성된 map, index, log page는 찾지 않습니다. CLI: `search`. |
+| `wiki_read_page` | page 하나 또는 heading 하나의 section을 읽습니다. CLI: `read`. |
 | `wiki_validate_page` | page 하나를 검증합니다. |
 | `wiki_lint` | 전체 wiki를 lint합니다. |
 | `wiki_hash_source` | raw source의 SHA-256을 계산합니다. |
@@ -656,7 +658,7 @@ git commit -m "wiki: update example concept"
 
 `git add` 대상은 `git status --short`에 나온 실제 변경 파일입니다. Wiki content만 바꾼 경우에는 보통 `wiki/`, `scratch/reports/`, `scratch/drafts/`, `scratch/review/`가 포함될 수 있고, workflow/tooling 개선에서는 `docs/`, `tools/`, `scripts/`, `.github/`도 함께 stage해야 합니다.
 
-`scripts/release_gate.sh`는 임시 복사본에서 tests, lint, health, maps, metrics를 실행합니다. 검증 중 생기는 report나 test artifact가 현재 vault를 오염시키지 않으며, 같은 gate는 `.github/workflows/release-gate.yml`에서도 실행됩니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다.
+`scripts/release_gate.sh`는 임시 복사본에서 tests, lint, health, maps, metrics를 실행합니다. 검증 중 생기는 report나 test artifact가 현재 vault를 오염시키지 않으며, 같은 gate는 `.github/workflows/release-gate.yml`에서도 실행됩니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다. 도구 test는 gate 시간의 대부분을 차지하고 코드와 문서에만 영향을 받습니다. 단, builder 저장소에서는 `init-vault.sh`가 `wiki/`, `scratch/drafts`, `scratch/review`를 새 vault에 복사하고 test가 그 결과를 검사하므로, 이 폴더들도 fingerprint에 넣습니다. 그래서 Git 저장소인 vault에서 통과한 gate는 `wiki/`, `raw/`, `scratch/` 밖의 파일 fingerprint를 Git 디렉터리의 `llm-wiki-gate-tests.cache`에 기록하고, 다음 실행에서 fingerprint가 같으면 도구 test를 건너뜁니다. 지식 페이지만 바꾼 경우 gate가 몇 초 안에 끝납니다. baseline test, lint, health, maps, metrics는 항상 실행합니다. 도구 test를 강제로 실행하려면 `WIKI_GATE_FULL=1 scripts/release_gate.sh`를 씁니다. Git이 없는 vault와 CI는 cache가 없으므로 항상 전체를 실행합니다.
 
 ## 18. 전체 명령 요약
 

@@ -287,6 +287,7 @@ A wiki operation is not complete until these conditions are satisfied:
 - A report is written under `scratch/reports/` for non-trivial ingest, lint, audit, or repair work.
 - `tools/wiki` validation passes before claiming completion.
 - `scripts/release_gate.sh` passes before claiming repo-level readiness.
+- The gate skips the tool unit tests when every file outside `wiki/`, `raw/` and `scratch/` (in the builder repository, outside `raw/` and `scratch/reports/`) matches the fingerprint of the last passing run (`llm-wiki-gate-tests.cache` in the Git directory, so the vault's own files never change). Baseline tests, lint, health, maps and metrics always run. `WIKI_GATE_FULL=1` forces the tool tests.
 
 Stenc validation is not part of the ordinary completion gate. Run `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` only when the user explicitly chooses the Stenc workflow.
 
@@ -379,7 +380,7 @@ Current checks:
 - generated navigation maps for topics, sources, decisions, pending reviews, and lifecycle signals
 - stale generated map detection through `maps build --check`
 - maintenance metrics dashboard for pending reviews, contested claims, stale sources, orphan pages, provenance coverage, deprecated links, and last health report
-- configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`
+- configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`; a `null` threshold reports the signal as a warning without gating it. The shipped policy gates contested claims that have no review item and reviews pending longer than 14 days, not every pending review.
 - report and generated query-capture draft path confinement under `scratch/reports/` and `scratch/drafts/`
 - release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks only when explicitly enabled, and `git diff --check` in a temporary repo copy
 

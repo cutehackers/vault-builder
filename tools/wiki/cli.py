@@ -39,6 +39,7 @@ from tools.wiki.lib.source_registry import (
     discover_raw_files,
     render_source_registry_report,
 )
+from tools.wiki.lib.search import read_wiki_page, render_hits, search_wiki
 from tools.wiki.lib.workflow import (
     ensure_draft_targets_workflow_target,
     prepare_query_capture_workflow,
@@ -63,6 +64,16 @@ def main(argv: list[str] | None = None) -> int:
     lint.add_argument("--report", nargs="?", const="__default__")
 
     health = subcommands.add_parser("health")
+
+    search_cmd = subcommands.add_parser("search")
+    search_cmd.add_argument("query")
+    search_cmd.add_argument("--type")
+    search_cmd.add_argument("--limit", type=int, default=10)
+    search_cmd.add_argument("--include-deprecated", action="store_true")
+
+    read_cmd = subcommands.add_parser("read")
+    read_cmd.add_argument("path")
+    read_cmd.add_argument("--section")
 
     metrics_cmd = subcommands.add_parser("metrics")
     metrics_cmd.add_argument("--report", nargs="?", const="__default__")
@@ -163,6 +174,29 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    if args.command == "search":
+        try:
+            hits = search_wiki(
+                ROOT,
+                args.query,
+                page_type=args.type,
+                limit=args.limit,
+                include_deprecated=args.include_deprecated,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(render_hits(hits))
+        return 0
+
+    if args.command == "read":
+        try:
+            print(read_wiki_page(ROOT, args.path, section=args.section), end="")
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+
     if args.command == "validate-page":
         page = parse_page(Path(args.path))
         issues = validate_schema(page)
@@ -235,7 +269,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Report written: {display_path(result.report_path, ROOT)}")
         if args.check:
             try:
-                if _metrics_has_actionable_signals(metrics, policy_path=policy_path):
+                failures, warnings = _metrics_check_findings(metrics, policy_path=policy_path)
+                for warning in warnings:
+                    print(f"Metrics warning (not gated): {warning}")
+                if failures:
+                    for failure in failures:
+                        print(f"Metrics gate: {failure}")
                     print("Metrics check failed: maintenance signals require attention.")
                     return 1
             except (OSError, ValueError) as exc:
@@ -629,7 +668,8 @@ def _publish_draft(draft_path: Path, report_path: Path | None) -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(_render_publish_report(draft_path, applied_result.target_path))
         print(f"Report written: {display_path(report_path, ROOT)}")
-    return 0 if lint_result.ok else 1
+    _rebuild_maps_after_publish()
+    return 0
 
 
 def _publish_batch(draft_path: Path, report_path: Path | None, dry_run: bool = False) -> int:
@@ -673,7 +713,18 @@ def _publish_batch(draft_path: Path, report_path: Path | None, dry_run: bool = F
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(_render_publish_batch_report(draft_path, applied_result.target_paths))
         print(f"Report written: {display_path(report_path, ROOT)}")
+    _rebuild_maps_after_publish()
     return 0
+
+
+def _rebuild_maps_after_publish() -> None:
+    """Keep generated maps current so a published page does not leave the release gate failing."""
+    try:
+        result = build_navigation_maps(ROOT)
+    except Exception as exc:  # The draft is already published; report instead of failing the command.
+        print(f"Navigation maps not rebuilt: {exc}. Run maps build before the release gate.", file=sys.stderr)
+        return
+    print(f"Rebuilt navigation maps: {len(result.changed_paths)} changed.")
 
 
 def _default_report_path() -> str:
@@ -725,7 +776,11 @@ METRIC_CHECK_FIELDS = [
     "orphan_pages",
     "pages_without_claim_level_provenance",
     "deprecated_linked_pages",
+    "unresolved_review_max_age_days",
 ]
+
+# Fields a policy may leave out without gating them. Every other field defaults to 0.
+METRIC_UNGATED_BY_DEFAULT = {"unresolved_review_max_age_days"}
 
 
 def _count_entry_statuses(entries: list[object]) -> dict[str, int]:
@@ -749,8 +804,10 @@ def _default_metrics_policy_path() -> Path:
     return ROOT / "tools" / "wiki" / "metrics-policy.json"
 
 
-def _metrics_check_thresholds(policy_path: Path | None = None) -> dict[str, int]:
-    thresholds = {field: 0 for field in METRIC_CHECK_FIELDS}
+def _metrics_check_thresholds(policy_path: Path | None = None) -> dict[str, int | None]:
+    thresholds: dict[str, int | None] = {
+        field: None if field in METRIC_UNGATED_BY_DEFAULT else 0 for field in METRIC_CHECK_FIELDS
+    }
     candidate = policy_path or _default_metrics_policy_path()
     if not candidate.exists():
         if policy_path is not None:
@@ -767,17 +824,29 @@ def _metrics_check_thresholds(policy_path: Path | None = None) -> dict[str, int]
     for field in METRIC_CHECK_FIELDS:
         if field in max_values:
             value = max_values[field]
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ValueError(
-                    f"Metrics policy max.{field} must be a non-negative integer: {display_path(candidate, ROOT)}"
+                    f"Metrics policy max.{field} must be a non-negative integer or null: "
+                    f"{display_path(candidate, ROOT)}"
                 )
             thresholds[field] = value
     return thresholds
 
 
-def _metrics_has_actionable_signals(metrics: object, policy_path: Path | None = None) -> bool:
+def _metrics_check_findings(metrics: object, policy_path: Path | None = None) -> tuple[list[str], list[str]]:
+    """Split nonzero signals into gate failures and ungated warnings."""
     thresholds = _metrics_check_thresholds(policy_path)
-    return any(int(getattr(metrics, field, 0)) > thresholds[field] for field in METRIC_CHECK_FIELDS)
+    failures: list[str] = []
+    warnings: list[str] = []
+    for field in METRIC_CHECK_FIELDS:
+        value = int(getattr(metrics, field, 0))
+        limit = thresholds[field]
+        if limit is None:
+            if value > 0:
+                warnings.append(f"{field}={value}")
+        elif value > limit:
+            failures.append(f"{field}={value} (max {limit})")
+    return failures, warnings
 
 
 def _render_publish_report(draft_path: Path, target_path: Path) -> str:
