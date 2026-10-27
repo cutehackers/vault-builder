@@ -35,6 +35,30 @@ from tools.wiki.lib.schema import validate_schema
 from tools.wiki.lib.vault_manifest import validate_v1_manifest
 
 
+# init-vault.sh runs install, which writes the Claude Code config folder and ~/.claude.json.
+# Every test in this module runs with a temporary HOME so the real ones are never touched.
+_MODULE_HOME: tempfile.TemporaryDirectory | None = None
+_SAVED_USER_ENVIRONMENT: dict[str, str | None] = {}
+
+
+def setUpModule() -> None:
+    global _MODULE_HOME
+    _MODULE_HOME = tempfile.TemporaryDirectory()
+    for key in ("HOME", "CLAUDE_CONFIG_DIR"):
+        _SAVED_USER_ENVIRONMENT[key] = os.environ.get(key)
+    os.environ["HOME"] = _MODULE_HOME.name
+    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+
+
+def tearDownModule() -> None:
+    for key, value in _SAVED_USER_ENVIRONMENT.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    if _MODULE_HOME is not None:
+        _MODULE_HOME.cleanup()
+
 VALID_PAGE = """---
 title: "Valid Page"
 type: concept
@@ -6245,3 +6269,12 @@ class MemoryScanTest(unittest.TestCase):
         self.assertIn("Never edit, move, or delete L1", skill)
         self.assertEqual(skill.split("\n---\n", 1)[0], pointer.split("\n---\n", 1)[0])
         self.assertIn(".agents/skills/memory-cleanup/SKILL.md", pointer)
+
+
+
+class UserHomeIsolationTest(unittest.TestCase):
+    def test_module_runs_with_a_temporary_home_and_no_config_dir_override(self):
+        self.assertIsNotNone(_MODULE_HOME)
+        assert _MODULE_HOME is not None
+        self.assertEqual(_MODULE_HOME.name, os.environ["HOME"])
+        self.assertNotIn("CLAUDE_CONFIG_DIR", os.environ)
