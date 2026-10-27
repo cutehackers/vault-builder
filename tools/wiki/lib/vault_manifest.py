@@ -46,6 +46,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/lib/draft_patch.py",
         "tools/wiki/lib/frontmatter.py",
         "tools/wiki/lib/hash_source.py",
+        "tools/wiki/lib/inbox.py",
         "tools/wiki/lib/ingest.py",
         "tools/wiki/lib/links.py",
         "tools/wiki/lib/lint.py",
