@@ -800,6 +800,8 @@ python3 tools/vault_migration/cli.py uninstall /path/to/vault
 
 `--dry-run` 옵션은 계획만 출력하고 아무 파일도 쓰지 않습니다.
 
+`init-vault.sh`는 Python 3.10 이상을 고른 뒤 같은 install 명령을 실행합니다. `bash init-vault.sh /path/to/vault --name personal`처럼 `--name` 옵션을 그대로 넘길 수 있습니다. 이미 vault인 폴더는 init으로 다시 만들 수 없고, 기존 vault 등록은 install로 합니다.
+
 `install <path> [--name NAME] [--with-stenc] [--dry-run]`
 
 - 대상 폴더가 없거나 비어 있으면 새 vault를 만듭니다. 임시 폴더에서 vault를 조립하고 lint로 검사한 뒤 한 번에 대상 경로로 옮깁니다. 중간에 실패하면 대상 폴더는 생기지 않습니다.
@@ -807,7 +809,9 @@ python3 tools/vault_migration/cli.py uninstall /path/to/vault
 - 불러오기 skill과 recall 스크립트를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
 - 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 역할 `personal` 값으로 더합니다. 저장소 연결(17.3)은 사용자가 직접 합니다.
 - MCP 설정 파일의 `mcpServers` 객체 아래에 `llm-wiki-<vault 이름>` 항목을 더합니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다. 그래서 다른 저장소의 세션에서도 이 vault의 MCP 도구를 쓸 수 있습니다. 대신 모든 저장소 세션에 vault 쓰기 도구도 보이고, vault 안의 세션에서는 `llm-wiki` 서버와 `llm-wiki-<vault 이름>` 서버가 같은 도구를 보여 줍니다.
-- 같은 이름의 MCP 항목이 다른 vault를 가리키면 아무것도 쓰지 않고 거부합니다. `--name` 옵션으로 다른 이름을 쓰세요.
+- `--name` 옵션이 없으면 대상 폴더 이름을 vault 이름으로 씁니다. 폴더 이름이 `^[A-Za-z0-9][A-Za-z0-9_.-]*$` 형식이 아니면 거부하고 `--name` 옵션을 요구합니다.
+- 같은 이름의 MCP 항목이 다른 vault를 가리키면 아무것도 쓰지 않고 거부합니다. `--name` 옵션으로 다른 이름을 쓰세요. 가리키는 vault 폴더가 더는 없으면 그 항목을 새 vault로 바꾸고 알림 줄을 출력합니다.
+- `CLAUDE_CONFIG_DIR` 폴더는 `$HOME` 안에 있어야 합니다. vault 밖 기록은 `$HOME` 기준 상대 경로로만 적기 때문입니다.
 - vault 밖 변경 중 실패하면 바꾼 파일을 backup으로 되돌립니다.
 - 설치한 vault 밖 파일과 MCP 항목은 `.vault-builder/manifest.json`의 vault 밖 기록에 남깁니다. `CLAUDE_CONFIG_DIR` 값이 있으면 그 폴더 아래에 설치합니다.
 
@@ -816,11 +820,13 @@ python3 tools/vault_migration/cli.py uninstall /path/to/vault
 - vault 안에서는 기록된 hash와 같은 managed 파일, `.mcp.json`, manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
 - `raw/`, `wiki/`, `scratch/`, `.git` 폴더와 manifest에 없는 파일은 어떤 경우에도 지우지 않습니다. commit도 하지 않습니다.
 - 이 vault의 MCP 항목을 지우고, 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 뺍니다.
-- 남은 vault가 없을 때만 불러오기 skill, recall 스크립트, 연결 설정을 지웁니다.
+- 남은 vault가 없을 때만 불러오기 skill, recall 스크립트, 연결 설정을 지웁니다. skill과 recall 스크립트는 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
+- MCP 항목은 기록된 hash와 같을 때만 지웁니다. 사용자가 고친 항목은 남기고 출력합니다.
+- vault 밖 변경이 중간에 실패하면 모두 되돌리고 vault 안은 건드리지 않습니다.
 
 `doctor <path>`
 
-manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트, 연결 설정, MCP 항목, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. vault의 `.mcp.json` 파일이 없거나 다른 vault 또는 Python 3.10 미만을 가리키면 다시 만듭니다. doctor가 쓰는 파일은 이것 하나뿐입니다.
+manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(실행 권한, `PYTHON=` 줄의 interpreter, git 밖 폴더에서의 실행 결과), 연결 설정, MCP 항목, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 사용자가 고친 managed 파일도 문제로 셉니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. vault의 `.mcp.json` 파일이 없거나 다른 vault 또는 Python 3.10 미만을 가리키면 다시 만듭니다. doctor가 쓰는 파일은 이것 하나뿐입니다.
 
 ## 18. Git 사용하기
 
