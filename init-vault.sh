@@ -5,15 +5,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR=""
 WITH_STENC=0
+VAULT_NAME_ARG=""
 
 usage() {
   cat <<'EOF'
-Usage: ./init-vault.sh [--with-stenc] [target-dir]
+Usage: ./init-vault.sh [--with-stenc] [--name NAME] [target-dir]
 
-Create a ready-to-use LLM Wiki vault.
+Create a ready-to-use LLM Wiki vault and register it for Claude Code
+(project-memory skill, vault map, and the user MCP entry llm-wiki-NAME).
 
 Options:
   --with-stenc  Include optional Stenc fixed-format spec/plan docs and tools.
+  --name NAME   Vault name. Default: the target folder name.
   -h, --help    Show this help.
 
 Examples:
@@ -28,6 +31,15 @@ while [[ $# -gt 0 ]]; do
     --with-stenc)
       WITH_STENC=1
       shift
+      ;;
+    --name)
+      if [[ $# -lt 2 ]]; then
+        echo "--name requires a value." >&2
+        usage >&2
+        exit 1
+      fi
+      VAULT_NAME_ARG="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -116,131 +128,13 @@ PY
 
 PYTHON_BIN="$(choose_python)"
 
-mkdir -p "${TARGET_DIR}"
-
-copy_file() {
-  local relative_path="$1"
-  local source_path="${SCRIPT_DIR}/${relative_path}"
-  local target_path="${TARGET_DIR}/${relative_path}"
-  if [[ ! -f "${source_path}" ]]; then
-    return
-  fi
-  mkdir -p "$(dirname "${target_path}")"
-  cp "${source_path}" "${target_path}"
-}
-
-copy_tree() {
-  local relative_path="$1"
-  local source_root="${SCRIPT_DIR}/${relative_path}"
-  if [[ ! -d "${source_root}" ]]; then
-    return
-  fi
-  while IFS= read -r -d '' source_path; do
-    local relative_file="${source_path#"${source_root}/"}"
-    local target_path="${TARGET_DIR}/${relative_path}/${relative_file}"
-    mkdir -p "$(dirname "${target_path}")"
-    cp "${source_path}" "${target_path}"
-  done < <(
-    find "${source_root}" -type f \
-      ! -path '*/__pycache__/*' \
-      ! -name '*.pyc' \
-      ! -name '.DS_Store' \
-      -print0
-  )
-}
-
-require_stenc_bundle() {
-  local missing=0
-  for required_path in \
-    "docs/stenc/content" \
-    "tools/stenc/validate-stenc-doc.js" \
-    "tools/stenc/setup-project.js" \
-    "tools/stenc/check-rendered-pages.js"
-  do
-    if [[ ! -e "${SCRIPT_DIR}/${required_path}" ]]; then
-      echo "Optional Stenc assets are not available in this vault template: ${required_path}" >&2
-      missing=1
-    fi
-  done
-  if [[ "${missing}" -ne 0 ]]; then
-    echo "Create the vault without --with-stenc, or run --with-stenc from a template that includes Stenc." >&2
-    exit 1
-  fi
-}
-
-mkdir -p "${TARGET_DIR}/raw/sources" "${TARGET_DIR}/raw/assets" "${TARGET_DIR}/raw/imports"
-mkdir -p "${TARGET_DIR}/scratch/drafts" "${TARGET_DIR}/scratch/reports" "${TARGET_DIR}/scratch/review"
-mkdir -p "${TARGET_DIR}/docs"
-
-copy_file ".gitignore"
-copy_file "AGENTS.md"
-copy_file "CLAUDE.md"
-copy_file "README.md"
-copy_file "README-kr.md"
-copy_file "docs/LLM-WIKI.md"
-copy_file "docs/usage.md"
-copy_file "docs/USER_PROMPTS.md"
-copy_file "docs/VAULT_PROMPTS.md"
-copy_tree ".github"
-copy_tree ".agents"
-copy_file ".claude/skills/wiki-ingest/SKILL.md"
-copy_file ".claude/skills/wiki-update/SKILL.md"
-copy_file ".claude/skills/wiki-query/SKILL.md"
-copy_file ".claude/skills/memory-cleanup/SKILL.md"
-copy_tree "docs/agent"
-copy_file "scripts/release_gate.sh"
-copy_tree "tools/wiki"
-copy_tree "tests"
-copy_tree "wiki"
-copy_tree "scratch/drafts"
-copy_tree "scratch/review"
-
-if [[ "${WITH_STENC}" -eq 1 ]]; then
-  require_stenc_bundle
-  copy_file "docs/stenc/.gitignore"
-  copy_tree "docs/stenc/content"
-  copy_tree "tools/stenc"
+# install assembles the vault in a temporary sibling folder, renames it into place, installs the
+# user-level project-memory files and MCP entry, and prints next steps that start with ${PYTHON_BIN}'s path.
+install_args=(install "${TARGET_DIR}")
+if [[ -n "${VAULT_NAME_ARG}" ]]; then
+  install_args+=(--name "${VAULT_NAME_ARG}")
 fi
-
-touch "${TARGET_DIR}/raw/sources/.gitkeep"
-touch "${TARGET_DIR}/raw/assets/.gitkeep"
-touch "${TARGET_DIR}/raw/imports/.gitkeep"
-touch "${TARGET_DIR}/scratch/reports/.gitkeep"
-
-chmod 0755 "${TARGET_DIR}/scripts/release_gate.sh" 2>/dev/null || true
-
-# .mcp.json is machine-specific (chosen interpreter, absolute path), so it is not a managed file.
-# Record the absolute interpreter path: Claude Code may start MCP servers with a PATH that lacks it.
-PYTHON_ABS="$(command -v "${PYTHON_BIN}")"
-"${PYTHON_BIN}" - "${PYTHON_ABS}" "${TARGET_DIR}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-python_bin, target_dir = str(Path(sys.argv[1]).absolute()), Path(sys.argv[2]).resolve()
-config = {
-    "mcpServers": {
-        "llm-wiki": {
-            "command": python_bin,
-            "args": [str(target_dir / "tools" / "wiki" / "mcp_server.py")],
-        }
-    }
-}
-(target_dir / ".mcp.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-PY
-
-"${PYTHON_BIN}" "${SCRIPT_DIR}/tools/vault_migration/cli.py" manifest \
-  --builder-root "${SCRIPT_DIR}" \
-  --target "${TARGET_DIR}" \
-  --builder-revision "${VAULT_BUILDER_REVISION:-contract-v2}"
-
-echo "LLM Wiki Vault initialized: ${TARGET_DIR}"
 if [[ "${WITH_STENC}" -eq 1 ]]; then
-  echo "Optional Stenc docs and tools included."
-else
-  echo "Optional Stenc docs and tools skipped. Re-run with --with-stenc to include them."
+  install_args+=(--with-stenc)
 fi
-echo "Next:"
-echo "  cd ${TARGET_DIR}"
-echo "  python3 tools/wiki/cli.py lint --report"
-echo "  python3 tools/wiki/cli.py health"
+exec "${PYTHON_BIN}" "${SCRIPT_DIR}/tools/vault_migration/cli.py" "${install_args[@]}"

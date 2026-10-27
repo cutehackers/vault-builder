@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.catalogs import build_catalog, write_catalog
+from tools.vault_migration.installing import install
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.models import MigrationPlan
 from tools.vault_migration.planning import audit_vault, validate_external_output_path
@@ -553,6 +554,11 @@ def _build_parser() -> argparse.ArgumentParser:
     apply = subcommands.add_parser("apply")
     apply.add_argument("--target", required=True)
     apply.add_argument("--plan", required=True)
+    install = subcommands.add_parser("install")
+    install.add_argument("path")
+    install.add_argument("--name")
+    install.add_argument("--with-stenc", action="store_true")
+    install.add_argument("--dry-run", action="store_true")
     recover = subcommands.add_parser("recover")
     recover.add_argument("--target", required=True)
     recover.add_argument("--migration-id", required=True)
@@ -680,6 +686,17 @@ def main(argv: list[str] | None = None) -> int:
             return _run_apply(args)
         except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
             print(f"apply: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "install":
+        try:
+            return install(
+                Path(args.path),
+                name=args.name,
+                with_stenc=args.with_stenc,
+                dry_run=args.dry_run,
+            )
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(f"install: {exc}", file=sys.stderr)
             return 1
     if args.command == "recover":
         try:
