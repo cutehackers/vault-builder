@@ -34,7 +34,7 @@ This skill may read raw sources, inspect wiki pages, identify reusable concepts,
    - same generated slug with a different canonical_source: slug-collision; stop and ask for a new slug or human review.
 5. If needed, run `python3 tools/wiki/cli.py ingest-source <raw-path> --report`.
 6. Read related pages from `wiki/` and avoid duplicate concept/entity/system/workflow pages.
-7. Extract durable concepts, entities, systems, workflows, decisions, claims, contradictions, and open questions.
+7. Extract durable concepts, entities, systems, workflows, decisions, claims, contradictions, and open questions. Search for existing pages first with `python3 tools/wiki/cli.py search "<keywords>"`. When the source is a short memo that changes or adds one decision on an existing page, use a patch draft and supersede the old claim instead of rewriting the page.
 8. For every substantive extracted page, set `source_count` and `quality.provenance` to match the actual evidence, then cite evidence in the body.
 9. Write JSON drafts under `scratch/drafts/` using `tools/wiki/templates/draft-upsert-page.json`.
 10. Publish drafts with `python3 tools/wiki/cli.py publish-draft <draft-path> --report`.

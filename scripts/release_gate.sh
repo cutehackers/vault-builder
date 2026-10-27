@@ -5,9 +5,31 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 gate_root=""
 
+print_python_install_help() {
+  local found
+  echo "Python 3.10 or newer is required, and no such interpreter was found on PATH." >&2
+  for found in "${PYTHON:-}" python3 python; do
+    if [[ -n "${found}" ]] && command -v "${found}" >/dev/null 2>&1; then
+      echo "  Found: $("${found}" --version 2>&1) at $(command -v "${found}")" >&2
+    fi
+  done
+  echo "Install Python 3.10 or newer, then run this command again:" >&2
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    Darwin)
+      echo "  brew install python@3.12" >&2
+      ;;
+    Linux)
+      echo "  sudo apt-get install python3.12   (Ubuntu 24.04 or newer; older Ubuntu needs ppa:deadsnakes/ppa)" >&2
+      echo "  sudo dnf install python3.12       (Fedora, RHEL)" >&2
+      ;;
+  esac
+  echo "  uv python install 3.12            (any OS, https://docs.astral.sh/uv/)" >&2
+  echo "If Python 3.10 or newer is installed under another name, set PYTHON, for example PYTHON=python3.12." >&2
+}
+
 choose_python() {
   local candidate
-  for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
+  for candidate in "${PYTHON:-}" python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
       if "$candidate" - <<'PY' >/dev/null 2>&1; then
 import sys
@@ -18,7 +40,7 @@ PY
       fi
     fi
   done
-  printf '[release-gate] Python 3.10 or newer is required.\n' >&2
+  print_python_install_help
   exit 1
 }
 
@@ -101,6 +123,36 @@ if issues:
 PY
 }
 
+code_fingerprint() {
+  local node_version
+  node_version="$(node --version 2>/dev/null || echo none)"
+  "$PYTHON_BIN" - "$1" "$PYTHON_BIN" "$node_version" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+root = Path(sys.argv[1])
+skip_prefixes = {("wiki",), ("raw",), ("scratch",), (".git",), (".worktrees",), (".obsidian",)}
+if (root / "init-vault.sh").is_file():
+    # The builder copies wiki/, scratch/drafts and scratch/review into new vaults and tests that output.
+    skip_prefixes = {("raw",), ("scratch", "reports"), (".git",), (".worktrees",), (".obsidian",)}
+skip_parts = {"__pycache__", "node_modules", ".DS_Store"}
+digest = hashlib.sha256()
+digest.update(f"{sys.argv[2]}\0{sys.version}\0{sys.argv[3]}\0".encode())
+for path in sorted(root.rglob("*")):
+    relative = path.relative_to(root)
+    if any(relative.parts[: len(prefix)] == prefix for prefix in skip_prefixes):
+        continue
+    if any(part in skip_parts for part in relative.parts):
+        continue
+    if path.suffix == ".pyc" or path.is_symlink() or not path.is_file():
+        continue
+    digest.update(relative.as_posix().encode() + b"\0")
+    digest.update(hashlib.sha256(path.read_bytes()).digest())
+print(digest.hexdigest())
+PY
+}
+
 stenc_checks_enabled() {
   case "${WIKI_ENABLE_STENC:-0}" in
     1|true|TRUE|yes|YES)
@@ -121,6 +173,19 @@ else
   printf '[release-gate] No Git worktree detected; tracked-diff guard will be skipped.\n'
 fi
 
+# Tool tests take most of the gate's time and depend on code and docs, not on vault knowledge.
+# In the builder repository they also test the wiki/ and scratch/ files copied into new vaults,
+# so those count as code there.
+# A passing run records a fingerprint of everything outside the knowledge directories in the Git
+# directory, so later runs that only changed wiki/, raw/ or scratch/ skip the tool tests. The cache
+# never lives in the vault's own files. Vaults without Git and fresh CI checkouts run every test.
+tests_cache=""
+code_fingerprint=""
+unit_tests_cached=0
+if [ "$git_worktree" -eq 1 ]; then
+  tests_cache="$(git -C "$ROOT" rev-parse --absolute-git-dir)/llm-wiki-gate-tests.cache"
+fi
+
 gate_root="$(mktemp -d "${TMPDIR:-/tmp}/llm-wiki-release-gate.XXXXXX")"
 wiki_tests=(
   tests/test_wiki_quality_baseline.py
@@ -132,11 +197,26 @@ fi
 rsync -a --exclude ".git" --exclude "__pycache__" "$ROOT/" "$gate_root/"
 cd "$gate_root"
 
-run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:2}" \
-  "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"
-if [ "${#wiki_tests[@]}" -gt 2 ]; then
-  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:2}" \
-    run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"
+# Fingerprint the copy that the tests run against, so a file edited during the gate cannot be
+# recorded as tested.
+if [ -n "$tests_cache" ]; then
+  code_fingerprint="$(code_fingerprint "$gate_root")"
+  if [ "${WIKI_GATE_FULL:-0}" != "1" ] && [ -f "$tests_cache" ] && [ "$(cat "$tests_cache")" = "$code_fingerprint" ]; then
+    unit_tests_cached=1
+  fi
+fi
+
+if [ "$unit_tests_cached" -eq 1 ]; then
+  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:1}" \
+    "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:1}"
+  printf '\n[release-gate] Tool tests skipped: code and docs match the last passing run. Set WIKI_GATE_FULL=1 to run them.\n'
+else
+  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:2}" \
+    "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"
+  if [ "${#wiki_tests[@]}" -gt 2 ]; then
+    run "$PYTHON_BIN -m unittest ${wiki_tests[*]:2}" \
+      run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"
+  fi
 fi
 run "$PYTHON_BIN tools/wiki/cli.py lint --report" \
   "$PYTHON_BIN" tools/wiki/cli.py lint --report
@@ -188,4 +268,10 @@ if [ "$git_worktree" -eq 1 ]; then
   run "git diff --check" git -C "$ROOT" diff --check -- .
 else
   run "check_workspace_whitespace" check_workspace_whitespace
+fi
+
+if [ -n "$tests_cache" ] && [ "$unit_tests_cached" -eq 0 ]; then
+  if ! printf '%s\n' "$code_fingerprint" 2>/dev/null > "$tests_cache"; then
+    printf '[release-gate] Could not record the passing test fingerprint; the next run will run every test.\n' >&2
+  fi
 fi

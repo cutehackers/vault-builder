@@ -6,9 +6,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .draft_patch import materialize_patch
 from .frontmatter import Page, parse_page, render_page
 from .lint import (
     ALLOWED_LOG_EVENTS,
+    claim_evidence_table,
     find_human_locks,
     validate_human_locks,
     validate_lifecycle,
@@ -42,6 +44,8 @@ class BatchDraftResult:
 def apply_draft(root: Path, draft_path: Path, report_path: Path | None = None, dry_run: bool = False) -> DraftResult:
     draft = _load_draft(draft_path)
     target_path = _resolve_wiki_target(root, draft)
+    if draft["operation"] == "patch-page":
+        draft = materialize_patch(target_path, draft)
     payload_errors = _validate_draft_payload(root, draft, target_path)
     if payload_errors:
         rendered = "\n".join(payload_errors)
@@ -61,6 +65,9 @@ def apply_draft(root: Path, draft_path: Path, report_path: Path | None = None, d
         if find_human_locks(existing_page).page_locked:
             raise ValueError(f"Target page is human-locked: {target_path}")
         _validate_locked_sections_preserved(existing_page.body, page.body, target_path)
+        claim_errors = _claims_preserved_errors(existing_page.body, page.body, draft.get("remove_claims"))
+        if claim_errors:
+            raise ValueError("Draft failed validation:\n" + "\n".join(claim_errors))
 
     if not dry_run:
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +96,7 @@ def apply_batch_draft(
     _validate_log_entry(errors, batch.get("log"))
     _validate_side_effects(errors, root, None, batch.get("log"))
     for index, page_draft in enumerate(batch["pages"]):
-        page_errors, target_path = _validate_batch_page(root, page_draft)
+        page_errors, target_path, page_draft = _validate_batch_page(root, page_draft)
         errors.extend(f"[page {index}] {error}" for error in page_errors)
         if target_path is None:
             continue
@@ -197,8 +204,17 @@ def _load_draft(path: Path) -> dict[str, Any]:
 def _validate_single_draft_shape(draft: dict[str, Any]) -> None:
     if draft.get("version") != 1:
         raise ValueError("Draft version must be 1.")
+    remove_claims = draft.get("remove_claims", [])
+    if not isinstance(remove_claims, list) or not all(isinstance(claim, str) for claim in remove_claims):
+        raise ValueError("Draft remove_claims must be a list of claim texts when present.")
+    if draft.get("operation") == "patch-page":
+        if not isinstance(draft.get("edits"), list):
+            raise ValueError("Patch draft edits must be a list.")
+        if "body" in draft:
+            raise ValueError("Patch draft must not include body; use edits.")
+        return
     if draft.get("operation") != "upsert-page":
-        raise ValueError("Draft operation must be upsert-page.")
+        raise ValueError("Draft operation must be upsert-page or patch-page.")
     if not isinstance(draft.get("frontmatter"), dict):
         raise ValueError("Draft frontmatter must be an object.")
     if not isinstance(draft.get("body"), str):
@@ -220,13 +236,16 @@ def _load_batch_draft(path: Path) -> dict[str, Any]:
     return batch
 
 
-def _validate_batch_page(root: Path, draft: dict[str, Any]) -> tuple[list[str], Path | None]:
+def _validate_batch_page(root: Path, draft: dict[str, Any]) -> tuple[list[str], Path | None, dict[str, Any]]:
+    """Validate one batch page and return it as an upsert-page draft."""
     errors: list[str] = []
     try:
         _validate_single_draft_shape(draft)
         target_path = _resolve_wiki_target(root, draft)
+        if draft["operation"] == "patch-page":
+            draft = materialize_patch(target_path, draft)
     except ValueError as exc:
-        return [str(exc)], None
+        return [str(exc)], None, draft
 
     if draft.get("log") is not None:
         errors.append("[error] invalid-batch-page-log - Batch page drafts must not include log; use batch log.")
@@ -248,7 +267,8 @@ def _validate_batch_page(root: Path, draft: dict[str, Any]) -> tuple[list[str], 
             _validate_locked_sections_preserved(existing_page.body, page.body, target_path)
         except ValueError as exc:
             errors.append(str(exc))
-    return errors, target_path
+        errors.extend(_claims_preserved_errors(existing_page.body, page.body, draft.get("remove_claims")))
+    return errors, target_path, draft
 
 
 def _resolve_wiki_target(root: Path, draft: dict[str, Any]) -> Path:
@@ -277,6 +297,31 @@ def _validate_draft_page(page: Page, wiki_root: Path, repo_root: Path) -> list[I
         issues.extend(validate_log(page))
     issues.extend(validate_page_links(page, wiki_root))
     return issues
+
+
+def _claims_preserved_errors(existing_body: str, proposed_body: str, remove_claims: Any) -> list[str]:
+    """Reject drafts that drop claim rows unless the draft names them in remove_claims.
+
+    Replacing a page body is the easiest way to lose a recorded claim by accident. A claim that
+    is no longer true should stay as a superseded or deprecated row; removal must be explicit.
+    """
+    existing = claim_evidence_table(existing_body)
+    if existing is None:
+        return []
+    proposed = claim_evidence_table(proposed_body)
+    proposed_claims = {row.claim for row in proposed.rows} if proposed is not None else set()
+    allowed = {claim.strip() for claim in remove_claims or []}
+    errors = []
+    for row in existing.rows:
+        if row.claim not in proposed_claims and row.claim not in allowed:
+            errors.append(
+                "[error] claim-removed - Draft removes a claim row without listing it in remove_claims; "
+                f"mark it superseded or deprecated instead: {row.claim}"
+            )
+    existing_claims = {row.claim for row in existing.rows}
+    for claim in sorted(allowed - existing_claims):
+        errors.append(f"[error] unknown-remove-claim - remove_claims names a claim the page does not have: {claim}")
+    return errors
 
 
 def _validate_locked_sections_preserved(existing_body: str, proposed_body: str, target_path: Path) -> None:

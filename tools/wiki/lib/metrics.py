@@ -9,7 +9,7 @@ from typing import Any
 from .frontmatter import Page, parse_page
 from .hash_source import display_path
 from .links import find_wiki_links
-from .lint import lint_repo
+from .lint import claim_evidence_table, lint_repo
 from .paths import resolve_report_path
 from .review import list_review_items
 from .source_registry import build_source_registry
@@ -137,29 +137,11 @@ def _load_wiki_pages(wiki_root: Path) -> list[Page]:
 
 
 def _claim_status_counts(page: Page) -> Counter[str]:
-    counts: Counter[str] = Counter()
-    in_claim_table = False
-    for line in page.body.splitlines():
-        cells = _table_cells(line)
-        if not cells:
-            in_claim_table = False
-            continue
-        normalized = [cell.lower() for cell in cells]
-        if normalized[:3] == ["claim", "status", "evidence"]:
-            in_claim_table = True
-            continue
-        if in_claim_table and set(cells) <= {"---", ":---", "---:", ":---:"}:
-            continue
-        if in_claim_table and len(cells) >= 3:
-            counts[cells[1].strip().lower()] += 1
-    return counts
-
-
-def _table_cells(line: str) -> list[str]:
-    stripped = line.strip()
-    if not stripped.startswith("|") or not stripped.endswith("|"):
-        return []
-    return [cell.strip() for cell in stripped.strip("|").split("|")]
+    """Count claim statuses from the same table lint validates."""
+    table = claim_evidence_table(page.body)
+    if table is None:
+        return Counter()
+    return Counter(row.status.strip().lower() for row in table.rows)
 
 
 def _is_substantive_without_claim_provenance(page: Page) -> bool:

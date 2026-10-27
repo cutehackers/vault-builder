@@ -77,9 +77,31 @@ need_command() {
 need_command curl
 need_command tar
 
+print_python_install_help() {
+  local found
+  echo "Python 3.10 or newer is required, and no such interpreter was found on PATH." >&2
+  for found in "${PYTHON:-}" python3 python; do
+    if [[ -n "${found}" ]] && command -v "${found}" >/dev/null 2>&1; then
+      echo "  Found: $("${found}" --version 2>&1) at $(command -v "${found}")" >&2
+    fi
+  done
+  echo "Install Python 3.10 or newer, then run this command again:" >&2
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    Darwin)
+      echo "  brew install python@3.12" >&2
+      ;;
+    Linux)
+      echo "  sudo apt-get install python3.12   (Ubuntu 24.04 or newer; older Ubuntu needs ppa:deadsnakes/ppa)" >&2
+      echo "  sudo dnf install python3.12       (Fedora, RHEL)" >&2
+      ;;
+  esac
+  echo "  uv python install 3.12            (any OS, https://docs.astral.sh/uv/)" >&2
+  echo "If Python 3.10 or newer is installed under another name, set PYTHON, for example PYTHON=python3.12." >&2
+}
+
 choose_python() {
   local candidate
-  for candidate in "${PYTHON:-}" python3.12 python3.11 python3.10 python3; do
+  for candidate in "${PYTHON:-}" python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
     if [[ -n "${candidate}" ]] && command -v "${candidate}" >/dev/null 2>&1; then
       if "${candidate}" - <<'PY' >/dev/null 2>&1; then
 import sys
@@ -90,7 +112,7 @@ PY
       fi
     fi
   done
-  echo "Missing required command: Python 3.10 or newer" >&2
+  print_python_install_help
   exit 1
 }
 

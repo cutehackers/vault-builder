@@ -443,6 +443,8 @@ class VaultManifestTest(unittest.TestCase):
                     )
                     self.assertEqual(1, result.returncode, result.stdout + result.stderr)
                     self.assertIn("Python 3.10 or newer", result.stderr)
+                    self.assertIn("Found: Python 3.9.18", result.stderr)
+                    self.assertIn("uv python install 3.12", result.stderr)
             self.assertFalse(missing_target.exists())
             self.assertEqual([], list(empty_target.iterdir()))
 

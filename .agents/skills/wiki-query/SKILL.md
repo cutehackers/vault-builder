@@ -34,8 +34,8 @@ This skill answers from durable wiki pages and source-backed evidence. It may cr
 ## Workflow
 
 1. Read `wiki/index.md` first.
-2. Identify candidate pages by type: sources, concepts, entities, systems, workflows, decisions, maps.
-3. Read relevant durable wiki pages.
+2. Find candidate pages with `python3 tools/wiki/cli.py search "<keywords>"`, adding `--type decision` or another type when the question names one. Over MCP, use `wiki_search`. Search leaves out deprecated pages and superseded claims; pass `--include-deprecated` only when the question is about history.
+3. Read relevant durable wiki pages. Use `python3 tools/wiki/cli.py read <path> --section "<heading>"`, or `wiki_read_page` over MCP, when only one section is needed.
 4. Inspect `wiki/sources/` or `raw/sources/` only when the answer needs source-level evidence.
 5. Separate stated facts, inferences, contested claims, and missing evidence.
 6. Answer with synthesis, not a list of retrieved snippets.
@@ -47,7 +47,8 @@ This skill answers from durable wiki pages and source-backed evidence. It may cr
 
 ## Quality Gates
 
-- Start from `wiki/index.md`; do not answer from memory alone.
+- Start from `wiki/index.md` and search; do not answer from memory alone.
+- Answer from current claims. Mention a superseded claim only to explain what changed.
 - Cite durable wiki pages and raw/source evidence when the answer depends on them.
 - Substantive synthesized answers require citations to durable pages or source evidence.
 - Do not present inferred claims as direct source facts.

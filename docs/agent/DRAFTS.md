@@ -7,13 +7,33 @@ report. Treat `publish-draft` as the durable publication gate.
 Use `tools/wiki/templates/draft-upsert-page.json` as the starting shape.
 Use `tools/wiki/templates/draft-batch-upsert-pages.json` when one semantic operation must update multiple durable pages transactionally.
 In a batch draft, put the durable operation record in the top-level `log`; individual `pages[]` entries must not include `log`.
-If a page sets `quality.provenance` to `claim`, include a markdown table with `Claim`, `Status`, and `Evidence` columns. Allowed row statuses are `stated`, `inferred`, `contested`, and `deprecated`.
+If a page sets `quality.provenance` to `claim`, include a markdown table with `Claim`, `Status`, and `Evidence` columns. Allowed row statuses are `stated`, `inferred`, `contested`, `deprecated`, and `superseded`. A `superseded` row must name its replacement with `Superseded by:` in its evidence.
+
+## Patch Drafts
+
+Use `tools/wiki/templates/draft-patch-page.json` to change part of an existing page: record one decision, correct one claim, or add one note. A patch draft lists `edits` instead of a full `body`. The CLI applies the edits to the current page and validates the result exactly like an upsert draft, so human locks, provenance, and links are checked the same way.
+
+| `op` | Fields | Effect |
+|---|---|---|
+| `append-claim` | `claim`, `status`, `evidence` | Adds a row at the end of the page's Claim/Status/Evidence table. |
+| `supersede-claim` | `claim`, `by`, `status`, `evidence` | Marks the matching row `superseded`, adds `Superseded by: <by>` to its evidence, and inserts the replacement row below it. |
+| `set-claim-status` | `claim`, `status` | Changes the status of the matching row. |
+| `replace-section` | `heading`, `content` | Replaces the text under one heading, up to the next heading of the same or higher level. |
+| `append-to-section` | `heading`, `content` | Adds text at the end of one section. |
+
+Claim edits (`append-claim`, `supersede-claim`, `set-claim-status`) are accepted only on pages with `quality.provenance: claim`, because lint validates claim evidence only there. `claim` must match exactly one existing row. `heading` is the full heading line, such as `## Notes`, and must appear once. A patch sets `updated` to today and, for claim-level provenance pages, recomputes `source_count` from the claim evidence. An optional `frontmatter` object overrides individual fields after that. A patch cannot create a page or a claim table; use an upsert draft for those.
+
+After a clean publish, `publish-draft` and `publish-batch` rebuild the generated navigation maps. When a map changes, this adds a `Rebuild Navigation Maps` entry to `wiki/log.md`. If the rebuild fails, the published draft stays and the command prints what to run.
+
+## Claim Removal Guard
+
+Every draft that targets an existing page with a claim table must keep each existing claim row. A claim that is no longer true stays as a `superseded` or `deprecated` row so its history remains. To remove a row on purpose, list its exact claim text in the draft's `remove_claims` array.
 
 ## Required Flow
 
 1. Read `wiki/index.md`.
 2. Read related pages to avoid duplicates.
-3. Prepare a JSON draft under `scratch/drafts/`.
+3. Prepare a JSON draft under `scratch/drafts/`. Use a patch draft when only part of an existing page changes.
 4. For optional low-level validation before publication, run:
 
    ```bash

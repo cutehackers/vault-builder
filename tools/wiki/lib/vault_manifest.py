@@ -42,6 +42,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/lib/.gitkeep",
         "tools/wiki/lib/authority.py",
         "tools/wiki/lib/draft.py",
+        "tools/wiki/lib/draft_patch.py",
         "tools/wiki/lib/frontmatter.py",
         "tools/wiki/lib/hash_source.py",
         "tools/wiki/lib/ingest.py",
@@ -53,6 +54,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/lib/paths.py",
         "tools/wiki/lib/review.py",
         "tools/wiki/lib/schema.py",
+        "tools/wiki/lib/search.py",
         "tools/wiki/lib/source_registry.py",
         "tools/wiki/lib/vault_manifest.py",
         "tools/wiki/lib/wiki_update.py",
@@ -60,6 +62,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/mcp_server.py",
         "tools/wiki/metrics-policy.json",
         "tools/wiki/templates/draft-batch-upsert-pages.json",
+        "tools/wiki/templates/draft-patch-page.json",
         "tools/wiki/templates/draft-upsert-page.json",
         "tools/wiki/templates/frontmatter.yaml",
     }
