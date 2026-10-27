@@ -719,6 +719,14 @@ class _OutsideChanges:
         _before_write(path)
         _atomic_write(path, contents, mode)
 
+    def delete(self, path: Path) -> None:
+        """Remove a file after backing it up; rollback writes it back."""
+        if not any(prior.path == path for prior in self.priors):
+            self.priors.append(self._backup(path))
+        _before_write(path)
+        path.unlink()
+        fsync_directory(path.parent)
+
     def _backup(self, path: Path) -> _Prior:
         if not path.exists():
             return _Prior(path, None, None, None)

@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
 from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.catalogs import build_catalog, write_catalog
 from tools.vault_migration.installing import install
+from tools.vault_migration.uninstalling import doctor, uninstall
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.models import MigrationPlan
 from tools.vault_migration.planning import audit_vault, validate_external_output_path
@@ -559,6 +560,11 @@ def _build_parser() -> argparse.ArgumentParser:
     install.add_argument("--name")
     install.add_argument("--with-stenc", action="store_true")
     install.add_argument("--dry-run", action="store_true")
+    uninstall_parser = subcommands.add_parser("uninstall")
+    uninstall_parser.add_argument("path")
+    uninstall_parser.add_argument("--dry-run", action="store_true")
+    doctor_parser = subcommands.add_parser("doctor")
+    doctor_parser.add_argument("path")
     recover = subcommands.add_parser("recover")
     recover.add_argument("--target", required=True)
     recover.add_argument("--migration-id", required=True)
@@ -697,6 +703,18 @@ def main(argv: list[str] | None = None) -> int:
             )
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             print(f"install: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "uninstall":
+        try:
+            return uninstall(Path(args.path), dry_run=args.dry_run)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(f"uninstall: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "doctor":
+        try:
+            return doctor(Path(args.path))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(f"doctor: {exc}", file=sys.stderr)
             return 1
     if args.command == "recover":
         try:
