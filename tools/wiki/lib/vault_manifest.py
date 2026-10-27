@@ -17,9 +17,11 @@ _MANAGED_MODES = frozenset({"0644", "0755"})
 _MANAGED_POLICIES = frozenset({"replace-if-unmodified"})
 MANAGED_EXACT_PATH_SCOPE = frozenset(
     {
+        ".agents/skills/memory-cleanup/SKILL.md",
         ".agents/skills/wiki-ingest/SKILL.md",
         ".agents/skills/wiki-query/SKILL.md",
         ".agents/skills/wiki-update/SKILL.md",
+        ".claude/skills/memory-cleanup/SKILL.md",
         ".claude/skills/wiki-ingest/SKILL.md",
         ".claude/skills/wiki-query/SKILL.md",
         ".claude/skills/wiki-update/SKILL.md",
@@ -51,6 +53,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/lib/links.py",
         "tools/wiki/lib/lint.py",
         "tools/wiki/lib/maps.py",
+        "tools/wiki/lib/memory_scan.py",
         "tools/wiki/lib/merge.py",
         "tools/wiki/lib/metrics.py",
         "tools/wiki/lib/paths.py",
