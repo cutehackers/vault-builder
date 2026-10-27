@@ -120,7 +120,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "7032ff3d58d196e4a51ae450aaeacce8e804b92455f644f98a618d818858dbe9"
+      "sha256": "eb2c8e3b8d65ec27cdd7317e83fe882bc47971607f0e5d432d6191cf2a1d5de7"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
