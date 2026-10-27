@@ -54,7 +54,7 @@
       "mode": "0644",
       "path": ".github/workflows/release-gate.yml",
       "policy": "replace-if-unmodified",
-      "sha256": "aa47224e6e7cac000eb09d5b44ed4f74b3cb31718b27d3e8889ee7c689e8b3c9"
+      "sha256": "899b4f4bc24a9dbf9da44f70940211e262542a58d628711b182e0bb0ded35acb"
     },
     ".gitignore": {
       "mode": "0644",

@@ -212,8 +212,9 @@ def _initialize_legacy_vault(root: Path) -> Path:
     return target
 
 
-# Contract v1 is frozen at this commit (memory-stage2 spec decision 8).
-V1_BASELINE_COMMIT = "3e75f46"
+# Contract v1 is frozen at this commit on main (memory-stage2 spec decision 8). PR #2 was
+# rebase-merged, so the branch commit 3e75f46 became 5fa66d4 with the same tree.
+V1_BASELINE_COMMIT = "5fa66d4"
 
 
 def _initialize_v1_vault(root: Path) -> Path:
@@ -989,6 +990,17 @@ class ContractCatalogTest(unittest.TestCase):
                     "authority_issues": [],
                 }
             )
+
+    def test_v1_baseline_commit_is_in_the_checked_out_history(self):
+        # A rebase or squash merge rewrites commit ids; the baseline must stay reachable from HEAD.
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", V1_BASELINE_COMMIT, "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_v1_catalog_bytes_are_fixed_at_v1_baseline_commit(self):
         relative = "tools/vault_migration/contracts/v1.json"
