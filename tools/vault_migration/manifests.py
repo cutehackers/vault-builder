@@ -4,15 +4,18 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+
+from tools.wiki.lib.vault_manifest import MANIFEST_CONTRACT_VERSION, MANIFEST_SCHEMA_VERSION
 
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
 from .durability import fsync_directory as _fsync_directory
 from .models import VaultManifest
 
 
-_CATALOG_PATH = "tools/vault_migration/contracts/v1.json"
+_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
 _MANIFEST_DIRECTORY = ".vault-builder"
 _MANIFEST_FILENAME = "manifest.json"
 
@@ -42,7 +45,7 @@ def _builder_revision(builder_root: Path, explicit_revision: str) -> str:
         check=False,
     )
     revision = result.stdout.strip() if result.returncode == 0 else ""
-    return revision or "contract-v1"
+    return revision or "contract-v2"
 
 
 def _utc_timestamp(value: datetime | None) -> str:
@@ -59,14 +62,18 @@ def create_manifest(
     target_root: Path,
     builder_revision: str,
     generated_at: datetime | None = None,
+    external_records: Iterable[Mapping[str, object]] = (),
 ) -> VaultManifest:
-    """Return the v1 manifest for catalog files copied unchanged into a target."""
+    """Return the current-schema manifest for catalog files copied unchanged into a target."""
     builder = _validate_root(builder_root, "Builder root")
     target, _, _ = _manifest_paths(target_root)
     catalog_path = _safe_relative_path(builder, _CATALOG_PATH)
     catalog = load_catalog(catalog_path)
-    if catalog.contract_version != 1:
-        raise ValueError("Version 1 manifest requires a version 1 catalog.")
+    if catalog.contract_version != MANIFEST_CONTRACT_VERSION:
+        raise ValueError(
+            f"Version {MANIFEST_CONTRACT_VERSION} manifest requires a version "
+            f"{MANIFEST_CONTRACT_VERSION} catalog."
+        )
 
     managed_files = {}
     for relative, managed in catalog.managed_files.items():
@@ -83,11 +90,12 @@ def create_manifest(
         managed_files[relative] = managed
 
     return VaultManifest(
-        schema_version=catalog.schema_version,
+        schema_version=MANIFEST_SCHEMA_VERSION,
         contract_version=catalog.contract_version,
         builder_revision=_builder_revision(builder, builder_revision),
         generated_at=_utc_timestamp(generated_at),
         managed_files=managed_files,
+        external_records=tuple(external_records),
     )
 
 

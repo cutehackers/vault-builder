@@ -20,6 +20,8 @@ try:
 except ImportError:  # pragma: no cover - supported migrations are POSIX-only
     fcntl = None  # type: ignore[assignment]
 
+from tools.wiki.lib.vault_manifest import MANIFEST_CONTRACT_VERSION
+
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
 from .durability import (
     exchange_directory_entries as _exchange_directory_entries,
@@ -32,7 +34,9 @@ from .models import MigrationAction, MigrationPlan, VaultManifest
 from .planning import _target_root, audit_vault, target_fingerprint
 
 
-_V1_CATALOG_PATH = "tools/vault_migration/contracts/v1.json"
+_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
+# Journals left by an interrupted contract-v1 migration stay recoverable.
+_JOURNAL_CONTRACT_VERSIONS = frozenset({1, MANIFEST_CONTRACT_VERSION})
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _RELEASE_GATE_COMMAND = ("bash", "scripts/release_gate.sh")
 _GATE_OUTPUT_TAIL_LINES = 20
@@ -247,6 +251,9 @@ def _apply_plan_locked(
 ) -> VaultManifest:
     _require_no_outstanding_migrations(target)
     checked_plan, actions = _verify_preconditions(builder, target, plan)
+    # A v1 manifest has no records outside the Vault; v2 records survive the migration.
+    current_manifest = load_manifest(target)
+    external_records = () if current_manifest is None else current_manifest.external_records
     try:
         journal_root, journal = _prepare_journal(target, checked_plan, actions)
     except _JournalPreparationFailure as exc:
@@ -306,7 +313,12 @@ def _apply_plan_locked(
         _verify_candidate_files(builder, target, actions)
 
         candidate = replace(
-            create_manifest(builder, target, checked_plan.builder_revision),
+            create_manifest(
+                builder,
+                target,
+                checked_plan.builder_revision,
+                external_records=external_records,
+            ),
             last_migration_id=checked_plan.migration_id,
         )
         candidate_bytes = candidate.to_json().encode("utf-8")
@@ -502,8 +514,8 @@ def _release_migration_lock(descriptor: int) -> None:
 def _verify_preconditions(builder: Path, target: Path, plan: MigrationPlan) -> tuple[MigrationPlan, tuple[MigrationAction, ...]]:
     # Reparse the immutable model so programmatic callers cannot bypass JSON boundaries.
     checked = MigrationPlan.from_json(plan.to_json())
-    if checked.schema_version != 1 or checked.target_contract_version != 1:
-        raise ValueError("Migration plan must target contract version 1.")
+    if checked.schema_version != 1 or checked.target_contract_version != MANIFEST_CONTRACT_VERSION:
+        raise ValueError(f"Migration plan must target contract version {MANIFEST_CONTRACT_VERSION}.")
     if checked.has_blocking_actions:
         raise ValueError("Migration plan requires human review before apply.")
     paths = tuple(action.path for action in checked.actions)
@@ -514,7 +526,7 @@ def _verify_preconditions(builder: Path, target: Path, plan: MigrationPlan) -> t
     if audit_vault(builder, target) != checked:
         raise ValueError("Migration target changed after audit; run audit again.")
 
-    catalog = load_catalog(_safe_relative_path(builder, _V1_CATALOG_PATH))
+    catalog = load_catalog(_safe_relative_path(builder, _CURRENT_CATALOG_PATH))
     if catalog.schema_version != checked.schema_version or catalog.contract_version != checked.target_contract_version:
         raise ValueError("Migration plan does not match the current builder contract.")
     if catalog.builder_revision != checked.builder_revision:
@@ -611,7 +623,7 @@ def _verify_candidate_files(builder: Path, target: Path, actions: tuple[Migratio
         path = _safe_target_path(target, action.path, reject_leaf_symlink=False)
         if path.is_symlink() or not path.is_file() or sha256_file(path) != action.desired_sha256 or _observed_mode(path) != action.desired_mode:
             raise ValueError(f"Migration validation failed: {action.path}")
-    catalog = load_catalog(_safe_relative_path(builder, _V1_CATALOG_PATH))
+    catalog = load_catalog(_safe_relative_path(builder, _CURRENT_CATALOG_PATH))
     for relative, desired in catalog.managed_files.items():
         path = _safe_target_path(target, relative, reject_leaf_symlink=False)
         if path.is_symlink() or not path.is_file() or sha256_file(path) != desired.sha256 or _observed_mode(path) != desired.mode:
@@ -2315,7 +2327,11 @@ def _load_journal(target: Path, journal_root: Path, migration_id: str) -> dict[s
         raise ValueError("Migration recovery journal is invalid.")
     if type(data.get("schema_version")) is not int or type(data.get("target_contract_version")) is not int:
         raise ValueError("Migration recovery journal is invalid.")
-    if data.get("schema_version") != 1 or data.get("migration_id") != migration_id or data.get("target_contract_version") != 1:
+    if (
+        data.get("schema_version") != 1
+        or data.get("migration_id") != migration_id
+        or data.get("target_contract_version") not in _JOURNAL_CONTRACT_VERSIONS
+    ):
         raise ValueError("Migration recovery journal is invalid.")
     if not isinstance(data.get("state"), str) or data["state"] not in _JOURNAL_STATES:
         raise ValueError("Migration recovery journal has an invalid state.")
@@ -2868,7 +2884,7 @@ def _recover_preparing_root(
         journal = {
             "schema_version": 1,
             "migration_id": migration_id,
-            "target_contract_version": 1,
+            "target_contract_version": MANIFEST_CONTRACT_VERSION,
             "state": "preparation-cleanup-pending",
             "entries": [],
             "manifest": None,
@@ -3159,7 +3175,7 @@ def _load_cleanup_tombstone(
         or type(data.get("schema_version")) is not int
         or type(data.get("target_contract_version")) is not int
         or data.get("schema_version") != 1
-        or data.get("target_contract_version") != 1
+        or data.get("target_contract_version") not in _JOURNAL_CONTRACT_VERSIONS
         or data.get("migration_id") != migration_id
         or (
             rolled_back

@@ -6,3 +6,4 @@ __pycache__/
 scratch/reports/*.tmp
 scratch/reports/*.cache
 .vault-builder/recovery/
+.mcp.json

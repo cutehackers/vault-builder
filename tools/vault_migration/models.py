@@ -11,8 +11,10 @@ from types import MappingProxyType
 from typing import Literal, Mapping
 
 from tools.wiki.lib.vault_manifest import (
-    parse_v1_manifest_json,
-    validate_v1_manifest,
+    EXTERNAL_RECORDS_KEY,
+    parse_manifest_json,
+    validate_external_records,
+    validate_manifest,
 )
 
 
@@ -236,6 +238,8 @@ class VaultManifest:
     generated_at: str
     managed_files: Mapping[str, ManagedFile]
     last_migration_id: str | None = None
+    # Schema 2 only: records of files and entries created outside the Vault.
+    external_records: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_version", _require_int(self.schema_version, "schema_version"))
@@ -245,10 +249,20 @@ class VaultManifest:
         object.__setattr__(self, "managed_files", _validate_managed_files(dict(self.managed_files), "managed_files"))
         if self.last_migration_id is not None and not _MIGRATION_ID_RE.fullmatch(self.last_migration_id):
             raise ValueError("last_migration_id must be 16 lowercase hexadecimal characters.")
-        validate_v1_manifest(self.to_dict())
+        if not isinstance(self.external_records, (tuple, list)):
+            raise ValueError("external_records must be a list.")
+        if self.schema_version < 2 and self.external_records:
+            raise ValueError("external_records require manifest schema version 2.")
+        records = validate_external_records([dict(record) for record in self.external_records])
+        object.__setattr__(
+            self,
+            "external_records",
+            tuple(MappingProxyType(record) for record in records),
+        )
+        validate_manifest(self.to_dict())
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "builder_revision": self.builder_revision,
             "contract_version": self.contract_version,
             "generated_at": self.generated_at,
@@ -256,10 +270,13 @@ class VaultManifest:
             "managed_files": {path: item.to_dict() for path, item in self.managed_files.items()},
             "schema_version": self.schema_version,
         }
+        if self.schema_version >= 2:
+            value[EXTERNAL_RECORDS_KEY] = [dict(record) for record in self.external_records]
+        return value
 
     @classmethod
     def from_dict(cls, value: object) -> "VaultManifest":
-        data = validate_v1_manifest(value)
+        data = validate_manifest(value)
         migration_id = data["last_migration_id"]
         if migration_id is not None:
             migration_id = _require_string(migration_id, "last_migration_id")
@@ -270,6 +287,7 @@ class VaultManifest:
             generated_at=_require_string(data["generated_at"], "generated_at"),
             managed_files=_validate_managed_files(data["managed_files"], "managed_files"),
             last_migration_id=migration_id,
+            external_records=tuple(data.get(EXTERNAL_RECORDS_KEY, ())),
         )
 
     def to_json(self) -> str:
@@ -277,7 +295,7 @@ class VaultManifest:
 
     @classmethod
     def from_json(cls, value: str) -> "VaultManifest":
-        return cls.from_dict(parse_v1_manifest_json(value))
+        return cls.from_dict(parse_manifest_json(value))
 
 
 @dataclass(frozen=True)

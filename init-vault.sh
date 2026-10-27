@@ -231,7 +231,7 @@ PY
 "${PYTHON_BIN}" "${SCRIPT_DIR}/tools/vault_migration/cli.py" manifest \
   --builder-root "${SCRIPT_DIR}" \
   --target "${TARGET_DIR}" \
-  --builder-revision "${VAULT_BUILDER_REVISION:-contract-v1}"
+  --builder-revision "${VAULT_BUILDER_REVISION:-contract-v2}"
 
 echo "LLM Wiki Vault initialized: ${TARGET_DIR}"
 if [[ "${WITH_STENC}" -eq 1 ]]; then

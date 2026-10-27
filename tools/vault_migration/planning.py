@@ -17,8 +17,14 @@ from .manifests import load_manifest
 from .models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan
 
 
-_V1_CATALOG_PATH = "tools/vault_migration/contracts/v1.json"
-_V0_CATALOG_PATH = "tools/vault_migration/contracts/v0.json"
+_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
+# Released catalogs whose hashes prove a file is unmodified builder output.
+_PRIOR_CATALOG_PATHS = (
+    "tools/vault_migration/contracts/v0.json",
+    "tools/vault_migration/contracts/v1.json",
+)
+# Manifest contract versions whose recorded hashes are trusted for planning.
+_SUPPORTED_MANIFEST_CONTRACTS = frozenset({1, 2})
 _REQUIRED_TOPOLOGY = (
     "AGENTS.md",
     "wiki/index.md",
@@ -35,12 +41,17 @@ def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
     builder = _regular_directory(builder_root, "Builder root")
     target = _target_root(target_root)
     _validate_topology(target)
-    v0_catalog = _load_catalog(builder, _V0_CATALOG_PATH)
-    v1_catalog = _load_catalog(builder, _V1_CATALOG_PATH)
+    prior_catalogs = tuple(_load_catalog(builder, path) for path in _PRIOR_CATALOG_PATHS)
+    current_catalog = _load_catalog(builder, _CURRENT_CATALOG_PATH)
     manifest = load_manifest(target)
 
-    manifest_is_supported = manifest is None or manifest.contract_version == v1_catalog.contract_version
-    catalog_actions = _catalog_actions(target, v0_catalog, v1_catalog, manifest if manifest_is_supported else None)
+    manifest_is_supported = manifest is None or manifest.contract_version in _SUPPORTED_MANIFEST_CONTRACTS
+    catalog_actions = _catalog_actions(
+        target,
+        prior_catalogs,
+        current_catalog,
+        manifest if manifest_is_supported else None,
+    )
     role_actions = _role_actions(target, set(catalog_actions))
     pages = _wiki_pages(target)
     authority_issues = _issue_dicts(target, scan_authority_issues(target, pages))
@@ -56,18 +67,18 @@ def audit_vault(builder_root: Path, target_root: Path) -> MigrationPlan:
     current_version = manifest.contract_version if manifest is not None else None
     migration_id = _migration_id(
         current_version=current_version,
-        target_version=v1_catalog.contract_version,
-        builder_revision=v1_catalog.builder_revision,
+        target_version=current_catalog.contract_version,
+        builder_revision=current_catalog.builder_revision,
         fingerprint=fingerprint,
         actions=actions,
         authority_issues=authority_issues,
     )
     return MigrationPlan(
-        schema_version=v1_catalog.schema_version,
+        schema_version=current_catalog.schema_version,
         migration_id=migration_id,
         current_contract_version=current_version,
-        target_contract_version=v1_catalog.contract_version,
-        builder_revision=v1_catalog.builder_revision,
+        target_contract_version=current_catalog.contract_version,
+        builder_revision=current_catalog.builder_revision,
         target_fingerprint=fingerprint,
         actions=actions,
         authority_issues=tuple(authority_issues),
@@ -202,13 +213,13 @@ def _safe_builder_path(builder: Path, relative: str) -> Path:
 
 def _catalog_actions(
     target: Path,
-    v0_catalog: ContractCatalog,
-    v1_catalog: ContractCatalog,
+    prior_catalogs: tuple[ContractCatalog, ...],
+    current_catalog: ContractCatalog,
     manifest: object,
 ) -> dict[str, MigrationAction]:
     manifest_files = getattr(manifest, "managed_files", {})
     actions: dict[str, MigrationAction] = {}
-    for relative, desired in v1_catalog.managed_files.items():
+    for relative, desired in current_catalog.managed_files.items():
         state = _file_state(target, relative)
         if state["kind"] == "missing":
             actions[relative] = _action(relative, "create", state, desired, "Managed file is missing from the Vault.")
@@ -237,7 +248,7 @@ def _catalog_actions(
                 "Managed bytes match the target contract but the file mode drifted.",
             )
             continue
-        known_hashes = _known_hashes(relative, v0_catalog, manifest_files)
+        known_hashes = _known_hashes(relative, prior_catalogs, manifest_files)
         if state["sha256"] in known_hashes:
             actions[relative] = _action(
                 relative,
@@ -257,15 +268,16 @@ def _catalog_actions(
     return actions
 
 
-def _known_hashes(relative: str, v0_catalog: ContractCatalog, manifest_files: object) -> set[str]:
+def _known_hashes(relative: str, prior_catalogs: tuple[ContractCatalog, ...], manifest_files: object) -> set[str]:
     hashes: set[str] = set()
     if isinstance(manifest_files, dict) or hasattr(manifest_files, "get"):
         managed = manifest_files.get(relative)
         if isinstance(managed, ManagedFile):
             hashes.add(managed.sha256)
-    legacy = v0_catalog.managed_files.get(relative)
-    if legacy is not None:
-        hashes.add(legacy.sha256)
+    for catalog in prior_catalogs:
+        prior = catalog.managed_files.get(relative)
+        if prior is not None:
+            hashes.add(prior.sha256)
     return hashes
 
 

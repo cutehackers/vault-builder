@@ -14,6 +14,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 from unittest import mock
@@ -32,6 +33,11 @@ from tools.vault_migration.planning import (
     validate_external_output_path,
 )
 from tools.wiki.lib.maps import build_navigation_maps
+from tools.wiki.lib.vault_manifest import (
+    normalized_json_sha256,
+    parse_manifest_json,
+    validate_manifest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,6 +176,17 @@ def _initialize_legacy_vault(root: Path) -> Path:
     target = root / "vault"
     _run(["bash", "init-vault.sh", str(target)], legacy_builder)
     _normalize_legacy_modes(target)
+    return target
+
+
+# Contract v1 is frozen at this commit (memory-stage2 spec decision 8).
+V1_BASELINE_COMMIT = "3e75f46"
+
+
+def _initialize_v1_vault(root: Path) -> Path:
+    v1_builder = _extract_git_archive(ROOT, V1_BASELINE_COMMIT, root / "v1-builder")
+    target = root / "vault"
+    _run(["bash", "init-vault.sh", str(target)], v1_builder)
     return target
 
 
@@ -382,7 +399,7 @@ class VaultManifestTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(2, manifest.contract_version)
             self.assertEqual("test-revision", manifest.builder_revision)
             self.assertNotIn("wiki/overview.md", manifest.managed_files)
             self.assertNotIn("tools/vault_migration/cli.py", manifest.managed_files)
@@ -543,6 +560,172 @@ class VaultManifestTest(unittest.TestCase):
                     write_manifest(target, manifest)
 
             self.assertEqual([], list((target / ".vault-builder").glob(".manifest.json.*.tmp")))
+
+
+def _external_records() -> list[dict[str, object]]:
+    return [
+        {
+            "kind": "file",
+            "location": ".claude/skills/project-memory/SKILL.md",
+            "sha256": "a" * 64,
+            "shared": True,
+        },
+        {
+            "kind": "config",
+            "location": ".claude/vault-builder/vault-map.json",
+            "shared": True,
+        },
+        {
+            "kind": "json-entry",
+            "location": ".claude.json",
+            "key_path": "mcpServers.llm-wiki-personal",
+            "sha256": "b" * 64,
+            "shared": False,
+        },
+    ]
+
+
+def _valid_v2_manifest() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "contract_version": 2,
+        "builder_revision": "test",
+        "generated_at": "2026-10-27T00:00:00Z",
+        "managed_files": {
+            "AGENTS.md": {
+                "path": "AGENTS.md",
+                "sha256": "c" * 64,
+                "mode": "0644",
+                "policy": "replace-if-unmodified",
+            }
+        },
+        "external_records": _external_records(),
+        "last_migration_id": None,
+    }
+
+
+class VaultManifestV2SchemaTest(unittest.TestCase):
+    def test_manifest_parser_reads_v1_and_v2(self):
+        v1 = {
+            "schema_version": 1,
+            "contract_version": 1,
+            "builder_revision": "test",
+            "generated_at": "2026-07-30T00:00:00Z",
+            "managed_files": {},
+        }
+        parsed_v1 = parse_manifest_json(json.dumps(v1))
+        self.assertEqual(1, parsed_v1["schema_version"])
+        self.assertNotIn("external_records", parsed_v1)
+
+        parsed_v2 = parse_manifest_json(json.dumps(_valid_v2_manifest()))
+        self.assertEqual(2, parsed_v2["schema_version"])
+        self.assertEqual(2, parsed_v2["contract_version"])
+        self.assertEqual(
+            sorted(_external_records(), key=lambda item: (item["location"], item.get("key_path", ""))),
+            parsed_v2["external_records"],
+        )
+
+    def test_vault_manifest_model_round_trips_external_records(self):
+        manifest = VaultManifest.from_dict(_valid_v2_manifest())
+
+        self.assertEqual(3, len(manifest.external_records))
+        self.assertEqual(manifest, VaultManifest.from_json(manifest.to_json()))
+        self.assertIn('"external_records"', manifest.to_json())
+        self.assertNotIn(
+            "external_records",
+            VaultManifest(1, 1, "test", "2026-07-30T00:00:00Z", {}).to_json(),
+        )
+        with self.assertRaisesRegex(ValueError, "external_records"):
+            VaultManifest(
+                1,
+                1,
+                "test",
+                "2026-07-30T00:00:00Z",
+                {},
+                external_records=tuple(_external_records()),
+            )
+
+    def test_empty_external_records_are_valid_for_v2(self):
+        value = _valid_v2_manifest()
+        value["external_records"] = []
+
+        self.assertEqual([], validate_manifest(value)["external_records"])
+
+    def test_normalized_json_sha256_ignores_key_order_and_whitespace(self):
+        first = normalized_json_sha256({"command": "python3", "args": ["a", "b"]})
+        second = normalized_json_sha256(json.loads('{ "args": ["a","b"],  "command":"python3" }'))
+
+        self.assertEqual(first, second)
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertNotEqual(first, normalized_json_sha256({"command": "python3", "args": ["b", "a"]}))
+
+    def test_manifest_validator_rejects_invalid_versions_and_external_records(self):
+        cases: dict[str, Callable[[dict[str, object]], None]] = {}
+
+        def record(index: int, key: str, item: object) -> Callable[[dict[str, object]], None]:
+            def change(value: dict[str, object]) -> None:
+                records = value["external_records"]
+                assert isinstance(records, list)
+                records[index][key] = item
+
+            return change
+
+        def drop(index: int, key: str) -> Callable[[dict[str, object]], None]:
+            def change(value: dict[str, object]) -> None:
+                records = value["external_records"]
+                assert isinstance(records, list)
+                records[index].pop(key)
+
+            return change
+
+        def duplicate(index: int) -> Callable[[dict[str, object]], None]:
+            def change(value: dict[str, object]) -> None:
+                records = value["external_records"]
+                assert isinstance(records, list)
+                records.append(dict(records[index]))
+
+            return change
+
+        def file_location_reused_by_entry(value: dict[str, object]) -> None:
+            records = value["external_records"]
+            assert isinstance(records, list)
+            records[2]["location"] = records[0]["location"]
+
+        cases["v2-missing-external-records"] = lambda value: value.pop("external_records")
+        cases["v1-with-external-records"] = lambda value: value.update(schema_version=1, contract_version=1)
+        cases["schema-2-contract-1"] = lambda value: value.__setitem__("contract_version", 1)
+        cases["schema-3"] = lambda value: value.update(schema_version=3, contract_version=3)
+        cases["records-not-list"] = lambda value: value.__setitem__("external_records", {})
+        cases["record-not-object"] = lambda value: value.__setitem__("external_records", ["x"])
+        cases["unknown-kind"] = record(0, "kind", "directory")
+        cases["absolute-location"] = record(0, "location", "/Users/someone/.claude/skills/project-memory/SKILL.md")
+        cases["parent-location"] = record(0, "location", "../.claude/SKILL.md")
+        cases["tilde-location"] = record(0, "location", "~/.claude/SKILL.md")
+        cases["empty-location"] = record(0, "location", "")
+        cases["file-missing-sha256"] = drop(0, "sha256")
+        cases["file-bad-sha256"] = record(0, "sha256", "A" * 64)
+        cases["file-key-path"] = record(0, "key_path", "mcpServers.x")
+        cases["config-with-sha256"] = record(1, "sha256", "a" * 64)
+        cases["shared-not-bool"] = record(1, "shared", 1)
+        cases["shared-missing"] = drop(1, "shared")
+        cases["unknown-record-field"] = record(1, "extra", True)
+        cases["entry-missing-key-path"] = drop(2, "key_path")
+        cases["entry-other-root-key"] = record(2, "key_path", "projects.llm-wiki-personal")
+        cases["entry-empty-name"] = record(2, "key_path", "mcpServers.")
+        cases["entry-nested-name"] = record(2, "key_path", "mcpServers.a/b")
+        cases["entry-missing-sha256"] = drop(2, "sha256")
+        cases["entry-shared"] = record(2, "shared", True)
+        cases["duplicate-file"] = duplicate(0)
+        cases["duplicate-entry"] = duplicate(2)
+        cases["file-location-reused"] = file_location_reused_by_entry
+
+        for name, change in cases.items():
+            value = json.loads(json.dumps(_valid_v2_manifest()))
+            change(value)
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate_manifest(value)
+            with self.subTest(name=f"{name}-json"), self.assertRaises(ValueError):
+                parse_manifest_json(json.dumps(value))
 
 
 class ContractCatalogTest(unittest.TestCase):
@@ -774,10 +957,26 @@ class ContractCatalogTest(unittest.TestCase):
                 }
             )
 
-    def test_v1_catalog_matches_current_managed_files(self):
-        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v1.json")
+    def test_v1_catalog_bytes_are_fixed_at_v1_baseline_commit(self):
+        relative = "tools/vault_migration/contracts/v1.json"
+        frozen = subprocess.run(
+            ["git", "show", f"{V1_BASELINE_COMMIT}:{relative}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
 
-        self.assertEqual(1, catalog.contract_version)
+        self.assertEqual(frozen, (ROOT / relative).read_bytes())
+
+    def test_v2_catalog_matches_current_managed_files(self):
+        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
+
+        self.assertEqual(2, catalog.contract_version)
+        self.assertEqual("contract-v2", catalog.builder_revision)
+        self.assertIn(".gitignore", catalog.managed_files)
+        self.assertFalse(
+            any(path.startswith("tools/vault_migration/assets/") for path in catalog.managed_files)
+        )
         self.assertEqual(set(MANAGED_PATHS), set(catalog.managed_files))
         for relative, managed in catalog.managed_files.items():
             path = ROOT / relative
@@ -1175,15 +1374,95 @@ class MigrationApplyTest(unittest.TestCase):
 
             manifest = apply_plan(ROOT, target, plan, run_gate=gate)
 
-            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(2, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             persisted = load_manifest(target)
             self.assertIsNotNone(persisted)
             assert persisted is not None
             self.assertEqual(plan.migration_id, persisted.last_migration_id)
-            self.assertEqual([None, 1], gate_versions)
+            self.assertEqual([None, 2], gate_versions)
             self.assertEqual(protected_before, _protected_hashes(target))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
+
+    def test_v1_manifest_vault_audit_replaces_v1_hashes_and_apply_writes_v2_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = _initialize_v1_vault(Path(tmpdir))
+            before = load_manifest(target)
+            assert before is not None
+            self.assertEqual((1, 1), (before.schema_version, before.contract_version))
+            v1 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v1.json")
+            v2 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
+            changed = sorted(
+                path
+                for path, desired in v2.managed_files.items()
+                if path in v1.managed_files and v1.managed_files[path].sha256 != desired.sha256
+            )
+
+            plan = audit_vault(ROOT, target)
+
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual(1, plan.current_contract_version)
+            self.assertEqual(2, plan.target_contract_version)
+            self.assertIn(".gitignore", changed)
+            for relative in changed:
+                self.assertEqual("replace", actions[relative].action, relative)
+                self.assertEqual(v1.managed_files[relative].sha256, actions[relative].current_sha256, relative)
+            self.assertFalse(plan.has_blocking_actions)
+
+            manifest = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            persisted = load_manifest(target)
+            assert persisted is not None
+            for result in (manifest, persisted):
+                self.assertEqual(2, result.schema_version)
+                self.assertEqual(2, result.contract_version)
+                self.assertEqual((), result.external_records)
+            stored = json.loads((target / ".vault-builder" / "manifest.json").read_text())
+            self.assertEqual([], stored["external_records"])
+            self.assertEqual(2, stored["schema_version"])
+            for relative, desired in v2.managed_files.items():
+                self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
+
+    def test_audit_uses_v1_catalog_hash_as_known_prior_hash(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            v1_gitignore = subprocess.run(
+                ["git", "show", f"{V1_BASELINE_COMMIT}:.gitignore"],
+                cwd=ROOT,
+                capture_output=True,
+                check=True,
+            ).stdout
+            (target / ".gitignore").write_bytes(v1_gitignore)
+
+            plan = audit_vault(ROOT, target)
+
+            action = next(action for action in plan.actions if action.path == ".gitignore")
+            self.assertEqual("replace", action.action)
+            self.assertEqual(hashlib.sha256(v1_gitignore).hexdigest(), action.current_sha256)
+
+    def test_apply_preserves_existing_v2_external_records(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            result = subprocess.run(
+                ["bash", "init-vault.sh", str(target)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            current = load_manifest(target)
+            assert current is not None
+            records = VaultManifest.from_dict(_valid_v2_manifest()).external_records
+            write_manifest(target, replace(current, external_records=records))
+            (target / "AGENTS.md").chmod(0o600)
+            plan = audit_vault(ROOT, target)
+
+            manifest = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+            self.assertEqual(records, manifest.external_records)
+            self.assertEqual(records, load_manifest(target).external_records)
 
     def test_apply_creates_missing_managed_parents_and_rollback_removes_them(self):
         for fail_gate in (False, True):
@@ -1380,7 +1659,7 @@ class MigrationApplyTest(unittest.TestCase):
                 / "tools"
                 / "vault_migration"
                 / "contracts"
-                / "v1.json"
+                / "v2.json"
             )
             second_catalog = json.loads(second_catalog_path.read_text())
             second_catalog["builder_revision"] = "concurrent-builder"
@@ -1546,7 +1825,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             changed = target / "AGENTS.md"
             desired = load_catalog(
-                ROOT / "tools" / "vault_migration" / "contracts" / "v1.json"
+                ROOT / "tools" / "vault_migration" / "contracts" / "v2.json"
             ).managed_files["AGENTS.md"]
             changed.write_bytes((ROOT / "AGENTS.md").read_bytes())
             changed.chmod(int(desired.mode, 8))
@@ -3085,7 +3364,7 @@ class MigrationApplyTest(unittest.TestCase):
                 if stop_stage == "before-publication":
                     self.assertIsNone(load_manifest(target))
                 else:
-                    self.assertEqual(1, load_manifest(target).contract_version)
+                    self.assertEqual(2, load_manifest(target).contract_version)
                     self.assertEqual(
                         manifest_intent["candidate_sha256"],
                         sha256_file(target / ".vault-builder" / "manifest.json"),
@@ -3442,7 +3721,7 @@ class MigrationApplyTest(unittest.TestCase):
                 recover_migration(target, plan.migration_id)
 
             self.assertEqual(before_recovery, _tree_digest(target))
-            self.assertEqual(1, load_manifest(target).contract_version)
+            self.assertEqual(2, load_manifest(target).contract_version)
             self.assertTrue(journal_root.is_dir())
 
     def test_recovery_restores_manifest_before_managed_files(self):
@@ -3464,7 +3743,7 @@ class MigrationApplyTest(unittest.TestCase):
             _, child_status = os.waitpid(child, 0)
             self.assertTrue(os.WIFEXITED(child_status))
             self.assertEqual(37, os.WEXITSTATUS(child_status))
-            self.assertEqual(1, load_manifest(target).contract_version)
+            self.assertEqual(2, load_manifest(target).contract_version)
 
             with mock.patch.object(applying, "_restore_entry", side_effect=OSError("stop during managed restore")):
                 with self.assertRaisesRegex(OSError, "stop during managed restore"):
@@ -5515,7 +5794,7 @@ class VaultMigrationCliTest(unittest.TestCase):
 
 
 class VaultMigrationAcceptanceTest(unittest.TestCase):
-    def test_fresh_vault_has_v1_manifest_and_passes_its_release_gate(self):
+    def test_fresh_vault_has_v2_manifest_and_passes_its_release_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
 
@@ -5524,7 +5803,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(2, manifest.contract_version)
             self.assertIsNone(manifest.last_migration_id)
             self.assertFalse((target / "builder_tests").exists())
             self.assertFalse((target / "tools" / "vault_migration").exists())
@@ -5554,7 +5833,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             for relative, expected_mode in expected_user_modes.items():
                 self.assertIn(relative, protected_after)
                 self.assertEqual(expected_mode, protected_after[relative][1], relative)
-            self.assertEqual(1, manifest.contract_version)
+            self.assertEqual(2, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             self.assertEqual(manifest, load_manifest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
