@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             contract_version = None
-        if contract_version == 1:
+        if contract_version is not None:
             issues.extend(validate_page_authority(ROOT, page))
         if page.path.name == "log.md":
             issues.extend(validate_log(page))

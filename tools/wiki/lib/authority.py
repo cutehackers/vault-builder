@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .frontmatter import Page
 from .schema import Issue
-from .vault_manifest import parse_v1_manifest_json
+from .vault_manifest import parse_manifest_json
 
 
 class PageRole(str, Enum):
@@ -34,7 +34,7 @@ def authority_contract_version(root: Path) -> int | None:
     if not path.is_file() or path.is_symlink():
         raise ValueError("Vault builder manifest must be a regular file.")
     try:
-        manifest = parse_v1_manifest_json(path.read_text(encoding="utf-8"))
+        manifest = parse_manifest_json(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError("Vault builder manifest is invalid.") from exc
     return int(manifest["contract_version"])

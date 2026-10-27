@@ -140,22 +140,19 @@ def _frontmatter(title: str, page_type: str = "concept") -> dict:
     }
 
 
-def _write_contract_manifest(root: Path, version: int = 1) -> None:
+def _write_contract_manifest(root: Path, version: int = 1, schema_version: int = 1) -> None:
     manifest = root / ".vault-builder" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contract_version": version,
-                "builder_revision": "test",
-                "generated_at": "2026-07-30T00:00:00Z",
-                "managed_files": {},
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    data: dict[str, object] = {
+        "schema_version": schema_version,
+        "contract_version": version,
+        "builder_revision": "test",
+        "generated_at": "2026-07-30T00:00:00Z",
+        "managed_files": {},
+    }
+    if schema_version == 2:
+        data["external_records"] = []
+    manifest.write_text(json.dumps(data, sort_keys=True) + "\n")
 
 
 def _valid_v1_manifest() -> dict[str, object]:
@@ -652,12 +649,17 @@ class WikiAuthorityContractTest(unittest.TestCase):
             )
 
     def test_registration_extra_semantics_are_reported_by_validate_page(self):
+        for version in (1, 2):
+            with self.subTest(contract_version=version):
+                self._assert_validate_page_reports_extra_semantics(version)
+
+    def _assert_validate_page_reports_extra_semantics(self, version: int):
         from tools.wiki import cli
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             _minimal_vault(root)
-            _write_contract_manifest(root)
+            _write_contract_manifest(root, version=version, schema_version=version)
             path = _write_role_page(root, "wiki/sources/input.md", "source")
             page = parse_page(path)
             path.write_text(
@@ -2296,7 +2298,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
-            self.assertEqual(1, manifest["contract_version"])
+            self.assertEqual(2, manifest["contract_version"])
             self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
             self.assertNotIn("wiki/overview.md", manifest["managed_files"])
             self.assertFalse((target / "tools" / "vault_migration").exists())
