@@ -6874,6 +6874,31 @@ class InstallTest(_UserHomeTestCase):
         self.assertIn("audit", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    def test_install_existing_vault_refuses_another_name(self):
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(target), "--name", "b")
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("mcpServers.llm-wiki-a", result.stderr)
+        self.assertIn("uninstall", result.stderr)
+        self.assertIn("--name a", result.stderr)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_install_existing_vault_refuses_another_config_folder(self):
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(target), "--name", "a", CLAUDE_CONFIG_DIR=str(self.home / "custom-config"))
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("CLAUDE_CONFIG_DIR", result.stderr)
+        self.assertIn("uninstall", result.stderr)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
     def test_install_assembly_failure_creates_no_target(self):
         claude_json = self._write_claude_json({"mcpServers": {}})
         target = self.work / "vault-a"
@@ -7159,6 +7184,94 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn(".claude.json", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_uninstall_and_doctor_refuse_unexpected_outside_records(self):
+        settings = self.config / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text('{"theme": "dark"}\n', encoding="utf-8")
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        manifest_path = target / ".vault-builder" / "manifest.json"
+        saved = manifest_path.read_bytes()
+
+        def edit(kind: str, field: str, value: str) -> None:
+            manifest = json.loads(saved)
+            record = next(record for record in manifest["external_records"] if record["kind"] == kind)
+            record[field] = value
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        cases = {
+            "config location": (lambda: edit("config", "location", ".claude/settings.json"), ".claude/settings.json"),
+            "file location": (lambda: edit("file", "location", ".claude/settings.json"), ".claude/settings.json"),
+            "json-entry location": (lambda: edit("json-entry", "location", ".claude/settings.json"), ".claude/settings.json"),
+            "json-entry key": (lambda: edit("json-entry", "key_path", "mcpServers.other"), "mcpServers.other"),
+        }
+        for label, (damage, expected) in cases.items():
+            with self.subTest(case=label):
+                damage()
+                try:
+                    before = _tree_snapshot(self.tmp)
+                    for arguments in (("--dry-run",), ()):
+                        result = self._cli("uninstall", str(target), *arguments)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(expected, result.stderr)
+                        self.assertEqual(before, _tree_snapshot(self.tmp))
+                    result = self._cli("doctor", str(target))
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    problem_lines = [line for line in result.stdout.splitlines() if line.startswith("Problem:")]
+                    self.assertTrue(any(expected in line for line in problem_lines), result.stdout)
+                    self.assertEqual('{"theme": "dark"}\n', settings.read_text(encoding="utf-8"))
+                finally:
+                    manifest_path.write_bytes(saved)
+
+        vault_map_saved = self.vault_map.read_bytes()
+        for label, value in {
+            "no version": {"vaults": {}},
+            "vaults not an object": {"version": 1, "vaults": []},
+            "no vaults": {"version": 1, "theme": "dark"},
+        }.items():
+            with self.subTest(vault_map=label):
+                self.vault_map.write_text(json.dumps(value), encoding="utf-8")
+                try:
+                    before = _tree_snapshot(self.tmp)
+                    for arguments in (("--dry-run",), ()):
+                        result = self._cli("uninstall", str(target), *arguments)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn("vault-map.json", result.stderr)
+                        self.assertEqual(before, _tree_snapshot(self.tmp))
+                finally:
+                    self.vault_map.write_bytes(vault_map_saved)
+        self.assertEqual(0, self._cli("doctor", str(target)).returncode)
+
+    def test_uninstall_removes_every_mcp_entry_record(self):
+        # Manifests written before install refused a second name hold two json-entry records.
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        claude = self._claude()
+        entry = claude["mcpServers"]["llm-wiki-a"]
+        claude["mcpServers"]["llm-wiki-b"] = dict(entry)
+        claude["mcpServers"]["other"] = {"command": "node", "args": ["server.js"]}
+        self._write_claude_json(claude)
+        vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
+        vault_map["vaults"]["b"] = {"path": str(target), "role": "personal"}
+        self.vault_map.write_text(json.dumps(vault_map, indent=2), encoding="utf-8")
+        manifest_path = target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        first = next(record for record in manifest["external_records"] if record["kind"] == "json-entry")
+        manifest["external_records"].append({**first, "key_path": "mcpServers.llm-wiki-b"})
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        dry_run = self._cli("uninstall", str(target), "--dry-run")
+        self.assertEqual(0, dry_run.returncode, dry_run.stdout + dry_run.stderr)
+        self.assertIn("mcpServers.llm-wiki-a", dry_run.stdout)
+        self.assertIn("mcpServers.llm-wiki-b", dry_run.stdout)
+
+        result = self._cli("uninstall", str(target))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(["other"], list(self._claude()["mcpServers"]))
+        self.assertFalse(self.vault_map.exists())
+        self.assertFalse((self.config / "skills" / "project-memory").exists())
 
     def test_doctor_healthy_vault_exits_zero_and_each_problem_exits_one(self):
         target = self.work / "vault-a"
