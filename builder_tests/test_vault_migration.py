@@ -32,7 +32,14 @@ from tools.vault_migration.planning import (
     target_fingerprint,
     validate_external_output_path,
 )
-from tools.wiki.lib.maps import build_navigation_maps
+from tools.wiki.lib.maps import (
+    PROJECT_MAP_MAX_TOKENS,
+    PROJECT_SECTION_HEADINGS,
+    PROJECT_SECTION_MAX_TOKENS,
+    _render_project_summary,
+    build_navigation_maps,
+    estimate_tokens,
+)
 from tools.wiki.lib.vault_manifest import (
     normalized_json_sha256,
     parse_manifest_json,
@@ -6090,3 +6097,378 @@ class FreshVaultClaudeIntegrationTest(unittest.TestCase):
 
             actions = {action.path: action for action in plan.actions}
             self.assertEqual("create", actions["scripts/release_gate.sh"].action)
+
+
+PROJECT_MEMORY_ASSET = ROOT / "tools" / "vault_migration" / "assets" / "project-memory"
+RECALL_ASSET = PROJECT_MEMORY_ASSET / "scripts" / "recall.sh"
+PROJECT_MEMORY_SKILL_ASSET = PROJECT_MEMORY_ASSET / "SKILL.md"
+RECALL_PYTHON_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
+RECALL_SECTIONS = ("open", "decisions", "corrections")
+
+
+def _materialize_recall_script(destination: Path) -> Path:
+    """Fill the interpreter placeholder the way install does and make the script executable."""
+    text = RECALL_ASSET.read_text(encoding="utf-8")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(text.replace(RECALL_PYTHON_PLACEHOLDER, shlex.quote(sys.executable)), encoding="utf-8")
+    destination.chmod(0o755)
+    return destination
+
+
+def _recall_namespace() -> dict[str, object]:
+    """Load the Python embedded in recall.sh without running its main function."""
+    text = RECALL_ASSET.read_text(encoding="utf-8")
+    start = text.index("<<'PY'\n") + len("<<'PY'\n")
+    end = text.index("\nPY\n", start)
+    namespace: dict[str, object] = {"__name__": "recall_embedded"}
+    exec(compile(text[start:end], str(RECALL_ASSET), "exec"), namespace)
+    return namespace
+
+
+def _git(cwd: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *arguments],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=True,
+        env={"HOME": str(cwd), "PATH": os.environ.get("PATH", "")},
+    )
+
+
+def _init_git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    _git(path, "init", "-q", "-b", "main")
+    (path / "README.md").write_text("sample\n", encoding="utf-8")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-q", "-m", "init")
+    return path
+
+
+def _write_summary_page(vault: Path, project_id: str, sections: list[list[str]]) -> Path:
+    page = vault / "wiki" / "maps" / "projects" / f"{project_id}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    frontmatter = (
+        "---\n"
+        f'title: "Project Summary: {project_id}"\n'
+        "type: map\n"
+        "generated_by: tools/wiki/cli.py maps build\n"
+        f"project: {project_id}\n"
+        "---\n"
+    )
+    page.write_text(frontmatter + "\n" + _render_project_summary(project_id, sections), encoding="utf-8")
+    return page
+
+
+def _small_sections() -> list[list[str]]:
+    return [
+        ["- [[inbox]] — Fix login timeout (deferred)"],
+        ["- [[decisions/use-sqlite]] — Use SQLite for local state (wiki/decisions/use-sqlite.md)"],
+        ["- [[rules/no-force-push]] — Never force push shared branches (wiki/rules/no-force-push.md)"],
+    ]
+
+
+def _large_korean_sections(label: str) -> list[list[str]]:
+    def lines(kind: str) -> list[str]:
+        return [
+            f"- [[{kind}/{label}-{index:03d}]] — {label} 저장소의 배포 순서와 데이터 보존 기간을 정한 한국어 결정 요약 {index}번 "
+            f"(wiki/{kind}/{label}-{index:03d}.md)"
+            for index in range(60)
+        ]
+
+    return [
+        [f"- [[inbox]] — {label} 남은 일 {index}번: 배포 스크립트 점검 (deferred)" for index in range(60)],
+        lines("decisions"),
+        lines("rules"),
+    ]
+
+
+class ProjectMemoryRecallTest(unittest.TestCase):
+    """recall.sh runs with a temporary HOME and without CLAUDE_CONFIG_DIR (A-26)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.tmp = Path(self._tmpdir.name).resolve()
+        self.home = self.tmp / "home"
+        self.config = self.home / ".claude"
+        self.script = _materialize_recall_script(
+            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
+        )
+        self.repo = _init_git_repo(self.tmp / "work" / "sample-app")
+        self.vault_a = self.tmp / "vaults" / "personal"
+        self.page_a = _write_summary_page(self.vault_a, "sample-app", _small_sections())
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
+            }
+        )
+
+    def _write_vault_map(self, data: object, *, config: Path | None = None) -> Path:
+        path = (config or self.config) / "vault-builder" / "vault-map.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data) if not isinstance(data, str) else data, encoding="utf-8")
+        return path
+
+    def _recall(self, cwd: Path, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        environment = {
+            "HOME": str(self.home),
+            "PATH": os.environ.get("PATH", ""),
+            "GIT_CEILING_DIRECTORIES": str(self.tmp),
+            **(env or {}),
+        }
+        # The environment is built from scratch, so CLAUDE_CONFIG_DIR is unset unless a test passes it.
+        return subprocess.run(
+            [str(self.script), *arguments],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+            timeout=30,
+        )
+
+    def _assert_one_reason_line(self, result: subprocess.CompletedProcess[str], *needles: str) -> str:
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(1, len(lines), result.stdout)
+        for needle in needles:
+            self.assertIn(needle, lines[0])
+        return lines[0]
+
+    def test_recall_prints_only_the_requested_section(self):
+        for index, section in enumerate(RECALL_SECTIONS):
+            with self.subTest(section=section):
+                result = self._recall(self.repo, section)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual("", result.stderr)
+                headings = [line for line in result.stdout.splitlines() if line.startswith("## ")]
+                self.assertEqual([PROJECT_SECTION_HEADINGS[index]], headings)
+                self.assertIn(_small_sections()[index][0], result.stdout)
+                header = result.stdout.splitlines()[0]
+                self.assertIn("personal", header)
+                self.assertIn(str(self.page_a), header)
+
+        result = self._recall(self.repo)
+        self.assertEqual(0, result.returncode, result.stderr)
+        headings = [line for line in result.stdout.splitlines() if line.startswith("## ")]
+        self.assertEqual(list(PROJECT_SECTION_HEADINGS), headings)
+        self.assertNotIn("## Purpose", result.stdout)
+        self.assertNotIn("generated_by", result.stdout)
+        for lines in _small_sections():
+            self.assertIn(lines[0], result.stdout)
+
+    def test_recall_from_git_worktree_matches_main_worktree(self):
+        worktree = self.tmp / "work" / "feature-checkout"
+        _git(self.repo, "worktree", "add", "-q", "-b", "feature", str(worktree))
+        nested = worktree / "nested"
+        nested.mkdir()
+        for arguments in ((), *((section,) for section in RECALL_SECTIONS)):
+            with self.subTest(arguments=arguments):
+                main_result = self._recall(self.repo, *arguments)
+                for cwd in (worktree, nested):
+                    worktree_result = self._recall(cwd, *arguments)
+                    self.assertEqual(0, worktree_result.returncode, worktree_result.stderr)
+                    self.assertEqual(main_result.stdout, worktree_result.stdout)
+                    self.assertIn("## ", worktree_result.stdout)
+
+    def test_recall_outside_git_prints_one_reason_line(self):
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        self._assert_one_reason_line(self._recall(outside), "git")
+        self._assert_one_reason_line(self._recall(outside, "open"), "git")
+
+    def test_recall_unlinked_repository_prints_one_reason_line(self):
+        other = _init_git_repo(self.tmp / "work" / "other-app")
+        self._assert_one_reason_line(self._recall(other), "other-app", "docs/usage.md")
+
+    def test_recall_missing_or_damaged_link_config_prints_one_reason_line(self):
+        vault_map = self.config / "vault-builder" / "vault-map.json"
+        damaged = {
+            "invalid-json": "{not json",
+            "not-an-object": "[]",
+            "projects-not-object": json.dumps({"vaults": {}, "projects": []}),
+            "project-entry-not-object": json.dumps({"vaults": {}, "projects": {"sample-app": "personal"}}),
+            "unknown-vault": json.dumps(
+                {"vaults": {}, "projects": {"sample-app": {"root": str(self.repo), "vaults": ["ghost"]}}}
+            ),
+            "vault-without-path": json.dumps(
+                {"vaults": {"personal": {"role": "personal"}}, "projects": {"sample-app": {"root": "x", "vaults": ["personal"]}}}
+            ),
+        }
+        for name, content in damaged.items():
+            with self.subTest(case=name):
+                vault_map.write_text(content, encoding="utf-8")
+                self._assert_one_reason_line(self._recall(self.repo), "vault-map.json")
+        vault_map.unlink()
+        self._assert_one_reason_line(self._recall(self.repo), "vault-map.json")
+
+    def test_recall_rejects_unknown_arguments_with_exit_2(self):
+        for arguments in (("recent",), ("Open",), ("open", "decisions"), ("--help",)):
+            with self.subTest(arguments=arguments):
+                result = self._recall(self.repo, *arguments)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(1, len(result.stderr.splitlines()), result.stderr)
+                self.assertIn("usage: recall.sh [open|decisions|corrections]", result.stderr)
+
+    def test_recall_skips_missing_vaults_pages_and_sections(self):
+        missing_vault = self.tmp / "vaults" / "gone"
+        no_page_vault = self.tmp / "vaults" / "empty"
+        no_page_vault.mkdir(parents=True)
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {
+                    "gone": {"path": str(missing_vault), "role": "team"},
+                    "empty": {"path": str(no_page_vault), "role": "team"},
+                    "personal": {"path": str(self.vault_a), "role": "personal"},
+                },
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["gone", "empty", "personal"]}},
+            }
+        )
+        result = self._recall(self.repo, "open")
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertIn("gone", lines[0])
+        self.assertIn("empty", lines[1])
+        self.assertIn(_small_sections()[0][0], result.stdout)
+
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {"gone": {"path": str(missing_vault), "role": "team"}},
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["gone"]}},
+            }
+        )
+        self._assert_one_reason_line(self._recall(self.repo), "gone")
+
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
+            }
+        )
+        self.page_a.write_text(
+            self.page_a.read_text(encoding="utf-8").replace("## Corrections and Rules", "## Other"),
+            encoding="utf-8",
+        )
+        result = self._recall(self.repo, "corrections")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("## Corrections and Rules", result.stdout)
+        self.assertNotIn("## Open Work", result.stdout)
+        self.assertNotIn("no-force-push", result.stdout)
+
+    def test_recall_caps_two_vault_output_with_one_truncation_line(self):
+        vault_b = self.tmp / "vaults" / "team"
+        _write_summary_page(self.vault_a, "sample-app", _large_korean_sections("개인"))
+        _write_summary_page(vault_b, "sample-app", _large_korean_sections("팀"))
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {
+                    "personal": {"path": str(self.vault_a), "role": "personal"},
+                    "team": {"path": str(vault_b), "role": "team"},
+                },
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal", "team"]}},
+            }
+        )
+        cases = [((section,), PROJECT_SECTION_MAX_TOKENS) for section in RECALL_SECTIONS]
+        cases.append(((), PROJECT_MAP_MAX_TOKENS))
+        for arguments, limit in cases:
+            with self.subTest(arguments=arguments):
+                result = self._recall(self.repo, *arguments)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertLessEqual(estimate_tokens(result.stdout), limit)
+                lines = result.stdout.splitlines()
+                self.assertEqual(1, sum("truncated" in line for line in lines), result.stdout)
+                self.assertTrue(lines[-1].startswith("project-memory: output truncated"), lines[-1])
+                self.assertEqual(2, sum(line.startswith("# vault ") for line in lines))
+                self.assertIn("개인", result.stdout)
+                self.assertIn("팀", result.stdout)
+                expected = [PROJECT_SECTION_HEADINGS[RECALL_SECTIONS.index(arguments[0])]] if arguments else list(
+                    PROJECT_SECTION_HEADINGS
+                )
+                headings = [line for line in lines if line.startswith("## ")]
+                self.assertEqual(expected * 2, headings)
+                self.assertEqual(result.stdout, self._recall(self.repo, *arguments).stdout)
+
+    def test_recall_small_output_has_no_truncation_line(self):
+        result = self._recall(self.repo)
+        self.assertNotIn("truncated", result.stdout)
+
+    def test_recall_reads_link_config_from_claude_config_dir(self):
+        custom = self.tmp / "custom-config"
+        (self.config / "vault-builder" / "vault-map.json").unlink()
+        self._write_vault_map(
+            {
+                "version": 1,
+                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
+                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
+            },
+            config=custom,
+        )
+        result = self._recall(self.repo, "open", env={"CLAUDE_CONFIG_DIR": str(custom)})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("## Open Work", result.stdout)
+
+    def test_recall_estimate_tokens_matches_maps(self):
+        recall_estimate = _recall_namespace()["estimate_tokens"]
+        samples = {
+            "korean": "프로젝트 요약은 필요한 섹션만 불러온다. 한글 자모 ㄱㅏ, 옛한글 각, 확장 ꥠ ힰ.",
+            "english": "Load only the requested section of the project summary.\n- [[decisions/x]] — y (wiki/x.md)",
+            "mixed": "- [[decisions/결정-001]] — SQLite를 local state 저장소로 쓴다 (wiki/decisions/결정-001.md)\n",
+        }
+        for name, sample in samples.items():
+            with self.subTest(sample=name):
+                self.assertEqual(estimate_tokens(sample), recall_estimate(sample))
+        for sample in ("", "a", "가", "ab가", "\n\n\n\n\n"):
+            self.assertEqual(estimate_tokens(sample), recall_estimate(sample))
+
+    def test_recall_constants_match_maps(self):
+        namespace = _recall_namespace()
+        self.assertEqual(PROJECT_SECTION_MAX_TOKENS, namespace["SECTION_MAX_TOKENS"])
+        self.assertEqual(PROJECT_MAP_MAX_TOKENS, namespace["ALL_MAX_TOKENS"])
+        self.assertEqual(
+            dict(zip(RECALL_SECTIONS, PROJECT_SECTION_HEADINGS)),
+            namespace["SECTION_HEADINGS"],
+        )
+
+    def test_recall_script_has_one_interpreter_placeholder_and_valid_syntax(self):
+        text = RECALL_ASSET.read_text(encoding="utf-8")
+        self.assertEqual(1, text.count(RECALL_PYTHON_PLACEHOLDER))
+        self.assertNotIn(RECALL_PYTHON_PLACEHOLDER, self.script.read_text(encoding="utf-8"))
+        subprocess.run(["bash", "-n", str(RECALL_ASSET)], check=True)
+        self.assertTrue(os.access(self.script, os.X_OK))
+
+    def test_project_memory_skill_frontmatter_and_body(self):
+        text = PROJECT_MEMORY_SKILL_ASSET.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\n"))
+        frontmatter_end = text.index("\n---\n", 4)
+        frontmatter = text[4:frontmatter_end]
+        body = text[frontmatter_end + 5 :]
+        self.assertLessEqual(len(frontmatter), 1536)
+        fields = dict(line.split(": ", 1) for line in frontmatter.splitlines())
+        self.assertEqual(["name", "description", "allowed-tools"], list(fields))
+        self.assertEqual("project-memory", fields["name"])
+        description = fields["description"]
+        for word in ("spec", "설계", "계획", "지난 결정", "남은 일"):
+            self.assertIn(word, description)
+        self.assertLessEqual(estimate_tokens(description), 60)
+        self.assertEqual("Bash(${CLAUDE_SKILL_DIR}/scripts/recall.sh *)", fields["allowed-tools"])
+        self.assertEqual(1, frontmatter.count("allowed-tools"))
+        self.assertIn("${CLAUDE_SKILL_DIR}/scripts/recall.sh", body)
+
+    def test_project_memory_skill_assets_have_no_home_path_and_stay_out_of_catalog(self):
+        for path in sorted(PROJECT_MEMORY_ASSET.rglob("*")):
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("/Users/", text, path)
+                self.assertNotIn("/home/", text, path)
+                self.assertNotIn("~/", text, path)
+        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v2.json").read_text(encoding="utf-8"))
+        self.assertNotIn("assets/", json.dumps(catalog_paths))
+        self.assertFalse([path for path in MANAGED_PATHS if path.startswith("tools/vault_migration/")])
