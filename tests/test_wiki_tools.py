@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -6005,3 +6006,242 @@ class ProjectSummaryMapTest(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn(f"Navigation maps: {len(MAP_DEFINITIONS) + 1}", output)
         self.assertIn(f"Changed maps: {len(MAP_DEFINITIONS) + 1}", output)
+
+
+MEMORY_NOTE_FEEDBACK = """---
+name: commit style
+description: Keep commit subjects short.
+type: feedback
+---
+
+Keep commit subjects under 72 characters.
+"""
+
+MEMORY_NOTE_PROJECT = """---
+name: release order
+description: Release order for the demo project.
+metadata:
+  type: project
+---
+
+Ship the scanner before the recall script.
+"""
+
+
+def _memory_home_env(home: Path) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CONFIG_DIR"}
+    env["HOME"] = str(home)
+    return env
+
+
+def _tree_state(root: Path) -> dict[str, tuple[str, int]]:
+    state: dict[str, tuple[str, int]] = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            state[path.relative_to(root).as_posix()] = (
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+                path.stat().st_mtime_ns,
+            )
+    return state
+
+
+class MemoryScanTest(unittest.TestCase):
+    """A-20: one vault, two L1 notes, a temporary HOME without CLAUDE_CONFIG_DIR."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        base = Path(tmpdir.name).resolve()
+        self.home = base / "home"
+        self.home.mkdir()
+        self.vault = base / "vault"
+        self.vault.mkdir()
+        _minimal_vault(self.vault)
+        self.project_root = base / "repos" / "demo"
+        self.project_root.mkdir(parents=True)
+        key = "".join(char if char.isalnum() else "-" for char in str(self.project_root))
+        self.memory_dir = self.home / ".claude" / "projects" / key / "memory"
+        self.memory_dir.mkdir(parents=True)
+        (self.memory_dir / "MEMORY.md").write_text("- [commit style](commit_style.md)\n", encoding="utf-8")
+        (self.memory_dir / "commit_style.md").write_text(MEMORY_NOTE_FEEDBACK, encoding="utf-8")
+        (self.memory_dir / "release_order.md").write_text(MEMORY_NOTE_PROJECT, encoding="utf-8")
+        env_patch = unittest.mock.patch.dict(os.environ, _memory_home_env(self.home), clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+    def _write_config(self, config_dir: Path | None = None) -> Path:
+        folder = (config_dir or self.home / ".claude") / "vault-builder"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "vault-map.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "vaults": {"personal": {"path": str(self.vault), "role": "personal"}},
+                    "projects": {"demo": {"root": str(self.project_root), "vaults": ["personal"]}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def _scan(self, *args: str) -> dict:
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--json", *args)
+        self.assertEqual(0, code, output)
+        return json.loads(output)
+
+    def _run_procedure(self, scan: dict) -> None:
+        """The deterministic part of the memory-cleanup skill: copy new notes to raw and register them."""
+        for project in scan["projects"]:
+            for note in project["notes"]:
+                if note["imported"]:
+                    continue
+                raw = self.vault / "raw" / "imports" / "claude-memory" / note["raw_name"]
+                raw.parent.mkdir(parents=True, exist_ok=True)
+                raw.write_bytes(Path(note["path"]).read_bytes())
+                code, output = _run_wiki_cli(
+                    self.vault,
+                    "ingest-source",
+                    raw.relative_to(self.vault).as_posix(),
+                    "--summary",
+                    f"Claude memory note {note['name']} of project {project['id']}.",
+                )
+                self.assertEqual(0, code, output)
+
+    def test_memory_scan_without_config_exits_1_with_one_line(self):
+        root = Path(__file__).resolve().parents[1]
+        before = _tree_state(self.home)
+        result = subprocess.run(
+            [sys.executable, "tools/wiki/cli.py", "memory-scan", "--json"],
+            cwd=root,
+            env=_memory_home_env(self.home),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        lines = (result.stdout + result.stderr).strip().splitlines()
+        self.assertEqual(1, len(lines), lines)
+        self.assertIn("vault-map.json", lines[0])
+        self.assertEqual(before, _tree_state(self.home))
+
+    def test_memory_scan_reads_config_under_claude_config_dir(self):
+        config_dir = self.home / "custom-config"
+        self._write_config(config_dir)
+        os.environ["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        memory_dir = config_dir / "projects" / self.memory_dir.parent.name / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "only.md").write_text(MEMORY_NOTE_FEEDBACK, encoding="utf-8")
+
+        scan = self._scan()
+
+        self.assertEqual(str(memory_dir), scan["projects"][0]["memory_dir"])
+        self.assertEqual(["only.md"], [note["name"] for note in scan["projects"][0]["notes"]])
+
+    def test_memory_scan_lists_new_notes_without_writing(self):
+        self._write_config()
+        vault_before = _tree_state(self.vault)
+        memory_before = _tree_state(self.memory_dir)
+
+        scan = self._scan()
+
+        self.assertEqual(str(self.vault), scan["vault"])
+        self.assertEqual(1, len(scan["projects"]))
+        project = scan["projects"][0]
+        self.assertEqual("demo", project["id"])
+        self.assertEqual(str(self.project_root), project["root"])
+        self.assertEqual(str(self.memory_dir), project["memory_dir"])
+        notes = {note["name"]: note for note in project["notes"]}
+        self.assertEqual({"commit_style.md", "release_order.md"}, set(notes))
+        self.assertEqual("feedback", notes["commit_style.md"]["type"])
+        self.assertEqual("project", notes["release_order.md"]["type"])
+        for name, note in notes.items():
+            digest = hashlib.sha256((self.memory_dir / name).read_bytes()).hexdigest()
+            self.assertEqual(digest, note["sha256"])
+            self.assertEqual(f"demo--{Path(name).stem}--{digest[:8]}.md", note["raw_name"])
+            self.assertFalse(note["imported"])
+            self.assertEqual([], note["sources"])
+        self.assertEqual(vault_before, _tree_state(self.vault))
+        self.assertEqual(memory_before, _tree_state(self.memory_dir))
+
+    def test_memory_cleanup_procedure_imports_each_note_once(self):
+        self._write_config()
+        memory_before = _tree_state(self.memory_dir)
+
+        self._run_procedure(self._scan())
+
+        raw_files = sorted(path.name for path in (self.vault / "raw" / "imports" / "claude-memory").iterdir())
+        self.assertEqual(2, len(raw_files))
+        for name in raw_files:
+            self.assertRegex(name, r"^demo--(commit_style|release_order)--[0-9a-f]{8}\.md$")
+        source_pages = sorted((self.vault / "wiki" / "sources").glob("*.md"))
+        self.assertEqual(2, len(source_pages))
+
+        rescan = self._scan()
+        notes = rescan["projects"][0]["notes"]
+        self.assertTrue(all(note["imported"] for note in notes))
+        self.assertTrue(all(note["sources"] for note in notes))
+        self.assertEqual("personal", notes[0]["sources"][0]["vault"])
+        self.assertTrue(notes[0]["sources"][0]["page"].startswith("wiki/sources/"))
+
+        vault_after_first = _tree_state(self.vault)
+        self._run_procedure(rescan)
+        self.assertEqual(vault_after_first, _tree_state(self.vault))
+        self.assertEqual(memory_before, _tree_state(self.memory_dir))
+
+    def test_memory_scan_text_output_marks_imported_state(self):
+        self._write_config()
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("Project demo", output)
+        self.assertIn("new  commit_style.md", output)
+        self.assertNotIn("MEMORY.md", output)
+
+    def test_memory_scan_project_filter_and_errors(self):
+        self._write_config()
+
+        self.assertEqual(["demo"], [project["id"] for project in self._scan("--project", "demo")["projects"]])
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--project", "other")
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(output.strip().splitlines()), output)
+
+        config = self.home / ".claude" / "vault-builder" / "vault-map.json"
+        config.write_text("{not json", encoding="utf-8")
+        code, output = _run_wiki_cli(self.vault, "memory-scan")
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(output.strip().splitlines()), output)
+
+        other_vault = self.home / "elsewhere"
+        other_vault.mkdir()
+        code, output = _run_wiki_cli(other_vault, "memory-scan")
+        self.assertEqual(1, code)
+
+    def test_memory_cleanup_skill_documents_required_rules(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / ".agents" / "skills" / "memory-cleanup" / "SKILL.md").read_text(encoding="utf-8")
+        pointer = (root / ".claude" / "skills" / "memory-cleanup" / "SKILL.md").read_text(encoding="utf-8")
+
+        for required in (
+            "memory-scan",
+            "MEMORY.md",
+            "<project id>--<note stem>--<sha256 first 8>.md",
+            "raw/imports/claude-memory/",
+            "personal",
+            "team",
+            "`project`",
+            "type: decision",
+            "`correction`",
+            "`rule`",
+            "supersede-claim",
+            "review create --type contradiction",
+            "gh pr create",
+            "maps build --report",
+            "search",
+        ):
+            self.assertIn(required, skill, required)
+        self.assertIn("Never edit, move, or delete L1", skill)
+        self.assertEqual(skill.split("\n---\n", 1)[0], pointer.split("\n---\n", 1)[0])
+        self.assertIn(".agents/skills/memory-cleanup/SKILL.md", pointer)

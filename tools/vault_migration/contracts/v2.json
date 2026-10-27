@@ -2,6 +2,12 @@
   "builder_revision": "contract-v2",
   "contract_version": 2,
   "managed_files": {
+    ".agents/skills/memory-cleanup/SKILL.md": {
+      "mode": "0644",
+      "path": ".agents/skills/memory-cleanup/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "3ceade1c702bd7037655b4b17067584b4ea013616b75493370e0e66416752dcf"
+    },
     ".agents/skills/wiki-ingest/SKILL.md": {
       "mode": "0644",
       "path": ".agents/skills/wiki-ingest/SKILL.md",
@@ -19,6 +25,12 @@
       "path": ".agents/skills/wiki-update/SKILL.md",
       "policy": "replace-if-unmodified",
       "sha256": "82b5e888325b92be9ac77612ce590000cbdc9547891eedf43023179499100583"
+    },
+    ".claude/skills/memory-cleanup/SKILL.md": {
+      "mode": "0644",
+      "path": ".claude/skills/memory-cleanup/SKILL.md",
+      "policy": "replace-if-unmodified",
+      "sha256": "c51ee4857ff383aa35303fa8cbec18aa41c660913b7f94bdd3ede8b9d4260617"
     },
     ".claude/skills/wiki-ingest/SKILL.md": {
       "mode": "0644",
@@ -54,7 +66,7 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "f8a1e20b1b3ae2be3f4dc8da814758a54e91184481e77fbebf723e66568d9a5b"
+      "sha256": "39af85c6bcc8a55a696c55ee4109c2a8a3d209d1cdeffa11744a384d33fe0f22"
     },
     "CLAUDE.md": {
       "mode": "0644",
@@ -132,13 +144,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "b0bd753bcdda5ae4df12013f297a11c7aa1d2dfc648a7a9f983ac3e082df3528"
+      "sha256": "44ca6e0ee9aa346f7bd2538641a40363203c3e6c23c43f9cf81f858749d25b3f"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "da3cc2af11583b59a0a3da25e23ac5607e8ebb1585514b55d9d6b450dd2648a2"
+      "sha256": "2b613b7d2d35cd2d680ddb067e2e5d75182c0714994f2a695da1bfc311447721"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -206,6 +218,12 @@
       "policy": "replace-if-unmodified",
       "sha256": "f96a875009145491f5af97b094845004e9c36be6d0eb3eac14ea6c8d14f99ccb"
     },
+    "tools/wiki/lib/memory_scan.py": {
+      "mode": "0644",
+      "path": "tools/wiki/lib/memory_scan.py",
+      "policy": "replace-if-unmodified",
+      "sha256": "e77b29b0ab9e4cf0d839ce46370dabc3aacd9a7a774050c4649a718775674ae9"
+    },
     "tools/wiki/lib/merge.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/merge.py",
@@ -252,7 +270,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/vault_manifest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "987eab1569cb1a24634a9eded7d8a7b3da837c08ec4fe868c810ac0498a025b6"
+      "sha256": "3e4f6f2dc592247417fbea57bd2c7f885cebaaba4755ec29784d3127f2a93247"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",

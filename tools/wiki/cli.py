@@ -28,6 +28,7 @@ from tools.wiki.lib.lint import (
     validate_source_hash,
 )
 from tools.wiki.lib.maps import build_navigation_maps
+from tools.wiki.lib.memory_scan import MemoryScanError, render_memory_scan, scan_memory
 from tools.wiki.lib.merge import scan_merge_candidates
 from tools.wiki.lib.metrics import build_maintenance_metrics
 from tools.wiki.lib.paths import resolve_report_path
@@ -70,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     search_cmd.add_argument("--type")
     search_cmd.add_argument("--limit", type=int, default=10)
     search_cmd.add_argument("--include-deprecated", action="store_true")
+
+    memory_scan_cmd = subcommands.add_parser("memory-scan")
+    memory_scan_cmd.add_argument("--project")
+    memory_scan_cmd.add_argument("--json", action="store_true")
 
     read_cmd = subcommands.add_parser("read")
     read_cmd.add_argument("path")
@@ -187,6 +192,15 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         print(render_hits(hits))
+        return 0
+
+    if args.command == "memory-scan":
+        try:
+            scan = scan_memory(ROOT, project=args.project)
+        except MemoryScanError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps(scan, indent=2, ensure_ascii=False) if args.json else render_memory_scan(scan))
         return 0
 
     if args.command == "read":

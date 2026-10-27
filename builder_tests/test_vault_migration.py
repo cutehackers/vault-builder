@@ -974,6 +974,12 @@ class ContractCatalogTest(unittest.TestCase):
         self.assertEqual(2, catalog.contract_version)
         self.assertEqual("contract-v2", catalog.builder_revision)
         self.assertIn(".gitignore", catalog.managed_files)
+        for relative in (
+            ".agents/skills/memory-cleanup/SKILL.md",
+            ".claude/skills/memory-cleanup/SKILL.md",
+            "tools/wiki/lib/memory_scan.py",
+        ):
+            self.assertIn(relative, catalog.managed_files)
         self.assertFalse(
             any(path.startswith("tools/vault_migration/assets/") for path in catalog.managed_files)
         )
@@ -5903,8 +5909,9 @@ _CLAUDE_FILES = (
     ".claude/skills/wiki-ingest/SKILL.md",
     ".claude/skills/wiki-update/SKILL.md",
     ".claude/skills/wiki-query/SKILL.md",
+    ".claude/skills/memory-cleanup/SKILL.md",
 )
-_POINTER_SKILLS = ("wiki-ingest", "wiki-update", "wiki-query")
+_POINTER_SKILLS = ("wiki-ingest", "wiki-update", "wiki-query", "memory-cleanup")
 
 
 def _skill_frontmatter(path: Path) -> dict[str, str]:
