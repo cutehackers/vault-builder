@@ -121,7 +121,7 @@ LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 �
 
 현재 저장소의 결정론적 도구는 `tools/wiki/cli.py` 아래에 있습니다. 위 skill/workflow는 사람이 기억하기 쉬운 권장 사용 방식이며, 내부에서는 기존 CLI를 조합합니다.
 
-현재 구현된 안정 명령은 `ingest-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
+현재 구현된 안정 명령은 `ingest-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
 
 ```text
 wiki-ingest
@@ -630,7 +630,199 @@ python3 tools/wiki/mcp_server.py
 
 MCP wrapper는 CLI를 얇게 감싸는 역할입니다. 같은 작업은 CLI로도 실행할 수 있습니다.
 
-## 17. Git 사용하기
+## 17. 여러 vault를 저장소에 연결하기 (project memory)
+
+Claude Code 세션에서 나온 결정, 교정, 남은 일은 세션이 끝나면 Claude Code auto memory(이하 L1 메모리)에만 남습니다. 이 절의 기능은 그 내용을 vault에 검증된 지식으로 옮기고, 다른 저장소의 세션에서 필요할 때 요약의 필요한 부분만 불러오게 합니다.
+
+```text
+L1 메모리
+-> memory-cleanup skill: vault의 raw/와 wiki/로 옮김
+-> maps build: project마다 요약 페이지 wiki/maps/projects/<project id>.md 생성
+-> /project-memory: 현재 저장소에 연결된 vault들의 요약 페이지에서 요청한 섹션만 출력
+```
+
+세션을 시작할 때 요약을 자동으로 넣지는 않습니다. 평소 세션에 드는 비용은 skill 목록에 보이는 한 줄(약 50 token)뿐입니다. 대신 요약은 Claude나 사용자가 불러올 때만 보입니다.
+
+### 17.1 설정 폴더와 연결 설정 파일
+
+vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLAUDE_CONFIG_DIR` 값이 있으면 그 폴더가 설정 폴더이고, 없으면 `$HOME/.claude` 폴더입니다. 아래에서 `<설정 폴더>` 표기는 이 폴더를 뜻합니다.
+
+| 경로 | 내용 |
+|---|---|
+| `<설정 폴더>/vault-builder/vault-map.json` | 연결 설정. 어떤 vault가 있고 어떤 저장소가 어느 vault를 쓰는지 적습니다. |
+| `<설정 폴더>/skills/project-memory/SKILL.md` | 불러오기 skill `project-memory` |
+| `<설정 폴더>/skills/project-memory/scripts/recall.sh` | 불러오기 skill이 실행하는 recall 스크립트 |
+
+세 파일은 여러 vault가 함께 씁니다. install이 처음 만들고, 마지막 vault를 uninstall할 때만 지웁니다.
+
+연결 설정 형식은 다음과 같습니다.
+
+```json
+{
+  "version": 1,
+  "vaults": {
+    "personal": {"path": "/path/to/vault", "role": "personal"},
+    "team": {"path": "/path/to/team-vault", "role": "team"},
+    "app": {"path": "/path/to/app-vault", "role": "project"}
+  },
+  "projects": {
+    "my-app": {"root": "/path/to/my-app", "vaults": ["personal", "team", "app"]}
+  }
+}
+```
+
+| key | 뜻 |
+|---|---|
+| `version` | 파일 형식 version입니다. 지금은 `1` 값을 씁니다. |
+| `vaults` | vault 이름별 항목입니다. `path` 값은 vault 폴더의 절대 경로이고, `role` 값은 아래 역할 3가지 가운데 하나입니다. |
+| `projects` | project id별 항목입니다. `root` 값은 저장소 main worktree root의 절대 경로이고, `vaults` 값은 이 저장소가 쓰는 vault 이름 목록입니다. |
+
+project id는 저장소 main worktree root 폴더의 이름입니다. 예를 들어 저장소가 `/path/to/my-app` 폴더에 있으면 project id는 `my-app` 값입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다. 이름이 같은 저장소 두 개는 구분하지 못합니다.
+
+이 파일은 사용자가 직접 편집하는 파일입니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
+
+### 17.2 vault 역할
+
+역할은 memory-cleanup skill이 note를 어느 vault로 보낼지 정할 때 씁니다.
+
+| 역할 | 들어가는 note |
+|---|---|
+| `personal` | 다른 저장소에서도 쓸 개인 지식. 해당 역할의 vault가 연결되어 있지 않을 때 note도 이 vault로 갑니다. |
+| `team` | 팀이 합의한 내용. 기본 branch에 직접 commit하지 않고 PR로만 반영합니다. |
+| `project` | 그 저장소의 결정과 이력 |
+
+install은 새로 등록하는 vault를 역할 `personal` 값으로 연결 설정에 더합니다. 팀 vault나 project vault라면 install 뒤에 연결 설정에서 `role` 값을 직접 바꿉니다.
+
+### 17.3 저장소 연결하기
+
+저장소를 연결하려면 연결 설정의 `projects` 항목에 한 줄을 더합니다.
+
+```json
+"my-app": {"root": "/path/to/my-app", "vaults": ["personal"]}
+```
+
+- 이름(`my-app`)은 project id, 즉 저장소 root 폴더 이름과 같아야 합니다.
+- `vaults` 목록에는 `vaults` 항목에 이미 있는 vault 이름만 씁니다.
+- 저장소 안의 파일은 하나도 바꾸지 않습니다.
+
+연결한 뒤 그 vault에서 memory-cleanup skill을 실행하면 요약 페이지가 생깁니다. 요약 페이지가 생기기 전에는 `/project-memory`가 "요약 페이지 없음" 한 줄만 출력합니다.
+
+### 17.4 L1 메모리 정리하기 (memory-cleanup, memory-scan)
+
+L1 메모리는 `<설정 폴더>/projects/<key>/memory/` 폴더입니다. `<key>` 부분은 저장소 root 절대 경로의 영숫자가 아닌 문자를 모두 `-`로 바꾼 값입니다. `MEMORY.md` 파일은 목록이고, 나머지 note 파일은 주제당 하나입니다.
+
+먼저 읽기 전용 명령으로 대상을 확인합니다. 연결 설정에 등록된 vault 폴더에서 실행합니다.
+
+```bash
+python3 tools/wiki/cli.py memory-scan
+python3 tools/wiki/cli.py memory-scan --project my-app --json
+```
+
+`memory-scan` 명령은 이 vault에 연결된 project마다 L1 note 목록, note별 sha256과 type, 그리고 같은 project에 연결된 모든 vault에 이미 들어왔는지(`imported` 또는 `new`)를 출력합니다. 파일은 하나도 쓰지 않습니다. 연결 설정이 없거나 이 vault가 `vaults` 항목에 없으면 이유 한 줄과 함께 exit 1로 끝납니다. 이 경우 17.1과 17.3을 따라 연결 설정을 먼저 만듭니다.
+
+정리는 vault 세션에서 agent에게 요청합니다.
+
+```text
+메모리 정리해주세요.
+```
+
+agent는 `.agents/skills/memory-cleanup/SKILL.md` 절차를 따릅니다.
+
+1. `memory-scan` 결과에서 이미 들어온 note는 건너뜁니다. 별도 상태 파일은 만들지 않습니다.
+2. 새 note는 역할 기준으로 대상 vault를 하나 골라 `raw/imports/claude-memory/<project id>--<note 이름>--<sha256 앞 8자>.md` 경로로 bytes 그대로 복사합니다. 내용이 바뀐 note는 새 raw 파일이 되고, 이전 파일은 그대로 남습니다.
+3. `ingest-source`, draft 작성, `publish-draft --report` 순서로 반영합니다. project 지식에는 frontmatter `project: <project id>` 값을 넣습니다. 결정은 `type: decision` 페이지로, 사용자 교정과 작업 규칙은 `tags` 목록에 `correction` 또는 `rule` 값이 있는 페이지로 만듭니다.
+4. 기존 지식과 충돌하는 note는 publish하지 않습니다. 나머지를 모두 반영하고 commit한 뒤 contradiction review를 만들고, 같은 세션에서 사용자에게 판단을 묻습니다. 판단을 미루면 review가 남고, 가장 오래된 review가 14일을 넘으면 `metrics --check`가 실패합니다.
+5. 팀 vault는 `memory-cleanup/<YYYY-MM-DD>` branch에서 작업하고 `gh pr create` 명령으로 PR을 엽니다.
+6. 바뀐 vault마다 `maps build --report` 명령과 `scripts/release_gate.sh` 스크립트를 실행합니다. 개인 vault와 project vault는 gate가 통과하면 commit합니다.
+
+L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니다.
+
+요약 페이지 `wiki/maps/projects/<project id>.md` 파일은 `maps build` 명령이 만들고, 섹션 3개를 항상 이 순서로 가집니다.
+
+| 섹션 | heading | 들어가는 것 |
+|---|---|---|
+| `open` | `## Open Work` | `wiki/inbox.md` item 가운데 `Project: <project id>` 줄이 있고 `Status` 값이 `unprocessed` 또는 `deferred`인 남은 일 |
+| `decisions` | `## Current Decisions` | `type` 값이 `decision`이고 deprecated가 아닌 페이지 |
+| `corrections` | `## Corrections and Rules` | `tags` 목록에 `correction` 또는 `rule` 값이 있는 페이지 |
+
+섹션 하나는 추정 token 750 이하, 페이지 본문 전체는 1,500 이하입니다. 추정 token은 한글 글자 수를 2로, 나머지 글자 수를 4로 나눈 값의 합입니다. 넘는 섹션은 끝 줄부터 생략하고 생략한 항목 수를 한 줄로 적습니다.
+
+### 17.5 요약 불러오기 (/project-memory)
+
+연결된 저장소의 Claude Code 세션에서 불러오기 skill을 직접 호출합니다.
+
+```text
+/project-memory
+/project-memory open
+/project-memory decisions
+/project-memory corrections
+```
+
+| 인자 | 출력 |
+|---|---|
+| 없음 | 섹션 3개 전부. 전체 추정 token 1,500 이하 |
+| `open` | 남은 일 |
+| `decisions` | 현재 결정 |
+| `corrections` | 교정과 작업 규칙 |
+
+섹션 하나만 요청하면 출력은 추정 token 750 이하입니다. 연결된 vault가 여러 개면 vault마다 vault 이름과 요약 페이지 경로를 담은 머리 줄이 붙습니다. 합계가 상한을 넘으면 상한을 vault 수로 나눠 vault마다 줄 단위로 자르고, 잘렸다는 줄을 하나 붙입니다. 각 줄 끝의 `wiki/...` 경로는 근거 페이지이며, 필요할 때만 열어 읽습니다.
+
+Claude는 spec, 설계, 계획을 쓸 때나 지난 결정과 남은 일을 물을 때 이 skill을 스스로 호출할 수 있습니다. 다만 호출 여부는 Claude가 판단하므로 보장되지 않습니다. 필요하면 위처럼 직접 호출하세요. skill은 recall 스크립트 실행만 미리 허용하므로 호출할 때 권한 확인이 뜨지 않습니다.
+
+recall 스크립트는 세션의 현재 작업 폴더로 저장소를 찾습니다. 세션 안에서 다른 저장소로 `cd` 명령으로 이동한 뒤 호출하면 그 저장소의 요약이 나옵니다.
+
+출력할 내용이 없으면 이유 한 줄을 출력하고 exit 0으로 끝납니다.
+
+| 상황 | 출력 |
+|---|---|
+| git 저장소 밖 | git 저장소가 아니라는 줄 |
+| 연결되지 않은 저장소 | project id와 연결 방법(이 문서 17.3)을 담은 줄 |
+| 연결 설정이 없거나 손상됨 | 그 사실을 담은 줄 |
+| 연결된 vault 폴더나 요약 페이지가 없음 | 그 vault를 건너뛰었다는 줄 |
+| 요청한 섹션 heading이 요약 페이지에 없음 | 그 vault의 섹션이 없다는 줄 |
+| 인자가 `open`, `decisions`, `corrections`, 없음 외의 값 | 사용법 한 줄, exit 2 |
+
+### 17.6 install, uninstall, doctor
+
+불러오기 skill, recall 스크립트, 연결 설정, MCP 등록은 builder checkout의 `tools/vault_migration/cli.py` 명령으로 설치하고 지웁니다. Python 3.10 이상으로 실행합니다.
+
+먼저 Claude Code를 모두 종료하세요. install과 uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` 파일을 고칩니다(`CLAUDE_CONFIG_DIR` 값이 있으면 `<설정 폴더>/.claude.json` 파일). Claude Code는 실행 중에 이 파일을 자주 씁니다. 파일 교체는 원자적이라 파일이 깨지지는 않지만, 두 쓰기가 겹치면 한쪽 변경이 사라질 수 있습니다.
+
+```bash
+cd /path/to/vault-builder
+
+python3 tools/vault_migration/cli.py install /path/to/vault --name personal --dry-run
+python3 tools/vault_migration/cli.py install /path/to/vault --name personal
+python3 tools/vault_migration/cli.py doctor /path/to/vault
+python3 tools/vault_migration/cli.py uninstall /path/to/vault --dry-run
+python3 tools/vault_migration/cli.py uninstall /path/to/vault
+```
+
+`--dry-run` 옵션은 계획만 출력하고 아무 파일도 쓰지 않습니다.
+
+`install <path> [--name NAME] [--with-stenc] [--dry-run]`
+
+- 대상 폴더가 없거나 비어 있으면 새 vault를 만듭니다. 임시 폴더에서 vault를 조립하고 lint로 검사한 뒤 한 번에 대상 경로로 옮깁니다. 중간에 실패하면 대상 폴더는 생기지 않습니다.
+- 대상이 이미 vault이면 vault 밖 파일만 설치합니다. 이때 audit 결과에 `create`, `replace`, `review-required`, `invalid` 항목이 하나라도 있으면 거부합니다. 1.1절의 audit/apply를 먼저 실행하세요.
+- 불러오기 skill과 recall 스크립트를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
+- 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 역할 `personal` 값으로 더합니다. 저장소 연결(17.3)은 사용자가 직접 합니다.
+- MCP 설정 파일의 `mcpServers` 객체 아래에 `llm-wiki-<vault 이름>` 항목을 더합니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다. 그래서 다른 저장소의 세션에서도 이 vault의 MCP 도구를 쓸 수 있습니다. 대신 모든 저장소 세션에 vault 쓰기 도구도 보이고, vault 안의 세션에서는 `llm-wiki` 서버와 `llm-wiki-<vault 이름>` 서버가 같은 도구를 보여 줍니다.
+- 같은 이름의 MCP 항목이 다른 vault를 가리키면 아무것도 쓰지 않고 거부합니다. `--name` 옵션으로 다른 이름을 쓰세요.
+- vault 밖 변경 중 실패하면 바꾼 파일을 backup으로 되돌립니다.
+- 설치한 vault 밖 파일과 MCP 항목은 `.vault-builder/manifest.json`의 vault 밖 기록에 남깁니다. `CLAUDE_CONFIG_DIR` 값이 있으면 그 폴더 아래에 설치합니다.
+
+`uninstall <path> [--dry-run]`
+
+- vault 안에서는 기록된 hash와 같은 managed 파일, `.mcp.json`, manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
+- `raw/`, `wiki/`, `scratch/`, `.git` 폴더와 manifest에 없는 파일은 어떤 경우에도 지우지 않습니다. commit도 하지 않습니다.
+- 이 vault의 MCP 항목을 지우고, 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 뺍니다.
+- 남은 vault가 없을 때만 불러오기 skill, recall 스크립트, 연결 설정을 지웁니다.
+
+`doctor <path>`
+
+manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트, 연결 설정, MCP 항목, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. vault의 `.mcp.json` 파일이 없거나 다른 vault 또는 Python 3.10 미만을 가리키면 다시 만듭니다. doctor가 쓰는 파일은 이것 하나뿐입니다.
+
+## 18. Git 사용하기
 
 LLM Wiki는 Git으로 durable state를 보존합니다.
 
@@ -660,7 +852,7 @@ git commit -m "wiki: update example concept"
 
 `scripts/release_gate.sh`는 임시 복사본에서 tests, lint, health, maps, metrics를 실행합니다. 검증 중 생기는 report나 test artifact가 현재 vault를 오염시키지 않으며, 같은 gate는 `.github/workflows/release-gate.yml`에서도 실행됩니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다. 도구 test는 gate 시간의 대부분을 차지하고 코드와 문서에만 영향을 받습니다. 단, builder 저장소에서는 `init-vault.sh`가 `wiki/`, `scratch/drafts`, `scratch/review`를 새 vault에 복사하고 test가 그 결과를 검사하므로, 이 폴더들도 fingerprint에 넣습니다. 그래서 Git 저장소인 vault에서 통과한 gate는 `wiki/`, `raw/`, `scratch/` 밖의 파일 fingerprint를 Git 디렉터리의 `llm-wiki-gate-tests.cache`에 기록하고, 다음 실행에서 fingerprint가 같으면 도구 test를 건너뜁니다. 지식 페이지만 바꾼 경우 gate가 몇 초 안에 끝납니다. baseline test, lint, health, maps, metrics는 항상 실행합니다. 도구 test를 강제로 실행하려면 `WIKI_GATE_FULL=1 scripts/release_gate.sh`를 씁니다. Git이 없는 vault와 CI는 cache가 없으므로 항상 전체를 실행합니다.
 
-## 18. 전체 명령 요약
+## 19. 전체 명령 요약
 
 | 목적 | 명령 |
 |---|---|
@@ -689,8 +881,13 @@ git commit -m "wiki: update example concept"
 | maintenance metrics report | `python3 tools/wiki/cli.py metrics --report` |
 | maintenance metrics gate | `python3 tools/wiki/cli.py metrics --check --report` |
 | MCP server 실행 | `python3 tools/wiki/mcp_server.py` |
+| L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
+| project 요약 불러오기 (Claude Code 세션) | `/project-memory [open\|decisions\|corrections]` |
+| vault 밖 파일 설치 (builder checkout) | `python3 tools/vault_migration/cli.py install /path/to/vault --name personal` |
+| vault 밖 파일 점검 (builder checkout) | `python3 tools/vault_migration/cli.py doctor /path/to/vault` |
+| vault 밖 파일 삭제 (builder checkout) | `python3 tools/vault_migration/cli.py uninstall /path/to/vault` |
 
-## 19. 완료 기준
+## 20. 완료 기준
 
 wiki 작업은 다음 조건을 만족해야 완료입니다.
 
