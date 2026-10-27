@@ -5958,6 +5958,44 @@ class ProjectSummaryMapTest(unittest.TestCase):
         self.assertIn("Removed `wiki/maps/projects/beta-2.md`", log)
         self.assertNotIn("maps/projects/beta-2", topic_map)
 
+    def test_project_summary_removed_when_project_field_removed_from_every_page(self):
+        # A-8: remove `project` from every page of one project, including the inbox Project: lines.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._a6_vault(root)
+            self.assertEqual(0, _run_wiki_cli(root, "maps", "build")[0])
+            alpha = root / "wiki" / "maps" / "projects" / "alpha.md"
+            self.assertTrue(alpha.exists())
+            for relative in (
+                "wiki/decisions/alpha-storage.md",
+                "wiki/concepts/alpha-naming-rule.md",
+                "wiki/concepts/alpha-background.md",
+            ):
+                page = parse_page(root / relative)
+                frontmatter = dict(page.frontmatter)
+                del frontmatter["project"]
+                (root / relative).write_text(render_page(frontmatter, page.body))
+            inbox = root / "wiki" / "inbox.md"
+            inbox.write_text(inbox.read_text().replace("Project: alpha\n", ""))
+
+            check_code, check_output = _run_wiki_cli(root, "maps", "build", "--check")
+            alpha_kept_by_check = alpha.exists()
+            build_code, build_output = _run_wiki_cli(root, "maps", "build")
+            recheck_code, recheck_output = _run_wiki_cli(root, "maps", "build", "--check")
+            log = (root / "wiki" / "log.md").read_text()
+            alpha_exists = alpha.exists()
+            beta_exists = (root / "wiki" / "maps" / "projects" / "beta-2.md").exists()
+            topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
+
+        self.assertEqual(1, check_code, check_output)
+        self.assertTrue(alpha_kept_by_check)
+        self.assertEqual(0, build_code, build_output)
+        self.assertEqual(0, recheck_code, recheck_output)
+        self.assertFalse(alpha_exists)
+        self.assertTrue(beta_exists)
+        self.assertIn("Removed `wiki/maps/projects/alpha.md`", log)
+        self.assertNotIn("maps/projects/alpha", topic_map)
+
     def test_project_summary_build_refuses_to_delete_unmarked_or_locked_project_files(self):
         for name, content in {
             "unmarked": render_page(_frontmatter("Hand Written", "map"), "# Hand Written\n\nSource: Human.\n"),

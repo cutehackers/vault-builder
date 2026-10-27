@@ -36,8 +36,10 @@ from .catalogs import _safe_relative_path, sha256_file
 from .durability import fsync_directory
 from .installing import (
     MCP_ENTRY_PREFIX,
+    NAME_PATTERN,
     ROOT,
     InstallError,
+    UserPaths,
     _ASSET_ROOT,
     _OutsideChanges,
     _absolute_target,
@@ -47,6 +49,7 @@ from .installing import (
     _load_json_object,
     _recall_is_known,
     _same_path,
+    _VAULT_MAP_VERSION,
     require_python,
     resolve_user_paths,
 )
@@ -66,13 +69,6 @@ class UninstallError(InstallError):
 # Shared helpers.
 
 
-def _home(environ: Mapping[str, str]) -> Path:
-    raw_home = environ.get("HOME", "")
-    if not raw_home or not os.path.isabs(raw_home):
-        raise UninstallError("HOME must be set to an absolute path.")
-    return Path(raw_home).resolve()
-
-
 def _records(manifest: VaultManifest, kind: str) -> list[Mapping[str, object]]:
     return [record for record in manifest.external_records if record["kind"] == kind]
 
@@ -83,6 +79,43 @@ def _record_path(home: Path, record: Mapping[str, object]) -> Path:
 
 def _entry_key(record: Mapping[str, object]) -> str:
     return str(record["key_path"]).split(".", 1)[1]
+
+
+def _record_problems(manifest: VaultManifest, user: UserPaths) -> list[str]:
+    """Describe each outside record whose location or key is not one install writes."""
+    problems = [_record_problem(record, user) for record in manifest.external_records]
+    return [problem for problem in problems if problem]
+
+
+def _record_problem(record: Mapping[str, object], user: UserPaths) -> str:
+    """Return why a record is unexpected, or "" when install writes exactly this location.
+
+    The manifest is tracked by git and editable, so uninstall and doctor accept only the paths
+    install resolves from HOME and CLAUDE_CONFIG_DIR: the skill, the recall script, the vault map,
+    and mcpServers.llm-wiki-<name> in the MCP settings file.
+    """
+    kind, location = str(record["kind"]), str(record["location"])
+    if kind == "file":
+        files = sorted({user.relative(user.skill), user.relative(user.recall)})
+        if location not in files:
+            return f"Unexpected file record {location}: expected {' or '.join(files)}."
+    elif kind == "config":
+        vault_map = user.relative(user.vault_map)
+        if location != vault_map:
+            return f"Unexpected config record {location}: expected {vault_map}."
+    elif kind == "json-entry":
+        mcp_config = user.relative(user.mcp_config)
+        key_path = str(record["key_path"])
+        prefix = "mcpServers." + MCP_ENTRY_PREFIX
+        name = key_path[len(prefix):] if key_path.startswith(prefix) else ""
+        if location != mcp_config or not NAME_PATTERN.fullmatch(name):
+            return (
+                f"Unexpected json-entry record {location} {key_path}: "
+                f"expected {mcp_config} mcpServers.{MCP_ENTRY_PREFIX}<name>."
+            )
+    else:
+        return f"Unexpected {kind} record {location}."
+    return ""
 
 
 def _is_skill(path: Path) -> bool:
@@ -141,8 +174,7 @@ class _UninstallPlan:
     missing_inside: list[str] = field(default_factory=list)
     delete_mcp_json: bool = False
     entry_path: Path | None = None
-    entry_key: str = ""
-    entry_action: str = ""  # remove | keep | absent
+    entries: list[tuple[str, str]] = field(default_factory=list)  # (key, remove | keep | absent)
     vault_map_path: Path | None = None
     vault_map: dict[str, object] | None = None
     vault_map_action: str = ""  # update | delete | absent
@@ -212,29 +244,37 @@ def _plan_uninstall(target: Path, builder_root: Path, environ: Mapping[str, str]
             "only files inside the vault were processed; files outside the vault were not touched."
         )
         return plan
-    _plan_outside(plan, manifest, builder_root, _home(environ))
+    user = resolve_user_paths(environ)
+    problems = _record_problems(manifest, user)
+    if problems:
+        raise UninstallError(
+            "The manifest lists files outside the vault that install does not write; nothing was written. "
+            + " ".join(problems)
+            + " Check HOME and CLAUDE_CONFIG_DIR match the install, or restore the manifest from git."
+        )
+    _plan_outside(plan, manifest, builder_root, user.home)
     return plan
 
 
 def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: Path, home: Path) -> None:
-    entries = _records(manifest, "json-entry")
+    # Records were checked by _record_problems: every json-entry is in the same MCP settings file.
     names: set[str] = set()
-    for record in entries:
+    for record in _records(manifest, "json-entry"):
         key = _entry_key(record)
-        if key.startswith(MCP_ENTRY_PREFIX):
-            names.add(key[len(MCP_ENTRY_PREFIX):])
+        names.add(key[len(MCP_ENTRY_PREFIX):])
         path = _record_path(home, record)
-        plan.entry_path, plan.entry_key = path, key
+        plan.entry_path = path
         config = _load_json_object(path, "MCP settings file")
         servers = config.get("mcpServers", {})
         if not isinstance(servers, dict):
             raise UninstallError(f"MCP settings file {path}: mcpServers must be a JSON object.")
         if key not in servers:
-            plan.entry_action = "absent"
+            action = "absent"
         elif normalized_json_sha256(servers[key]) == record["sha256"]:
-            plan.entry_action = "remove"
+            action = "remove"
         else:
-            plan.entry_action = "keep"
+            action = "keep"
+        plan.entries.append((key, action))
 
     for record in _records(manifest, "config"):
         path = _record_path(home, record)
@@ -243,10 +283,15 @@ def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: P
             plan.vault_map_action = "absent"
             continue
         vault_map = _load_json_object(path, "Vault map")
-        vaults = vault_map.get("vaults", {})
+        vaults = vault_map.get("vaults")
         projects = vault_map.get("projects", {})
-        if not isinstance(vaults, dict) or not isinstance(projects, dict):
-            raise UninstallError(f"Vault map {path}: vaults and projects must be JSON objects.")
+        if vault_map.get("version") != _VAULT_MAP_VERSION or not isinstance(vaults, dict):
+            raise UninstallError(
+                f"Vault map {path} must be a JSON object with version {_VAULT_MAP_VERSION} and a vaults object; "
+                "nothing was written."
+            )
+        if not isinstance(projects, dict):
+            raise UninstallError(f"Vault map {path}: projects must be a JSON object.")
         removed = []
         for vault_name, value in list(vaults.items()):
             vault_path = value.get("path") if isinstance(value, dict) else None
@@ -279,11 +324,13 @@ def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: P
 def _uninstall_outside(plan: _UninstallPlan) -> None:
     changes = _OutsideChanges()
     try:
-        if plan.entry_action == "remove" and plan.entry_path is not None:
+        removed = [key for key, action in plan.entries if action == "remove"]
+        if removed and plan.entry_path is not None:
             # Re-read just before writing: Claude Code may have rewritten the file since planning.
             config = _load_json_object(plan.entry_path, "MCP settings file")
             servers = dict(config.get("mcpServers", {}))  # type: ignore[arg-type]
-            servers.pop(plan.entry_key, None)
+            for key in removed:
+                servers.pop(key, None)
             config["mcpServers"] = servers
             mode = stat.S_IMODE(plan.entry_path.stat().st_mode)
             changes.write(plan.entry_path, _json_bytes(config, indent=2), mode)
@@ -347,11 +394,11 @@ def _print_uninstall(plan: _UninstallPlan, stream: TextIO, *, dry_run: bool) -> 
     print("  kept .gitignore, raw/, wiki/, scratch/, .git and files the manifest does not list", file=stream)
     for relative in plan.kept_modified:
         print(f"Kept modified file: {plan.target / relative}", file=stream)
-    if plan.entry_path is not None:
-        key = f"mcpServers.{plan.entry_key}"
-        if plan.entry_action == "remove":
+    for entry_key, action in plan.entries:
+        key = f"mcpServers.{entry_key}"
+        if action == "remove":
             print(f"  {'remove' if dry_run else 'removed'} {key} from {plan.entry_path}", file=stream)
-        elif plan.entry_action == "keep":
+        elif action == "keep":
             print(f"Kept changed MCP entry (differs from the manifest record): {key} in {plan.entry_path}", file=stream)
         else:
             print(f"Note: {key} was not found in {plan.entry_path}", file=stream)
@@ -431,16 +478,19 @@ def doctor(
             report.problems.append(
                 f"{len(modified)} managed files differ from the manifest: " + ", ".join(modified)
             )
-        for record in _records(manifest, "file"):
+        # An unexpected record is a problem and its location is not used.
+        report.problems += _record_problems(manifest, user)
+        trusted = [record for record in manifest.external_records if not _record_problem(record, user)]
+        for record in (record for record in trusted if record["kind"] == "file"):
             path = _record_path(home, record)
             recorded[path] = str(record["sha256"])
             if _is_skill(path):
                 skill = path
             elif _is_recall(path):
                 recall = path
-        for record in _records(manifest, "config"):
+        for record in (record for record in trusted if record["kind"] == "config"):
             vault_map_path = _record_path(home, record)
-        for record in _records(manifest, "json-entry"):
+        for record in (record for record in trusted if record["kind"] == "json-entry"):
             mcp_config = _record_path(home, record)
             key = _entry_key(record)
             if key.startswith(MCP_ENTRY_PREFIX):

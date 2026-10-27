@@ -237,6 +237,8 @@ def _precheck(
     target = _absolute_target(target)
     new_vault, empty_dir = _target_state(target, builder_root)
     vault_name = _vault_name(target, name)
+    if not new_vault:
+        _require_same_entry_key(target, MCP_ENTRY_PREFIX + vault_name, user)
     if with_stenc and new_vault:
         missing = [path for path in _STENC_REQUIRED if not (builder_root / path).exists()]
         if missing:
@@ -385,6 +387,28 @@ def _vault_name(target: Path, name: str | None) -> str:
         f"Folder name {target.name!r} cannot be a vault name. Pass --name NAME "
         "(letters, digits, '.', '_' or '-', starting with a letter or digit)."
     )
+
+
+def _require_same_entry_key(target: Path, key: str, user: UserPaths) -> None:
+    """Refuse a second MCP entry name or config folder: uninstall accepts only one of each."""
+    manifest = load_manifest(target)
+    assert manifest is not None
+    expected = {user.relative(path) for path in (user.skill, user.recall, user.vault_map, user.mcp_config)}
+    for record in manifest.external_records:
+        if str(record["location"]) not in expected:
+            raise InstallError(
+                f"Vault {target} was installed with another HOME or CLAUDE_CONFIG_DIR "
+                f"({record['location']} is not under the current config folder). "
+                "Run uninstall with the original HOME and CLAUDE_CONFIG_DIR first."
+            )
+        key_path = str(record.get("key_path", ""))
+        if record["kind"] == "json-entry" and key_path != f"mcpServers.{key}":
+            registered = key_path.split(".", 1)[1]
+            name = registered[len(MCP_ENTRY_PREFIX):] if registered.startswith(MCP_ENTRY_PREFIX) else registered
+            raise InstallError(
+                f"Vault {target} is already registered as {key_path}. Run uninstall first to change "
+                f"its name, or install again with --name {name}."
+            )
 
 
 def _require_regular_or_absent(path: Path) -> None:
