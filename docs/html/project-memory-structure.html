@@ -180,6 +180,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
 @media (max-width: 760px) { .phases { grid-template-columns: 1fr; } }
 .phase { border-radius: 12px; padding: 16px; display: grid; gap: 10px; align-content: start; border: 1px solid var(--line); background: var(--surface); }
 .phase.now { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+.phase.done { border: 1.5px solid var(--keep); background: var(--keep-soft); }
 .phase .ph { display: grid; }
 .phase .ph small { font-size: 12px; color: var(--ink-2); }
 .task { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
@@ -443,26 +444,26 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
   <section id="plan">
     <div class="sec-head">
       <div class="eyebrow">실행 순서</div>
-      <h2>vault-builder 기반 정리가 먼저입니다</h2>
+      <h2>1단계와 2단계는 끝났습니다</h2>
     </div>
     <div class="phases">
-      <div class="phase now">
-        <div class="ph"><h3>1단계 · 지금</h3><small>bake 진행 중 · 구현 계획 승인 대기</small></div>
-        <div class="task"><b>vault-builder 기반 정리</b><span>release gate 복원, contract hash 불일치 수정, Python 검사 순서, Claude Code 연동 파일</span></div>
+      <div class="phase done">
+        <div class="ph"><h3>1단계 · 완료</h3><small>2026-10-26</small></div>
+        <div class="task"><b>vault-builder 기반 정리</b><span>release gate 복원, contract hash 불일치 수정, Python 검사 순서, Claude Code 연동 파일</span><span class="dep">ea450df, 6463627</span></div>
       </div>
-      <div class="phase">
-        <div class="ph"><h3>2단계 · 다음 spec</h3><small>메모리 기능 · 1단계 뒤</small></div>
+      <div class="phase done">
+        <div class="ph"><h3>2단계 · 완료</h3><small>메모리 기능 · 2026-10-27</small></div>
         <div class="phase-grid">
-          <div class="task"><b>요약 페이지</b><span>project 필드 추가, 요약 생성</span></div>
-          <div class="task"><b>정리 skill</b><span>메모리 → vault</span></div>
-          <div class="task"><b>SessionStart hook</b><span>연결 설정, 멀티 vault 문서</span><span class="dep">요약 페이지와 정리 skill 뒤</span></div>
-          <div class="task"><b>install / uninstall</b><span>원칙1~7</span></div>
-          <div class="task"><b>현재 vault migration</b><span>1단계 결과를 지금 vault에 적용</span></div>
+          <div class="task"><b>요약 페이지</b><span>project 필드 추가, 요약 생성</span><span class="dep">e4e95f0</span></div>
+          <div class="task"><b>정리 skill</b><span>메모리 → vault</span><span class="dep">ccd52c7</span></div>
+          <div class="task"><b>/project-memory skill</b><span>SessionStart hook 대신, 필요할 때 불러서 요약을 읽는 방식으로 바꿈</span><span class="dep">c314920</span></div>
+          <div class="task"><b>install / uninstall / doctor</b><span>원칙1~7</span><span class="dep">a3f0a70, 643da01</span></div>
+          <div class="task"><b>현재 vault migration</b><span>지금 vault에 contract v2 적용, vault 밖 기록 4개</span></div>
         </div>
       </div>
       <div class="phase">
-        <div class="ph"><h3>3단계 · 나중</h3><small>Vault Graph</small></div>
-        <div class="task"><b>읽기 전용 통합 검색</b><span>여러 vault를 한 번에, 출처 포함</span></div>
+        <div class="ph"><h3>3단계 · 다음</h3><small>Vault Graph</small></div>
+        <div class="task"><b>읽기 전용 통합 검색</b><span>여러 vault를 한 번에, 출처 포함</span><span class="dep">별도 repo에서 구현 중, 이 vault와는 아직 연결하지 않음</span></div>
       </div>
     </div>
   </section>
