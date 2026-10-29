@@ -1,5 +1,31 @@
 # Decisions
 
+## 2026-10-29 - Release Versions For vault-builder
+
+**Release:** 1.0.0
+
+**Question:** How should vault-builder record which build installed a vault,
+when every catalog shared the fixed revision `contract-v2` and the v2 catalog
+was rebuilt in place?
+
+**Decision:** Use SemVer release versions starting at 1.0.0, kept in `VERSION`,
+git tags `vX.Y.Z`, and `CHANGELOG.md`. The catalog and manifest
+`builder_revision` hold the release version. Contract, manifest schema, and
+vault-map versions stay separate integers, listed per release in the
+changelog compatibility table. A MAJOR release is required whenever installed
+vaults need manual action, including every contract bump.
+
+**Reason:** A vault manifest must name the exact release that wrote it so that
+doctor can report an outdated vault. Release and contract numbers count
+different things, so they stay independent.
+
+**Implications:**
+
+- `docs/PUBLISH.md` is the release procedure.
+- The release gate fails when `VERSION`, the latest changelog release, and the
+  catalog `builder_revision` disagree.
+- New entries in this file and `docs/PATCH_LOG.md` carry a `**Release:**` line.
+
 ## 2026-08-03 - Defer The Full Target Gate Until Transactional Migration
 
 **Question:** How should the local Vault transition validate its pre-apply state

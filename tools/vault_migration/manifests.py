@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.vault_migration.versioning import read_version
 from tools.wiki.lib.vault_manifest import MANIFEST_CONTRACT_VERSION, MANIFEST_SCHEMA_VERSION
 
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
@@ -37,15 +37,7 @@ def _builder_revision(builder_root: Path, explicit_revision: str) -> str:
     environment_revision = os.environ.get("VAULT_BUILDER_REVISION", "")
     if environment_revision:
         return environment_revision
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=builder_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    revision = result.stdout.strip() if result.returncode == 0 else ""
-    return revision or "contract-v2"
+    return read_version(builder_root)
 
 
 def _utc_timestamp(value: datetime | None) -> str:

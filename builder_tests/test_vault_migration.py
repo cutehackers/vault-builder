@@ -28,6 +28,7 @@ from tools.vault_migration.catalogs import build_catalog, load_catalog, sha256_f
 from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.managed_paths import MANAGED_PATHS
+from tools.vault_migration.versioning import read_version, version_label
 from tools.vault_migration.models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan, VaultManifest
 from tools.vault_migration.planning import (
     audit_vault,
@@ -1031,7 +1032,7 @@ class ContractCatalogTest(unittest.TestCase):
         catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
 
         self.assertEqual(2, catalog.contract_version)
-        self.assertEqual("contract-v2", catalog.builder_revision)
+        self.assertEqual(read_version(ROOT), catalog.builder_revision)
         self.assertIn(".gitignore", catalog.managed_files)
         for relative in (
             ".agents/skills/memory-cleanup/SKILL.md",
@@ -8872,3 +8873,75 @@ class ReinstallRoundTripTests(_RouterVaultTestCase):
             self.assertEqual(page_bytes, page.read_bytes())
             self.assertEqual([], _changed_paths(knowledge, self._knowledge(target)), f"round {round_number} install")
             self.assertFalse((target / ".mcp.json").exists())
+
+
+class ReleaseVersionTests(unittest.TestCase):
+    """VERSION, CHANGELOG.md and the catalog name the same release (docs/PUBLISH.md)."""
+
+    def test_version_file_holds_one_semver_line(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+            self.assertEqual("1.2.3", read_version(root))
+            for bad in ("1.2\n", "v1.2.3\n", "1.2.3", "01.2.3\n", "1.2.3\n\n", "1.2.3-rc1\n"):
+                with self.subTest(bad=bad):
+                    (root / "VERSION").write_text(bad, encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        read_version(root)
+            (root / "VERSION").unlink()
+            with self.assertRaisesRegex(ValueError, "Missing VERSION"):
+                read_version(root)
+
+    def test_version_changelog_and_catalog_agree(self):
+        version = read_version(ROOT)
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        headings = re.findall(r"^## \[([^\]]+)\]", changelog, flags=re.MULTILINE)
+        self.assertEqual("Unreleased", headings[0])
+        self.assertEqual(version, headings[1])
+        self.assertRegex(changelog, rf"(?m)^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$")
+        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
+        self.assertEqual(version, catalog.builder_revision)
+        self.assertIn(f"| {version} | {catalog.contract_version} |", changelog)
+
+    def test_catalog_command_defaults_revision_to_version(self):
+        written = []
+        with mock.patch.object(cli, "write_catalog", side_effect=lambda path, catalog, **_: written.append(catalog)):
+            self.assertEqual(0, cli.main(["catalog", "--contract-version", "2", "--output", "unused.json"]))
+        self.assertEqual(read_version(ROOT), written[0].builder_revision)
+
+    def test_manifest_revision_defaults_to_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir)
+            with mock.patch.dict(os.environ, {"VAULT_BUILDER_REVISION": ""}):
+                self.assertEqual(read_version(ROOT), create_manifest(ROOT, target, "").builder_revision)
+
+
+class DoctorVersionTests(_RouterVaultTestCase):
+    """install and doctor print the release; doctor notes a vault written by another release."""
+
+    def setUp(self):
+        super().setUp()
+        self.target = self.work / "vault-a"
+        self.install_result = self._install(str(self.target), "--name", "a")
+        self.assertEqual(0, self.install_result.returncode, self.install_result.stdout + self.install_result.stderr)
+
+    def test_install_and_doctor_print_the_release(self):
+        self.assertIn(version_label(ROOT), self.install_result.stdout)
+        result = self._cli("doctor", str(self.target))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn(version_label(ROOT), result.stdout)
+        self.assertNotIn("Note: This vault was installed", result.stdout)
+
+    def test_doctor_notes_a_vault_from_another_release_without_failing(self):
+        manifest_path = self.target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["builder_revision"] = "contract-v2"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result = self._cli("doctor", str(self.target))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        notes = [line for line in result.stdout.splitlines() if line.startswith("Note: This vault was installed")]
+        self.assertEqual(1, len(notes), result.stdout)
+        self.assertIn("contract-v2", notes[0])
+        self.assertIn(read_version(ROOT), notes[0])

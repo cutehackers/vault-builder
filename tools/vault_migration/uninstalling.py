@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
+from tools.vault_migration.versioning import read_version, version_label
 from tools.wiki.lib.vault_manifest import normalized_json_sha256
 
 from .catalogs import _safe_relative_path, sha256_file
@@ -528,6 +529,12 @@ def doctor(
         report.problems.append(f"Manifest is invalid: {exc}")
     if manifest is None and not report.problems:
         report.problems.append(f"No Vault builder manifest in {target}. Run install first.")
+    builder_version = read_version(builder_root)
+    if manifest is not None and manifest.builder_revision != builder_version:
+        report.notes.append(
+            f"This vault was installed or migrated by builder revision {manifest.builder_revision}; "
+            f"this checkout is {builder_version}. Run audit and apply to bring the vault up to date."
+        )
     elif manifest is not None and manifest.schema_version != 2:
         report.problems.append(
             f"Manifest schema is {manifest.schema_version}, not 2. Run audit and apply, then install."
@@ -591,6 +598,7 @@ def doctor(
             "or delete the file if you do not use it."
         )
 
+    print(version_label(builder_root), file=stream)
     for note in report.notes:
         print(f"Note: {note}", file=stream)
     for problem in report.problems:

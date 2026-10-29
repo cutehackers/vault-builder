@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.catalogs import build_catalog, write_catalog
+from tools.vault_migration.versioning import read_version
 from tools.vault_migration.installing import install
 from tools.vault_migration.linking import link, list_links, unlink
 from tools.vault_migration.uninstalling import doctor, uninstall
@@ -542,7 +543,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     catalog = subcommands.add_parser("catalog")
     catalog.add_argument("--contract-version", required=True, type=int)
-    catalog.add_argument("--revision", required=True)
+    catalog.add_argument("--revision", help="Defaults to the VERSION file.")
     catalog.add_argument("--source-ref")
     catalog.add_argument("--output", required=True)
     manifest = subcommands.add_parser("manifest")
@@ -675,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if exc.code == 0 else 1
     if args.command == "catalog":
         try:
-            result = build_catalog(ROOT, args.contract_version, args.revision, args.source_ref)
+            result = build_catalog(ROOT, args.contract_version, args.revision or read_version(ROOT), args.source_ref)
             output = Path(args.output)
             display_output = output if output.is_absolute() else ROOT / output
             write_catalog(output, result, output_root=ROOT)

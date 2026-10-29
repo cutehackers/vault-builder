@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
+from tools.vault_migration.versioning import version_label
 from tools.wiki.lib.vault_manifest import normalized_json_sha256
 
 from .applying import apply_plan
@@ -994,6 +995,7 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
     else:
         kind = "existing vault"
     print(f"Dry run: install {kind} {plan.target}", file=stream)
+    print(version_label(), file=stream)
     print(f"Vault name: {plan.name}", file=stream)
     print(f"Interpreter: {plan.python}", file=stream)
     if plan.new_vault:
@@ -1031,6 +1033,7 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
         print("Restored managed files and the manifest:", file=stream)
         for line in _restore_changes(plan.restore_plan) or ["none"]:
             print(f"  {line}", file=stream)
+    print(version_label(), file=stream)
     print(f"Vault name: {plan.name}", file=stream)
     print(f"MCP server: mcpServers.{plan.mcp_key} ({plan.mcp_entry_action}) in {plan.user.mcp_config}", file=stream)
     print(f"Router: {plan.user.router}", file=stream)
