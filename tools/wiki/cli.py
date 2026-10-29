@@ -73,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     search_cmd.add_argument("--include-deprecated", action="store_true")
 
     memory_scan_cmd = subcommands.add_parser("memory-scan")
-    memory_scan_cmd.add_argument("--project")
+    memory_scan_target = memory_scan_cmd.add_mutually_exclusive_group()
+    memory_scan_target.add_argument("--project")
+    memory_scan_target.add_argument("--repo", type=Path)
     memory_scan_cmd.add_argument("--json", action="store_true")
 
     read_cmd = subcommands.add_parser("read")
@@ -196,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "memory-scan":
         try:
-            scan = scan_memory(ROOT, project=args.project)
+            scan = scan_memory(ROOT, project=args.project, repo=args.repo)
         except MemoryScanError as exc:
             print(str(exc), file=sys.stderr)
             return 1

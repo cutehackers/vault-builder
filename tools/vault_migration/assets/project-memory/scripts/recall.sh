@@ -16,9 +16,11 @@ PYTHON=@VAULT_BUILDER_PYTHON@
 exec "$PYTHON" -I - "$@" <<'PY'
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 SECTION_MAX_TOKENS = 750
 ALL_MAX_TOKENS = 1500
@@ -78,7 +80,16 @@ def config_dir():
     return Path(os.environ.get("HOME") or Path.home()) / ".claude"
 
 
-def linked_vaults(map_path, project_id):
+def link_command(root, vault_names):
+    names = ", ".join(sorted(vault_names)) or "none"
+    return (
+        f"run tools/vault_migration/cli.py link <vault> --repo {shlex.quote(str(root))} "
+        f"from the vault-builder checkout (vaults: {names})"
+    )
+
+
+def load_vault_map(map_path):
+    """Return the link config as a dict with object vaults and projects; versions 1 and 2 are read."""
     if not map_path.is_file():
         raise Stop(f"No link config at {map_path}; link a project there first (see docs/usage.md).")
     try:
@@ -88,15 +99,123 @@ def linked_vaults(map_path, project_id):
     damaged = f"Link config {map_path} is damaged"
     if not isinstance(data, dict):
         raise Stop(f"{damaged}: it must be a JSON object.")
-    vaults = data.get("vaults")
-    projects = data.get("projects")
-    if not isinstance(vaults, dict) or not isinstance(projects, dict):
+    if not isinstance(data.get("vaults"), dict) or not isinstance(data.get("projects"), dict):
         raise Stop(f"{damaged}: vaults and projects must be objects.")
-    if project_id not in projects:
-        raise Stop(
-            f"Project {project_id} is not linked to a vault; add it under projects in {map_path} (see docs/usage.md)."
+    version = data.get("version")
+    if type(version) is not int or version not in (1, 2):
+        raise Stop(f"{damaged}: version must be 1 or 2.")
+    return data
+
+
+def origin_url(root):
+    """Return the origin URL as written in the git config, or None."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-    entry = projects[project_id]
+    except OSError:
+        return None
+    url = result.stdout.strip()
+    return url if result.returncode == 0 and url else None
+
+
+def resolve_path(path):
+    try:
+        return path.expanduser().resolve()
+    except (OSError, RuntimeError):
+        return path.expanduser().absolute()
+
+
+def normalize_remote(url, base):
+    """host/path with a lowercase host for host forms; an absolute path for file:// and local paths.
+
+    Same rule as normalize_remote in the llm-wiki router. A relative local path is read against base.
+    """
+    text = url.strip()
+    if "://" in text:
+        parts = urlsplit(text)
+        if parts.scheme.lower() == "file":
+            return str(resolve_path(Path(unquote(parts.path))))
+        return host_path(parts.hostname or "", parts.path)
+    colon = text.find(":")
+    if colon > 0 and "/" not in text[:colon]:
+        return host_path(text[:colon].rpartition("@")[2], text[colon + 1 :])
+    local = Path(text).expanduser()
+    if not local.is_absolute():
+        local = base / local
+    return str(resolve_path(local))
+
+
+def host_path(host, path):
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")].rstrip("/")
+    return f"{host.lower()}/{path}"
+
+
+def find_project(root, data, map_path):
+    """Spec 4.3: return (project id, stage, recorded root) or raise Stop. Stages: root, remote, name."""
+    projects = data["projects"]
+    entries = {key: value for key, value in projects.items() if isinstance(value, dict)}
+
+    def recorded_root(entry):
+        value = entry.get("root") if isinstance(entry, dict) else None
+        return resolve_path(Path(value)) if isinstance(value, str) and value else None
+
+    resolved = resolve_path(root)
+    origin = origin_url(root)
+
+    def has_remote(entry):
+        return isinstance(entry, dict) and isinstance(entry.get("remote"), str)
+
+    stages = [("root", [key for key, entry in entries.items() if recorded_root(entry) == resolved])]
+    if origin is not None:
+        wanted = normalize_remote(origin, root)
+        stages.append(
+            (
+                "remote",
+                [
+                    key
+                    for key, entry in entries.items()
+                    if has_remote(entry)
+                    and normalize_remote(entry["remote"], recorded_root(entry) or root) == wanted
+                ],
+            )
+        )
+    stages.append(
+        ("name", [key for key, entry in projects.items() if key == root.name and not (origin is not None and has_remote(entry))])
+    )
+    for stage, matches in stages:
+        if len(matches) == 1:
+            return matches[0], stage, recorded_root(projects[matches[0]])
+        if len(matches) > 1:
+            raise Stop(
+                f"Several projects in {map_path} match {root} by {stage}: {', '.join(sorted(matches))}; "
+                "remove or fix the extra entries."
+            )
+    raise Stop(
+        f"{root} is not linked to a project in {map_path}.\nlink: {link_command(root, data['vaults'])}"
+    )
+
+
+def relink_note(root, stage, recorded, vault_names):
+    """One line when the project was found by remote or name and the recorded root is elsewhere."""
+    if stage == "root" or recorded == resolve_path(root):
+        return None
+    where = recorded if recorded is not None else "missing"
+    return (
+        f"{PREFIX}link config root ({where}) differs from this repository at {root}. "
+        f"Run link again: {link_command(root, vault_names)}"
+    )
+
+
+def linked_vaults(map_path, data, project_id):
+    damaged = f"Link config {map_path} is damaged"
+    vaults = data["vaults"]
+    entry = data["projects"][project_id]
     names = entry.get("vaults") if isinstance(entry, dict) else None
     if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
         raise Stop(f"{damaged}: project {project_id} needs a vaults list.")
@@ -193,15 +312,18 @@ def recall(arguments):
         return 2
     wanted = [arguments[0]] if arguments and arguments[0] else list(SECTION_HEADINGS)
     limit = SECTION_MAX_TOKENS if len(wanted) == 1 else ALL_MAX_TOKENS
+    map_path = config_dir() / "vault-builder" / "vault-map.json"
     try:
         root = project_root(os.getcwd())
-        project_id = root.name
-        vaults = linked_vaults(config_dir() / "vault-builder" / "vault-map.json", project_id)
+        data = load_vault_map(map_path)
+        project_id, stage, recorded = find_project(root, data, map_path)
+        vaults = linked_vaults(map_path, data, project_id)
     except Stop as stop:
         print(PREFIX + str(stop))
         return 0
 
-    notes = []
+    note = relink_note(root, stage, recorded, [name for name, _ in vaults])
+    notes = [note] if note else []
     blocks = []
     for name, vault_path in vaults:
         header, sections, block_notes = vault_block(name, vault_path, project_id, wanted)

@@ -29,3 +29,4 @@ Reading the output:
 - Item lines end with the evidence page path `(wiki/<path>.md)`, relative to that vault. Open an evidence page only when you need more than its summary line.
 - A single `project-memory:` line means nothing was printed for a stated reason, such as no git repository or no linked vault. Report that line and continue without it.
 - A last `project-memory: output truncated` line means items were cut to fit the size limit.
+- A `link:` line, or a `project-memory:` line that says to link again, tells how to connect this repository to a vault. Pass that line to the user unchanged.

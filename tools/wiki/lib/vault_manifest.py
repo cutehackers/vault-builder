@@ -309,10 +309,6 @@ def _external_record(value: object) -> dict[str, object]:
                 "Vault builder manifest json-entry key_path must be "
                 "mcpServers.<name>."
             )
-        if shared:
-            raise ValueError(
-                "Vault builder manifest json-entry external record must not be shared."
-            )
         record["key_path"] = key_path
     return record
 

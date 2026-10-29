@@ -6309,6 +6309,343 @@ class MemoryScanTest(unittest.TestCase):
         self.assertIn(".agents/skills/memory-cleanup/SKILL.md", pointer)
 
 
+def _shared_json_entry_manifest() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "contract_version": 2,
+        "builder_revision": "test",
+        "generated_at": "2026-10-28T00:00:00Z",
+        "managed_files": {},
+        "external_records": [
+            {
+                "kind": "file",
+                "location": ".claude/vault-builder/llm_wiki_router.py",
+                "sha256": "a" * 64,
+                "shared": True,
+            },
+            {
+                "kind": "json-entry",
+                "location": ".claude.json",
+                "key_path": "mcpServers.llm-wiki",
+                "sha256": "b" * 64,
+                "shared": True,
+            },
+        ],
+        "last_migration_id": None,
+    }
+
+
+class SharedJsonEntryTests(unittest.TestCase):
+    """A-18: a shared json-entry record passes vault-side manifest validation."""
+
+    def test_shared_json_entry_record_is_accepted_in_schema_2(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        manifest = validate_manifest(_shared_json_entry_manifest())
+
+        self.assertEqual(2, manifest["schema_version"])
+        entry = next(record for record in manifest["external_records"] if record["kind"] == "json-entry")
+        self.assertEqual("mcpServers.llm-wiki", entry["key_path"])
+        self.assertIs(True, entry["shared"])
+
+    def test_json_entry_key_path_rule_is_unchanged(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        value = _shared_json_entry_manifest()
+        value["external_records"][1]["key_path"] = "other.llm-wiki"  # type: ignore[index]
+
+        with self.assertRaisesRegex(ValueError, "key_path"):
+            validate_manifest(value)
+
+    def test_shared_json_entry_manifest_file_passes_cli_manifest_parser(self):
+        from tools.wiki.lib.vault_manifest import parse_manifest_json
+
+        parsed = parse_manifest_json(json.dumps(_shared_json_entry_manifest()))
+
+        self.assertEqual(2, len(parsed["external_records"]))
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
+
+
+def _git_repo(path: Path, origin: str | None = None) -> Path:
+    path.mkdir(parents=True)
+    _git(path, "init", "-q")
+    if origin is not None:
+        _git(path, "remote", "add", "origin", origin)
+    return path
+
+
+# One row per section 4.3 case: (name, map version, projects, repo folder, origin, expected).
+# expected is ("found", id, step), ("none",), or ("multiple", ids).
+MEMORY_SCAN_REPO_CASES: tuple[tuple[str, int, dict, str | None, str | None, tuple], ...] = (
+    (
+        "same-root",
+        2,
+        {"demo": {"root": "{repos}/demo", "vaults": ["personal"], "remote": "git@github.com:Owner/demo.git"}},
+        "demo",
+        "git@github.com:Owner/demo.git",
+        ("found", "demo", "root"),
+    ),
+    (
+        "moved-scp-map-https-origin",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "git@github.com:Owner/demo.git"}},
+        "renamed",
+        "https://github.com/Owner/demo",
+        ("found", "demo", "remote"),
+    ),
+    (
+        "moved-https-map-scp-origin",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "https://user@GitHub.com:443/Owner/demo.git/"}},
+        "renamed",
+        "git@github.com:Owner/demo.git",
+        ("found", "demo", "remote"),
+    ),
+    (
+        "same-name-no-origin",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"]}},
+        "demo",
+        None,
+        ("found", "demo", "name"),
+    ),
+    (
+        "same-name-other-origin",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "git@github.com:a/demo.git"}},
+        "demo",
+        "git@github.com:b/demo.git",
+        ("none",),
+    ),
+    (
+        "two-projects-same-remote",
+        2,
+        {
+            "one": {"root": "{base}/old/one", "vaults": ["personal"], "remote": "git@github.com:Owner/demo.git"},
+            "two": {"root": "{base}/old/two", "vaults": ["personal"], "remote": "https://github.com/Owner/demo"},
+        },
+        "demo",
+        "git@github.com:Owner/demo.git",
+        ("multiple", ["one", "two"]),
+    ),
+    (
+        "version-1-same-root",
+        1,
+        {"demo": {"root": "{repos}/demo", "vaults": ["personal"]}},
+        "demo",
+        "git@github.com:Owner/demo.git",
+        ("found", "demo", "root"),
+    ),
+    (
+        "version-1-moved-same-name",
+        1,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"]}},
+        "demo",
+        "git@github.com:Owner/demo.git",
+        ("found", "demo", "name"),
+    ),
+    (
+        "scp-without-user",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "https://github.com/Owner/demo"}},
+        "renamed",
+        "github.com:Owner/demo.git",
+        ("found", "demo", "remote"),
+    ),
+    (
+        "local-path-keeps-dot-git",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "{base}/upstream/demo"}},
+        "renamed",
+        "file://{base}/upstream/demo.git",
+        ("none",),
+    ),
+    (
+        "local-path-file-url-equals-plain-path",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "{base}/upstream/demo.git"}},
+        "renamed",
+        "file://{base}/upstream/demo.git",
+        ("found", "demo", "remote"),
+    ),
+    (
+        "relative-local-path-against-each-root",
+        2,
+        {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "../../upstream/demo.git"}},
+        "renamed",
+        "../../upstream/demo.git",
+        ("found", "demo", "remote"),
+    ),
+    (
+        "outside-git",
+        2,
+        {"demo": {"root": "{repos}/demo", "vaults": ["personal"]}},
+        None,
+        None,
+        ("none",),
+    ),
+)
+
+
+class MemoryScanRepoTests(unittest.TestCase):
+    """memory-scan --repo finds the project with the section 4.3 rule."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.base = Path(tmpdir.name).resolve()
+        self.home = self.base / "home"
+        self.home.mkdir()
+        self.vault = self.base / "vault"
+        self.vault.mkdir()
+        _minimal_vault(self.vault)
+        self.repos = self.base / "repos"
+        self.repos.mkdir()
+        env_patch = unittest.mock.patch.dict(os.environ, _memory_home_env(self.home), clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+    def _write_map(self, version: object, projects: dict) -> Path:
+        text = json.dumps(projects).replace("{repos}", str(self.repos)).replace("{base}", str(self.base))
+        path = self.home / ".claude" / "vault-builder" / "vault-map.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "version": version,
+                    "vaults": {"personal": {"path": str(self.vault), "role": "personal"}},
+                    "projects": json.loads(text),
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def _repo_for(self, folder: str | None, origin: str | None) -> Path:
+        if folder is None:
+            outside = self.base / "plain"
+            outside.mkdir()
+            return outside
+        if origin is not None:
+            origin = origin.replace("{base}", str(self.base))
+        return _git_repo(self.repos / folder, origin)
+
+    def test_fixture_table(self):
+        for name, version, projects, folder, origin, expected in MEMORY_SCAN_REPO_CASES:
+            with self.subTest(name):
+                self.setUp()
+                self._write_map(version, projects)
+                repo = self._repo_for(folder, origin)
+                before = _tree_state(self.base)
+
+                code, output = _run_wiki_cli(self.vault, "memory-scan", "--json", "--repo", str(repo))
+
+                self.assertEqual(before, _tree_state(self.base))
+                if expected[0] == "found":
+                    self.assertEqual(0, code, output)
+                    scan = json.loads(output)
+                    self.assertEqual(expected[1], scan["repo"]["project"])
+                    self.assertEqual(expected[2], scan["repo"]["step"])
+                    self.assertEqual([expected[1]], [project["id"] for project in scan["projects"]])
+                else:
+                    self.assertEqual(1, code, output)
+                    lines = output.strip().splitlines()
+                    self.assertEqual(1, len(lines), output)
+                    if expected[0] == "multiple":
+                        self.assertIn("several projects", lines[0].lower())
+                        for project_id in expected[1]:
+                            self.assertIn(project_id, lines[0])
+
+    def test_find_project_returns_id_step_and_link_root(self):
+        from tools.wiki.lib.memory_scan import ProjectMatch, ProjectStop, find_project
+
+        repo = _git_repo(self.repos / "renamed", "git@github.com:Owner/demo.git")
+        old_root = str(self.base / "old" / "demo")
+        vault_map = {
+            "version": 2,
+            "vaults": {},
+            "projects": {"demo": {"root": old_root, "vaults": [], "remote": "https://github.com/Owner/demo.git"}},
+        }
+
+        match = find_project(repo, vault_map)
+
+        self.assertEqual(("demo", "remote", old_root), (match.project_id, match.step, match.root))
+        self.assertIsInstance(match, ProjectMatch)
+        self.assertIn("link again", match.note)
+        self.assertIsInstance(find_project(self.base, vault_map), ProjectStop)
+
+    def test_moved_repo_adds_one_relink_line(self):
+        self._write_map(
+            2,
+            {"demo": {"root": "{base}/old/demo", "vaults": ["personal"], "remote": "git@github.com:Owner/demo.git"}},
+        )
+        repo = _git_repo(self.repos / "renamed", "git@github.com:Owner/demo.git")
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--repo", str(repo))
+
+        self.assertEqual(0, code, output)
+        relink = [line for line in output.splitlines() if "link" in line and "again" in line]
+        self.assertEqual(1, len(relink), output)
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--json", "--repo", str(repo))
+        self.assertEqual(0, code, output)
+        self.assertEqual(str(self.base / "old" / "demo"), json.loads(output)["repo"]["linked_root"])
+
+    def test_same_root_has_no_relink_line(self):
+        self._write_map(2, {"demo": {"root": "{repos}/demo", "vaults": ["personal"]}})
+        repo = _git_repo(self.repos / "demo")
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--json", "--repo", str(repo))
+
+        self.assertEqual(0, code, output)
+        self.assertIsNone(json.loads(output)["repo"]["hint"])
+
+    def test_project_found_but_not_linked_to_this_vault_exits_1(self):
+        path = self._write_map(2, {})
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["vaults"]["other"] = {"path": str(self.base / "other"), "role": "team"}
+        data["projects"]["demo"] = {"root": str(self.repos / "demo"), "vaults": ["other"]}
+        path.write_text(json.dumps(data), encoding="utf-8")
+        repo = _git_repo(self.repos / "demo")
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--repo", str(repo))
+
+        self.assertEqual(1, code, output)
+        self.assertEqual(1, len(output.strip().splitlines()), output)
+        self.assertIn("demo", output)
+
+    def test_project_option_keeps_id_lookup_and_output(self):
+        self._write_map(2, {"demo": {"root": "{repos}/demo", "vaults": ["personal"], "remote": "git@x:y/demo.git"}})
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan", "--json", "--project", "demo")
+
+        self.assertEqual(0, code, output)
+        scan = json.loads(output)
+        self.assertNotIn("repo", scan)
+        self.assertEqual(["demo"], [project["id"] for project in scan["projects"]])
+
+    def test_unknown_map_version_is_damaged(self):
+        for version in (3, 0, True, None):
+            with self.subTest(version=version):
+                self._write_map(version, {"demo": {"root": "{repos}/demo", "vaults": ["personal"]}})
+
+                code, output = _run_wiki_cli(self.vault, "memory-scan")
+
+                self.assertEqual(1, code, output)
+                self.assertEqual(1, len(output.strip().splitlines()), output)
+                self.assertIn("version", output)
+
+    def test_non_string_remote_is_damaged(self):
+        self._write_map(2, {"demo": {"root": "{repos}/demo", "vaults": ["personal"], "remote": 5}})
+
+        code, output = _run_wiki_cli(self.vault, "memory-scan")
+
+        self.assertEqual(1, code, output)
+        self.assertIn("remote", output)
+
 
 class UserHomeIsolationTest(unittest.TestCase):
     def test_module_runs_with_a_temporary_home_and_no_config_dir_override(self):

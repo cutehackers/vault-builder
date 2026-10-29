@@ -6318,9 +6318,14 @@ class ProjectMemoryRecallTest(unittest.TestCase):
         self._assert_one_reason_line(self._recall(outside), "git")
         self._assert_one_reason_line(self._recall(outside, "open"), "git")
 
-    def test_recall_unlinked_repository_prints_one_reason_line(self):
+    def test_recall_unlinked_repository_prints_reason_and_link_lines(self):
         other = _init_git_repo(self.tmp / "work" / "other-app")
-        self._assert_one_reason_line(self._recall(other), "other-app", "docs/usage.md")
+        result = self._recall(other)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(2, len(lines), result.stdout)
+        self.assertIn("other-app", lines[0])
+        self.assertTrue(lines[1].startswith("link: "), lines[1])
 
     def test_recall_missing_or_damaged_link_config_prints_one_reason_line(self):
         vault_map = self.config / "vault-builder" / "vault-map.json"
@@ -6510,6 +6515,181 @@ class ProjectMemoryRecallTest(unittest.TestCase):
         catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v2.json").read_text(encoding="utf-8"))
         self.assertNotIn("assets/", json.dumps(catalog_paths))
         self.assertFalse([path for path in MANAGED_PATHS if path.startswith("tools/vault_migration/")])
+
+
+class RecallProjectLookupTests(unittest.TestCase):
+    """recall.sh finds the project by root, origin remote, then folder name (spec 4.3, 4.4, A-11)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.tmp = Path(self._tmpdir.name).resolve()
+        self.home = self.tmp / "home"
+        self.config = self.home / ".claude"
+        self.script = _materialize_recall_script(
+            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
+        )
+        self.vault = self.tmp / "vaults" / "personal"
+        self.team = self.tmp / "vaults" / "team"
+        _write_summary_page(self.vault, "sample-app", _small_sections())
+        self.vaults = {
+            "personal": {"path": str(self.vault), "role": "personal"},
+            "team": {"path": str(self.team), "role": "team"},
+        }
+
+    def _write_map(self, projects: dict[str, object], *, version: object = 2) -> None:
+        path = self.config / "vault-builder" / "vault-map.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data: dict[str, object] = {"vaults": self.vaults, "projects": projects}
+        if version is not None:
+            data["version"] = version
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def _repo(self, name: str, origin: str | None = None) -> Path:
+        repo = _init_git_repo(self.tmp / "work" / name)
+        if origin is not None:
+            _git(repo, "remote", "add", "origin", origin)
+        return repo
+
+    def _recall(self, cwd: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(self.script), *arguments],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            env={"HOME": str(self.home), "PATH": os.environ.get("PATH", ""), "GIT_CEILING_DIRECTORIES": str(self.tmp)},
+            timeout=30,
+        )
+
+    def _relink_lines(self, stdout: str) -> list[str]:
+        return [line for line in stdout.splitlines() if "link" in line and "--repo" in line]
+
+    def test_unlinked_repository_prints_reason_and_link_line(self):
+        repo = self._repo("other-app")
+        self._write_map({"sample-app": {"root": str(self.tmp / "work" / "sample-app"), "vaults": ["personal"]}})
+        result = self._recall(repo, "open")
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(2, len(lines), result.stdout)
+        self.assertTrue(lines[0].startswith("project-memory: "), lines[0])
+        self.assertIn(str(repo), lines[0])
+        self.assertEqual(
+            f"link: run tools/vault_migration/cli.py link <vault> --repo {repo} "
+            "from the vault-builder checkout (vaults: personal, team)",
+            lines[1],
+        )
+
+    def test_root_stage_finds_renamed_folder_without_relink_line(self):
+        repo = self._repo("renamed-folder")
+        self._write_map({"sample-app": {"root": str(repo), "vaults": ["personal"]}})
+        result = self._recall(repo, "open")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("## Open Work", result.stdout)
+        self.assertIn("sample-app.md", result.stdout.splitlines()[0])
+        self.assertEqual([], self._relink_lines(result.stdout))
+
+    def test_moved_repository_found_by_remote_prints_section_and_one_relink_line(self):
+        cases = {
+            "scp": ("git@GitHub.com:acme/sample-app.git", "https://github.com/acme/sample-app"),
+            "https": ("https://user@github.com:443/acme/sample-app.git/", "ssh://git@github.com/acme/sample-app"),
+        }
+        for name, (origin, recorded) in cases.items():
+            with self.subTest(form=name):
+                repo = self._repo(f"moved-{name}", origin)
+                old_root = self.tmp / "old" / "sample-app"
+                self._write_map({"sample-app": {"root": str(old_root), "remote": recorded, "vaults": ["personal"]}})
+                result = self._recall(repo, "open")
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("## Open Work", result.stdout)
+                self.assertIn(_small_sections()[0][0], result.stdout)
+                relink = self._relink_lines(result.stdout)
+                self.assertEqual(1, len(relink), result.stdout)
+                self.assertIn(str(old_root), relink[0])
+                self.assertIn(f"--repo {repo}", relink[0])
+
+    def test_name_stage_without_origin_finds_project(self):
+        repo = self._repo("sample-app")
+        self._write_map({"sample-app": {"root": str(self.tmp / "elsewhere" / "sample-app"), "vaults": ["personal"]}}, version=1)
+        result = self._recall(repo, "decisions")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("## Current Decisions", result.stdout)
+        self.assertEqual(1, len(self._relink_lines(result.stdout)), result.stdout)
+
+    def test_name_stage_skips_entry_with_different_remote(self):
+        repo = self._repo("sample-app", "https://github.com/acme/sample-app.git")
+        self._write_map(
+            {
+                "sample-app": {
+                    "root": str(self.tmp / "elsewhere" / "sample-app"),
+                    "remote": "git@github.com:other/sample-app.git",
+                    "vaults": ["personal"],
+                }
+            }
+        )
+        lines = self._recall(repo).stdout.splitlines()
+        self.assertEqual(2, len(lines), lines)
+        self.assertTrue(lines[1].startswith("link: "), lines[1])
+
+    def test_two_projects_with_same_remote_stop_with_ids(self):
+        repo = self._repo("moved", "git@github.com:acme/sample-app.git")
+        remote = "https://github.com/acme/sample-app"
+        self._write_map(
+            {
+                "alpha": {"root": str(self.tmp / "a"), "remote": remote, "vaults": ["personal"]},
+                "beta": {"root": str(self.tmp / "b"), "remote": remote, "vaults": ["personal"]},
+            }
+        )
+        result = self._recall(repo)
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(1, len(lines), result.stdout)
+        self.assertIn("alpha", lines[0])
+        self.assertIn("beta", lines[0])
+
+    def test_unsupported_vault_map_version_prints_one_reason_line(self):
+        repo = self._repo("sample-app")
+        for version in (3, "2", True, None):
+            with self.subTest(version=version):
+                self._write_map({"sample-app": {"root": str(repo), "vaults": ["personal"]}}, version=version)
+                lines = self._recall(repo).stdout.splitlines()
+                self.assertEqual(1, len(lines), lines)
+                self.assertIn("version", lines[0])
+                self.assertIn("damaged", lines[0])
+
+    def test_relative_local_remote_of_entry_is_read_against_its_stored_root(self):
+        old_root = self.tmp / "old" / "sample-app"
+        repo = self._repo("moved", str(self.tmp / "old" / "upstream.git"))
+        self._write_map({"sample-app": {"root": str(old_root), "remote": "../upstream.git", "vaults": ["personal"]}})
+        result = self._recall(repo, "open")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("## Open Work", result.stdout)
+        relink = self._relink_lines(result.stdout)
+        self.assertEqual(1, len(relink), result.stdout)
+        self.assertIn("Run link again", relink[0])
+
+    def test_normalize_remote_forms(self):
+        normalize = _recall_namespace()["normalize_remote"]
+        base = self.tmp / "work" / "repo"
+        expected = "github.com/acme/sample-app"
+        for url in (
+            "git@github.com:acme/sample-app.git",
+            " https://github.com/acme/sample-app/ ",
+            "ssh://git@GitHub.com:22/acme/sample-app.git",
+            "https://user@github.com/acme/sample-app.git/",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(expected, normalize(url, base))
+        self.assertEqual(expected, normalize("GitHub.com:acme/sample-app.git", base))
+        self.assertEqual(str(self.tmp / "remotes" / "x.git"), normalize(f"file://{self.tmp}/remotes/x.git", base))
+        self.assertEqual(str(self.tmp / "remotes" / "x.git"), normalize(f"{self.tmp}/remotes/x.git/", base))
+        self.assertEqual(str(self.tmp / "work" / "up.git"), normalize("../up.git", base))
+
+    def test_skill_tells_agent_to_pass_link_line_to_user(self):
+        text = PROJECT_MEMORY_SKILL_ASSET.read_text(encoding="utf-8")
+        reading = text[text.index("Reading the output:") :]
+        items = [line for line in reading.splitlines() if line.startswith("- ")]
+        self.assertTrue(any("`link:`" in item and "unchanged" in item for item in items), items)
 
 
 def _tree_snapshot(*roots: Path) -> dict[str, tuple[str, int]]:
