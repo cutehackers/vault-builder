@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -7658,7 +7659,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("Dry run", result.stdout)
-        self.assertIn("mcpServers.llm-wiki-a", result.stdout)
+        self.assertIn("remove mcpServers.llm-wiki from", result.stdout)
         self.assertIn("Nothing was written.", result.stdout)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
@@ -7715,14 +7716,11 @@ class UninstallDoctorTest(_UserHomeTestCase):
         vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
         self.assertEqual(["b"], list(vault_map["vaults"]))
         self.assertEqual(["b"], vault_map["projects"]["app"]["vaults"])
-        self.assertEqual([], vault_map["projects"]["lib"]["vaults"])
+        self.assertNotIn("lib", vault_map["projects"])  # decision 35: a project left with no vault goes
         claude = self._claude()
-        self.assertEqual(["other", "llm-wiki-b"], list(claude["mcpServers"]))
+        self.assertEqual(["other", "llm-wiki"], list(claude["mcpServers"]))
         expected = dict(claude_before)
-        expected["mcpServers"] = {
-            key: value for key, value in claude_before["mcpServers"].items() if key != "llm-wiki-a"
-        }
-        self.assertEqual(expected, claude)
+        self.assertEqual(expected, claude)  # the shared entry stays while vault b remains
         self.assertTrue((second / ".vault-builder" / "manifest.json").is_file())
 
         result = self._cli("uninstall", str(second))
@@ -7743,7 +7741,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
         claude = self._claude()
-        claude["mcpServers"]["llm-wiki-a"]["env"] = {"DEBUG": "1"}
+        claude["mcpServers"]["llm-wiki"]["env"] = {"DEBUG": "1"}
         self._write_claude_json(claude)
         with self.recall.open("a", encoding="utf-8") as handle:
             handle.write("# my change\n")
@@ -7751,8 +7749,8 @@ class UninstallDoctorTest(_UserHomeTestCase):
         result = self._cli("uninstall", str(target))
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("llm-wiki-a", self._claude()["mcpServers"])
-        self.assertIn("mcpServers.llm-wiki-a", result.stdout)
+        self.assertIn("llm-wiki", self._claude()["mcpServers"])
+        self.assertIn("mcpServers.llm-wiki", result.stdout)
         self.assertTrue(self.recall.is_file())
         self.assertIn(str(self.recall), result.stdout)
         self.assertFalse(self.skill.exists())
@@ -7857,36 +7855,6 @@ class UninstallDoctorTest(_UserHomeTestCase):
                     self.vault_map.write_bytes(vault_map_saved)
         self.assertEqual(0, self._cli("doctor", str(target)).returncode)
 
-    def test_uninstall_removes_every_mcp_entry_record(self):
-        # Manifests written before install refused a second name hold two json-entry records.
-        target = self.work / "vault-a"
-        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
-        claude = self._claude()
-        entry = claude["mcpServers"]["llm-wiki-a"]
-        claude["mcpServers"]["llm-wiki-b"] = dict(entry)
-        claude["mcpServers"]["other"] = {"command": "node", "args": ["server.js"]}
-        self._write_claude_json(claude)
-        vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
-        vault_map["vaults"]["b"] = {"path": str(target), "role": "personal"}
-        self.vault_map.write_text(json.dumps(vault_map, indent=2), encoding="utf-8")
-        manifest_path = target / ".vault-builder" / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        first = next(record for record in manifest["external_records"] if record["kind"] == "json-entry")
-        manifest["external_records"].append({**first, "key_path": "mcpServers.llm-wiki-b"})
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-        dry_run = self._cli("uninstall", str(target), "--dry-run")
-        self.assertEqual(0, dry_run.returncode, dry_run.stdout + dry_run.stderr)
-        self.assertIn("mcpServers.llm-wiki-a", dry_run.stdout)
-        self.assertIn("mcpServers.llm-wiki-b", dry_run.stdout)
-
-        result = self._cli("uninstall", str(target))
-
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(["other"], list(self._claude()["mcpServers"]))
-        self.assertFalse(self.vault_map.exists())
-        self.assertFalse((self.config / "skills" / "project-memory").exists())
-
     def test_doctor_healthy_vault_exits_zero_and_each_problem_exits_one(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7905,7 +7873,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
             "mcp entry": (
                 claude_json,
                 lambda: self._write_claude_json({"mcpServers": {}}),
-                "llm-wiki-a",
+                "mcpServers.llm-wiki",
             ),
             "modified managed file": (
                 target / "AGENTS.md",
@@ -7928,36 +7896,6 @@ class UninstallDoctorTest(_UserHomeTestCase):
                     path.chmod(mode)
         self.assertEqual(0, self._cli("doctor", str(target)).returncode)
 
-    def test_doctor_regenerates_missing_or_stale_mcp_json(self):
-        target = self.work / "vault-a"
-        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
-        mcp_json = target / ".mcp.json"
-        expected = {"command": sys.executable, "args": [str(target / "tools" / "wiki" / "mcp_server.py")]}
-        old_python = self.tmp / "old-python"
-        old_python.write_text(
-            "#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -c "import sys; sys.exit(1)"\n',
-            encoding="utf-8",
-        )
-        old_python.chmod(0o755)
-        cases = {
-            "missing": lambda: mcp_json.unlink(),
-            "other vault": lambda: mcp_json.write_text(
-                json.dumps({"mcpServers": {"llm-wiki": {"command": sys.executable, "args": ["/elsewhere/tools/wiki/mcp_server.py"]}}}),
-                encoding="utf-8",
-            ),
-            "old python": lambda: mcp_json.write_text(
-                json.dumps({"mcpServers": {"llm-wiki": {"command": str(old_python), "args": expected["args"]}}}),
-                encoding="utf-8",
-            ),
-        }
-        for label, damage in cases.items():
-            with self.subTest(case=label):
-                damage()
-                result = self._cli("doctor", str(target))
-                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                self.assertIn("Regenerated", result.stdout)
-                self.assertEqual(expected, json.loads(mcp_json.read_text(encoding="utf-8"))["mcpServers"]["llm-wiki"])
-
     def test_doctor_checks_claude_mcp_list_when_claude_config_dir_is_set(self):
         config = self.home / "custom-config"
         target = self.work / "vault-a"
@@ -7976,14 +7914,331 @@ class UninstallDoctorTest(_UserHomeTestCase):
             CLAUDE_STUB_LISTING=str(listing),
         )
 
-        listing.write_text("llm-wiki-a: python mcp_server.py - Connected\n", encoding="utf-8")
+        listing.write_text("llm-wiki: python llm_wiki_router.py - Connected\n", encoding="utf-8")
         result = self._cli("doctor", str(target), env=environment)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
-        listing.write_text("other: node server.js - Connected\n", encoding="utf-8")
-        result = self._cli("doctor", str(target), env=environment)
+        for other in ("other: node server.js - Connected\n", "llm-wiki-a: python mcp_server.py - Connected\n"):
+            listing.write_text(other, encoding="utf-8")
+            result = self._cli("doctor", str(target), env=environment)
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("claude mcp list", result.stdout)
+
+
+class _RouterVaultTestCase(_UserHomeTestCase):
+    """Helpers for uninstall and doctor with the single llm-wiki server entry (spec 4.6, 4.7)."""
+
+    def _cli(self, command: str, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "tools/vault_migration/cli.py", command, *arguments],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env or self._env(),
+            timeout=300,
+        )
+
+    @property
+    def router(self) -> Path:
+        return self.config / "vault-builder" / "llm_wiki_router.py"
+
+    @property
+    def skill(self) -> Path:
+        return self.config / "skills" / "project-memory" / "SKILL.md"
+
+    @property
+    def recall(self) -> Path:
+        return self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
+
+    @property
+    def vault_map(self) -> Path:
+        return self.config / "vault-builder" / "vault-map.json"
+
+    @property
+    def claude_json(self) -> Path:
+        return self.home / ".claude.json"
+
+    def _claude(self) -> dict[str, object]:
+        return json.loads(self.claude_json.read_text(encoding="utf-8"))
+
+    def _knowledge_snapshot(self, vault: Path) -> dict[str, tuple[str, int]]:
+        return _tree_snapshot(*(vault / name for name in ("raw", "wiki", "scratch", ".git")))
+
+    def _install_ok(self, target: Path, name: str) -> None:
+        result = self._install(str(target), "--name", name)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+
+class UninstallRouterTests(_RouterVaultTestCase):
+    """uninstall removes the shared server entry and files with the last vault (spec 4.6, A-13, A-14, A-15)."""
+
+    def _uninstall_both(self, initial: dict[str, object] | None) -> None:
+        if initial is not None:
+            self._write_claude_json(initial)
+        first = self.work / "vault-a"
+        second = self.work / "vault-b"
+        self._install_ok(first, "a")
+        self._install_ok(second, "b")
+        for vault in (first, second):
+            (vault / "raw" / "sources" / "note.md").write_text("Raw note.\n", encoding="utf-8")
+            _git(vault, "init", "-q")
+            _git(vault, "add", "-A")
+            _git(vault, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "seed")
+        vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
+        vault_map["projects"] = {
+            "r": {"root": str(self.work / "r"), "vaults": ["a"], "remote": "git@example.com:me/r.git"},
+            "app": {"root": str(self.work / "app"), "vaults": ["a", "b"]},
+        }
+        self.vault_map.write_text(json.dumps(vault_map, indent=2), encoding="utf-8")
+        knowledge = {vault: self._knowledge_snapshot(vault) for vault in (first, second)}
+        shared = _tree_snapshot(self.router, self.skill, self.recall)
+        entry = self._claude()["mcpServers"]["llm-wiki"]
+
+        result = self._cli("uninstall", str(first))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(entry, self._claude()["mcpServers"]["llm-wiki"])
+        self.assertEqual(shared, _tree_snapshot(self.router, self.skill, self.recall))
+        vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
+        self.assertEqual(2, vault_map["version"])
+        self.assertEqual(["b"], list(vault_map["vaults"]))
+        self.assertEqual({"app": {"root": str(self.work / "app"), "vaults": ["b"]}}, vault_map["projects"])
+
+        result = self._cli("uninstall", str(second))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        claude = self._claude()
+        self.assertNotIn("llm-wiki", claude["mcpServers"])
+        for path in (self.router, self.skill, self.recall, self.vault_map):
+            self.assertFalse(path.exists(), path)
+        self.assertFalse((self.config / "vault-builder").exists())
+        self.assertFalse((self.config / "skills" / "project-memory").exists())
+        expected = dict(initial or {})
+        expected["mcpServers"] = dict(expected.get("mcpServers", {}))  # type: ignore[arg-type]
+        self.assertEqual(expected, claude)
+        for vault in (first, second):
+            self.assertEqual(knowledge[vault], self._knowledge_snapshot(vault))
+            self.assertFalse((vault / ".mcp.json").exists())
+        self.assertEqual([], sorted(str(path) for path in self.home.rglob("*vault-builder-backup*")))
+
+    def test_remaining_vault_keeps_shared_files_and_last_vault_removes_everything(self):
+        self._uninstall_both(
+            {
+                "numStartups": 3,
+                "projects": {"/somewhere": {"allowedTools": []}},
+                "mcpServers": {"other": {"command": "node", "args": ["server.js"]}},
+            }
+        )
+
+    def test_last_vault_leaves_an_empty_mcp_servers_object_when_none_existed(self):
+        self._uninstall_both(None)
+        self.assertEqual({"mcpServers": {}}, self._claude())
+
+    def test_last_uninstall_removes_entry_rewritten_by_another_interpreter(self):
+        from tools.vault_migration import uninstalling
+
+        first_python = self.tmp / "py-x" / "python3"
+        second_python = self.tmp / "py-y" / "python3"
+        for link in (first_python, second_python):
+            link.parent.mkdir()
+            link.symlink_to(sys.executable)
+        self.assertEqual(0, installing.install(self.work / "a", name="a", python=str(first_python), out=io.StringIO()))
+        self.assertEqual(0, installing.install(self.work / "b", name="b", python=str(second_python), out=io.StringIO()))
+        self.assertEqual(str(second_python), self._claude()["mcpServers"]["llm-wiki"]["command"])
+
+        self.assertEqual(0, uninstalling.uninstall(self.work / "b", out=io.StringIO()))
+        self.assertIn("llm-wiki", self._claude()["mcpServers"])
+        out = io.StringIO()
+        self.assertEqual(0, uninstalling.uninstall(self.work / "a", out=out))
+
+        self.assertEqual({}, self._claude()["mcpServers"], out.getvalue())
+        self.assertFalse((self.config / "vault-builder").exists())
+
+    def test_last_vault_keeps_changed_entry_and_unknown_router_and_lists_them(self):
+        target = self.work / "vault-a"
+        self._install_ok(target, "a")
+        claude = self._claude()
+        claude["mcpServers"]["llm-wiki"]["env"] = {"DEBUG": "1"}
+        self._write_claude_json(claude)
+        self.router.write_text("# my own router\n", encoding="utf-8")
+
+        result = self._cli("uninstall", str(target))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(claude, self._claude())
+        self.assertIn("mcpServers.llm-wiki", result.stdout)
+        self.assertEqual("# my own router\n", self.router.read_text(encoding="utf-8"))
+        self.assertIn(str(self.router), result.stdout)
+        self.assertFalse(self.vault_map.exists())
+        self.assertFalse(self.skill.exists())
+        self.assertFalse((self.config / "skills" / "project-memory").exists())
+
+    def test_old_entry_record_is_refused_without_writes(self):
+        target = self.work / "vault-a"
+        self._install_ok(target, "a")
+        manifest_path = target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for record in manifest["external_records"]:
+            if record["kind"] == "json-entry":
+                record["key_path"] = "mcpServers.llm-wiki-x"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+
+        for arguments in (("--dry-run",), ()):
+            with self.subTest(arguments=arguments):
+                result = self._cli("uninstall", str(target), *arguments)
+
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("mcpServers.llm-wiki-x", result.stderr)
+                self.assertIn("previous vault-builder version", result.stderr)
+                self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_old_mcp_json_is_deleted_and_other_mcp_json_is_kept_and_printed(self):
+        target = self.work / "vault-a"
+        self._install_ok(target, "a")
+        mcp_json = target / ".mcp.json"
+        old = {"mcpServers": {"llm-wiki": {"command": sys.executable, "args": [str(target / "tools" / "wiki" / "mcp_server.py")]}}}
+        mcp_json.write_text(json.dumps(old), encoding="utf-8")
+
+        result = self._cli("uninstall", str(target))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertFalse(mcp_json.exists())
+
+        other = self.work / "vault-b"
+        self._install_ok(other, "b")
+        mine = {
+            "mcpServers": {
+                "llm-wiki": old["mcpServers"]["llm-wiki"] | {"args": [str(other / "tools" / "wiki" / "mcp_server.py")]},
+                "mine": {"command": "node", "args": ["mine.js"]},
+            }
+        }
+        (other / ".mcp.json").write_text(json.dumps(mine), encoding="utf-8")
+
+        result = self._cli("uninstall", str(other))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(mine, json.loads((other / ".mcp.json").read_text(encoding="utf-8")))
+        self.assertIn(str(other / ".mcp.json"), result.stdout)
+
+
+def _fake_python(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+class DoctorRouterTests(_RouterVaultTestCase):
+    """doctor writes no file and starts the server entry to check its answers (spec 4.7, A-16)."""
+
+    def setUp(self):
+        super().setUp()
+        self.target = self.work / "vault-a"
+        self._install_ok(self.target, "a")
+
+    def _problems(self, result: subprocess.CompletedProcess[str]) -> list[str]:
+        return [line for line in result.stdout.splitlines() if line.startswith("Problem:")]
+
+    def test_healthy_vault_exits_zero_and_writes_nothing(self):
+        before = _tree_snapshot(self.tmp)
+
+        result = self._cli("doctor", str(self.target))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual([], self._problems(result))
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+        self.assertFalse((self.target / ".mcp.json").exists())
+
+    def test_each_problem_exits_one_without_writing(self):
+        saved_claude = self.claude_json.read_bytes()
+        saved_router = self.router.read_bytes()
+
+        def set_command(command: str) -> None:
+            claude = json.loads(saved_claude)
+            claude["mcpServers"]["llm-wiki"]["command"] = command
+            self.claude_json.write_text(json.dumps(claude), encoding="utf-8")
+
+        def add_old_entry() -> None:
+            claude = json.loads(saved_claude)
+            claude["mcpServers"]["llm-wiki-x"] = {"command": "node", "args": ["x.js"]}
+            self.claude_json.write_text(json.dumps(claude), encoding="utf-8")
+
+        def set_args(arguments: list[str]) -> None:
+            claude = json.loads(saved_claude)
+            claude["mcpServers"]["llm-wiki"]["args"] = arguments
+            self.claude_json.write_text(json.dumps(claude), encoding="utf-8")
+
+        python39 = _fake_python(self.tmp / "py39" / "python3", "exit 1")
+        cases = {
+            ".mcp.json": (lambda: (self.target / ".mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8"), ".mcp.json"),
+            "old entry": (add_old_entry, "llm-wiki-x"),
+            "entry missing": (lambda: self._write_claude_json({"mcpServers": {}}), "mcpServers.llm-wiki"),
+            "entry args": (lambda: set_args([str(self.router)]), "mcpServers.llm-wiki"),
+            "router missing": (lambda: self.router.unlink(), str(self.router)),
+            "command missing": (lambda: set_command(str(self.tmp / "no-such-python")), "3.10"),
+            "command python 3.9": (lambda: set_command(str(python39)), "3.10"),
+            "other server name": (
+                lambda: self.router.write_bytes(saved_router.replace(b'SERVER_NAME = "llm-wiki"', b'SERVER_NAME = "other"')),
+                "serverInfo.name",
+            ),
+        }
+        for label, (damage, expected) in cases.items():
+            with self.subTest(case=label):
+                damage()
+                try:
+                    before = _tree_snapshot(self.tmp)
+                    result = self._cli("doctor", str(self.target))
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertTrue(any(expected in line for line in self._problems(result)), result.stdout)
+                    self.assertEqual(before, _tree_snapshot(self.tmp))
+                finally:
+                    self.claude_json.write_bytes(saved_claude)
+                    self.router.write_bytes(saved_router)
+                    (self.target / ".mcp.json").unlink(missing_ok=True)
+        self.assertEqual(0, self._cli("doctor", str(self.target)).returncode)
+
+    def test_router_that_never_answers_is_a_problem_within_40_seconds(self):
+        self.router.write_text("import time\ntime.sleep(600)\n", encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+        started = time.monotonic()
+
+        result = self._cli("doctor", str(self.target))
+
+        self.assertLess(time.monotonic() - started, 40)
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("claude mcp list", result.stdout)
+        self.assertTrue(any("did not answer" in line for line in self._problems(result)), result.stdout)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_server_start_problem_includes_first_stderr_line(self):
+        self.router.write_text("import sys\nsys.stderr.write('router broke here\\n')\nsys.exit(3)\n", encoding="utf-8")
+
+        result = self._cli("doctor", str(self.target))
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertTrue(any("router broke here" in line for line in self._problems(result)), result.stdout)
+
+    def test_patch_version_command_with_another_path_is_a_note_only(self):
+        from tools.vault_migration import uninstalling
+
+        patch_python = self.tmp / "3.12.7" / "bin" / "python3"
+        patch_python.parent.mkdir(parents=True)
+        patch_python.symlink_to(sys.executable)
+        stable_bin = self.tmp / "stable-bin"
+        stable_bin.mkdir()
+        (stable_bin / f"python{sys.version_info[0]}.{sys.version_info[1]}").symlink_to(sys.executable)
+        claude = self._claude()
+        claude["mcpServers"]["llm-wiki"]["command"] = str(patch_python)
+        self._write_claude_json(claude)
+        environment = self._env(PATH=f"{stable_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+        out = io.StringIO()
+
+        code = uninstalling.doctor(self.target, environ=environment, out=out)
+
+        self.assertEqual(0, code, out.getvalue())
+        notes = [line for line in out.getvalue().splitlines() if line.startswith("Note:")]
+        self.assertTrue(any(str(patch_python) in line and "install" in line for line in notes), out.getvalue())
 
 
 class LinkingTests(unittest.TestCase):
