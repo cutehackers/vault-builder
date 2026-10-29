@@ -1,0 +1,519 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Vault 개선 로드맵</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: one reading column; the roadmap is a lane x stage grid that stacks on phones. */
+:root {
+  --bg: #F5F6F8; --surface: #FFFFFF; --ink: #161A21; --muted: #5A6170; --line: #DCE0E7;
+  --accent: #2F54C9; --accent-soft: #E6ECFB;
+  --ok: #1E7F55; --ok-soft: #E2F3EA; --warn: #A86300; --warn-soft: #FBF0DD;
+  --off: #6F6495; --off-soft: #EEEBF6; --risk: #B4372F; --risk-soft: #FBE7E5;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111318; --surface: #191C22; --ink: #E7E9EE; --muted: #9AA1AE; --line: #2B303A;
+  --accent: #8FA8FF; --accent-soft: #1F2840;
+  --ok: #5CC79A; --ok-soft: #16301F; --warn: #E3A548; --warn-soft: #33260F;
+  --off: #B3A8DA; --off-soft: #2A2538; --risk: #E37A70; --risk-soft: #3A1D1A; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #191C22; --ink: #E7E9EE; --muted: #9AA1AE; --line: #2B303A;
+  --accent: #8FA8FF; --accent-soft: #1F2840;
+  --ok: #5CC79A; --ok-soft: #16301F; --warn: #E3A548; --warn-soft: #33260F;
+  --off: #B3A8DA; --off-soft: #2A2538; --risk: #E37A70; --risk-soft: #3A1D1A; color-scheme: dark; }
+
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 21px; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+section { display: grid; gap: 18px; min-width: 0; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.lede { color: var(--muted); }
+.head { display: grid; gap: 10px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 13px; }
+
+.tag { display: inline-block; font-family: var(--mono); font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.tag.a { color: var(--off); border-color: var(--off); }
+.tag.b { color: var(--accent); border-color: var(--accent); }
+.size { font-size: 12px; color: var(--muted); }
+
+/* diagnosis */
+.diag { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.diag div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: grid; gap: 6px; min-width: 0; }
+.diag b { color: var(--risk); }
+
+/* corrections */
+.fix { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.fix li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.fix li > div { min-width: 0; display: grid; gap: 2px; }
+.fix .was { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--risk); }
+.code { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); }
+
+/* roadmap */
+.road-scroll { overflow-x: auto; }
+.road { display: grid; grid-template-columns: 120px repeat(3, minmax(200px, 1fr)); gap: 8px; min-width: 760px; }
+.road .colh { font-size: 13px; font-weight: 700; padding: 6px 2px; border-bottom: 2px solid var(--ink); }
+.road .colh small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.road .laneh { font-size: 13px; font-weight: 700; color: var(--muted); padding-top: 10px; }
+.cell { display: grid; gap: 8px; align-content: start; padding: 8px 0; border-top: 1px dashed var(--line); }
+.card { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 10px 12px; transition: opacity .15s, border-color .15s; }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card .t { font-weight: 700; font-size: 14px; line-height: 1.4; }
+.card .row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.card[data-kind="fix"] { border-left-color: var(--ok); }
+.card[data-kind="core"] { border-left-color: var(--accent); }
+.card[data-kind="design"] { border-left-color: var(--off); }
+.road.focus .card { opacity: .3; }
+.road.focus .card.sel { opacity: 1; border-color: var(--ink); }
+.road.focus .card.up { opacity: 1; border-color: var(--warn); }
+.road.focus .card.down { opacity: 1; border-color: var(--ok); }
+.st { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.st.done { color: var(--ok); background: var(--ok-soft); }
+.st.part { color: var(--warn); background: var(--warn-soft); }
+.card.is-done { border-color: var(--ok); background: var(--ok-soft); }
+.card.is-part { border-color: var(--warn); }
+.prop.is-done { border-color: var(--ok); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); align-items: center; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+#roadNote { min-height: 1.6em; font-size: 14px; }
+
+/* proposals */
+.props { display: grid; gap: 14px; }
+.prop { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; display: grid; gap: 10px; min-width: 0; scroll-margin-top: 16px; }
+.prop:target { border-color: var(--accent); }
+.prop header { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.prop ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.prop li { max-width: 72ch; }
+.prop .foot { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.stage-h { font-size: 13px; font-weight: 700; color: var(--muted); padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* anchor demo */
+.anchor { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 760px) { .anchor { grid-template-columns: 1fr; } }
+.src { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.75; padding: 8px 0; }
+.src div { padding: 0 14px; white-space: pre; }
+.src div span { color: var(--muted); display: inline-block; width: 2.4em; user-select: none; }
+.src .hit { background: var(--accent-soft); }
+.src .hit.stale { background: var(--warn-soft); }
+.src .gone { color: var(--muted); text-decoration: line-through; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; }
+.states button { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.states button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.states button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.verdict { display: grid; gap: 8px; align-content: start; }
+.pill { justify-self: start; font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 2px 10px; border-radius: 999px; }
+.pill.current { color: var(--ok); background: var(--ok-soft); }
+.pill.stale { color: var(--warn); background: var(--warn-soft); }
+.pill.unresolved { color: var(--off); background: var(--off-soft); }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.new { color: var(--accent); }
+
+/* decisions & risks */
+.dlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.dlist li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.dlist li > div { min-width: 0; display: grid; gap: 6px; }
+.rec { font-size: 14px; }
+.rec b { color: var(--ok); }
+.risks .code { color: var(--risk); }
+@media (max-width: 520px) { .fix li, .dlist li { grid-template-columns: 1fr; gap: 4px; } h1 { font-size: 25px; } }
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="eyebrow">vault · vault-builder · vault-graph</span>
+  <h1>Vault 개선 로드맵</h1>
+  <p class="lede">OpenWiki 조사로 만든 개선 계획(B1~B6)과 앞서 검토한 개선안(A1~A5)을 합쳐 제안 13개로 정리했습니다. 결정 4개는 2026-10-28에 모두 정했습니다. 그 뒤 vault 연결 규칙을 다시 검토해서 효율안1~3과 MCP 설치 점검 결과 발견1~6을 제안11~13에 반영했습니다. 제안11~13은 2026-10-29에 구현을 마치고 main에 병합했습니다(<code>a843778</code>). 테스트 582개와 release gate를 통과했고, 리뷰 판정은 Ready to merge(수용 근거 28/28)입니다. 이 Mac에도 새로 설치했고, 수동 점검 세 가지(서버 하나만 연결, doctor 통과, uninstall 뒤 남는 것 없음과 재설치 왕복)를 모두 통과했습니다. 코드 참조는 2026-10-28 기준 현재 checkout에서 확인했습니다.</p>
+  <div class="meta">
+    <span><span class="tag a">A1~A5</span> 앞 검토의 개선1~5</span>
+    <span><span class="tag b">B1~B6</span> OpenWiki 계획의 개선1~6</span>
+    <span>OpenWiki 자체의 동작은 다시 확인하지 않고 조사 결과를 그대로 썼습니다</span>
+  </div>
+</header>
+
+<section>
+  <h2>핵심 진단</h2>
+  <div class="diag">
+    <div><b>약점1</b><h3>원본이 바뀌어도 모릅니다</h3><p>drift 검사는 <code>raw/</code> 사본의 해시만 비교합니다. <code>Stale sources</code> 값은 raw drift와 누락만 셉니다(<code>tools/wiki/lib/metrics.py:69</code>). 그래서 원본 repo가 바뀌어도 이 값은 0이고, 0이라는 값이 건강하다는 증거가 되지 못합니다.</p></div>
+    <div><b>약점2</b><h3>근거 단위가 파일 전체입니다</h3><p>evidence는 <code>path#sha256=...</code> 형태만 읽습니다(<code>tools/wiki/lib/lint.py:763</code>). 큰 소스에서 한 줄만 바뀌어도 그 파일을 가리키는 claim이 모두 무효가 되고, 어느 claim이 실제로 틀렸는지 구분할 수 없습니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>계획 정정</h2>
+  <p class="lede">OpenWiki 계획의 사실 몇 가지가 현재 코드와 다릅니다. 아래 제안은 정정한 사실을 기준으로 씁니다.</p>
+  <ul class="fix">
+    <li><span class="code">정정1</span><div><span class="was">vault-graph 구현 repo가 이 머신에 없다</span><span><code>$HOME/workspace/vault-graph</code>에 있습니다. spec이 다른 사용자의 홈 경로를 가리켜서 못 찾은 것입니다. commit 148개, MCP 읽기 도구 9개(<code>search_vault</code>, <code>ask_vault</code>, <code>build_context_pack</code>, <code>find_related</code>, <code>get_decision_trace</code> 등)가 구현되어 있습니다. 그래서 계획의 결정2는 이미 답이 나왔습니다.</span></div></li>
+    <li><span class="code">정정2</span><div><span class="was">workspace registry를 새로 만든다</span><span>연결 설정은 이미 두 개 있습니다. vault-builder install이 쓰는 <code>vault-map.json</code>이 하나이고, vault-graph의 <code>VaultCatalog</code>가 또 하나입니다. <code>VaultCatalog</code>에는 이미 <code>active_vault_id</code>와 여러 vault 범위 검색이 있습니다(<code>src/vault_graph/operation/scope/vault_catalog.py</code>). 새로 만들면 세 번째 설정이 생깁니다.</span></div></li>
+    <li><span class="code">정정3</span><div><span class="was">OpenWiki의 설치 영수증 방식을 참고한다</span><span>이미 구현되어 있습니다. install은 vault 밖에 쓴 파일을 hash와 함께 manifest v2에 기록하고, uninstall과 doctor가 이 기록을 씁니다. 그래서 로드맵에서 뺐습니다.</span></div></li>
+    <li><span class="code">정정4</span><div><span class="was">lint.py:460, lint.py:728, index.md 16.7KB</span><span>현재 builder 기준으로 <code>canonical_source</code>를 <code>raw/</code> 아래로 제한하는 규칙은 <code>lint.py:508</code>, evidence 해석은 <code>lint.py:763</code>에 있습니다. <code>wiki/index.md</code>는 지금 19.5KB입니다.</span></div></li>
+  </ul>
+</section>
+
+<section>
+  <h2>로드맵</h2>
+  <p class="lede">카드를 누르면 그 제안의 선행 작업과 후속 작업이 표시됩니다. 같은 열의 카드는 서로 기다리지 않습니다.</p>
+  <div class="legend">
+    <span><i style="background:var(--ok)"></i>정리·수정</span>
+    <span><i style="background:var(--accent)"></i>구조 개선</span>
+    <span><i style="background:var(--off)"></i>설계만</span>
+    <span><i style="background:none;border:2px solid var(--warn)"></i>선행 작업</span>
+    <span><i style="background:none;border:2px solid var(--ok)"></i>후속 작업</span>
+    <span><span class="st done">✓ 구현 완료</span> main 병합, 이 Mac 설치·점검 완료</span>
+    <span><span class="st part">일부 완료</span> 일부 항목만 구현</span>
+  </div>
+  <div class="road-scroll">
+    <div class="road" id="road">
+      <div></div>
+      <div class="colh">단계0 · 바로<small>독립, 규모 작음</small></div>
+      <div class="colh">단계1 · 근거 기반<small>vault 계약 변경</small></div>
+      <div class="colh">단계2 · 연결과 점검<small>단계1 결과 사용</small></div>
+
+      <div class="laneh">vault-builder<br>wiki 도구·계약</div>
+      <div class="cell">
+        <button class="card" data-id="1" data-kind="fix" data-deps=""><span class="t">제안1. 보고서와 지표 정직하게</span><span class="row"><span class="tag a">A4</span><span class="tag b">B1</span><span class="size">작음</span></span></button>
+        <button class="card is-done" data-id="11" data-kind="core" data-deps=""><span class="t">제안11. MCP 서버 하나와 깔끔한 설치·제거</span><span class="row"><span class="tag a">A3</span><span class="tag">효율안1</span><span class="size">큼</span><span class="st done">✓ 구현 완료</span></span></button>
+        <button class="card is-done" data-id="12" data-kind="fix" data-deps=""><span class="t">제안12. 저장소 연결 명령</span><span class="row"><span class="tag">효율안2</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
+        <button class="card is-done" data-id="13" data-kind="fix" data-deps=""><span class="t">제안13. 저장소를 경로와 remote로 찾기</span><span class="row"><span class="tag">효율안3</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
+      </div>
+      <div class="cell">
+        <button class="card" data-id="3" data-kind="core" data-deps=""><span class="t">제안3. 줄 범위 claim 근거</span><span class="row"><span class="tag b">B2</span><span class="size">큼</span></span></button>
+        <button class="card" data-id="4" data-kind="core" data-deps="3"><span class="t">제안4. upstream 추적과 repo 증거</span><span class="row"><span class="tag b">B2</span><span class="size">중간</span></span></button>
+        <button class="card" data-id="5" data-kind="core" data-deps=""><span class="t">제안5. 공통 규칙을 검색으로 찾게</span><span class="row"><span class="tag a">A2</span><span class="size">작음</span></span></button>
+      </div>
+      <div class="cell">
+        <button class="card" data-id="8" data-kind="fix" data-deps="3 4"><span class="t">제안8. 예약 점검</span><span class="row"><span class="tag b">B4</span><span class="size">작음</span></span></button>
+      </div>
+
+      <div class="laneh">vault-graph</div>
+      <div class="cell"></div>
+      <div class="cell"></div>
+      <div class="cell">
+        <button class="card" data-id="6" data-kind="core" data-deps="3 4"><span class="t">제안6. 연결 설정 통합과 workspace</span><span class="row"><span class="tag b">B3</span><span class="size">큼</span></span></button>
+        <button class="card" data-id="7" data-kind="core" data-deps="6 11"><span class="t">제안7. MCP 진입점 정리</span><span class="row"><span class="tag a">A3</span><span class="tag b">B4</span><span class="size">중간</span></span></button>
+      </div>
+
+      <div class="laneh">문서·설계</div>
+      <div class="cell">
+        <button class="card is-part" data-id="2" data-kind="fix" data-deps=""><span class="t">제안2. 문서를 구현에 맞추기</span><span class="row"><span class="tag a">A1</span><span class="tag a">A5</span><span class="tag b">B1</span><span class="size">작음</span><span class="st part">일부 완료</span></span></button>
+      </div>
+      <div class="cell">
+        <button class="card" data-id="10" data-kind="design" data-deps=""><span class="t">제안10. vault-graph 범위 축소</span><span class="row"><span class="tag b">B6</span><span class="size">설계</span></span></button>
+      </div>
+      <div class="cell">
+        <button class="card" data-id="9" data-kind="design" data-deps="6"><span class="t">제안9. graph.json 계약</span><span class="row"><span class="tag b">B5</span><span class="size">설계</span></span></button>
+      </div>
+    </div>
+  </div>
+  <p id="roadNote" class="lede">카드를 눌러 의존 관계를 확인하세요.</p>
+</section>
+
+<section>
+  <h2>제안 상세</h2>
+  <div class="props">
+    <div class="stage-h">단계0 · 바로</div>
+
+    <article class="prop" id="p1">
+      <header><span class="code">제안1</span><h3>도구가 만든 보고서와 지표를 정직하게 만든다</h3></header>
+      <p>lint 보고서가 commit되지 않은 상태로 생기는 문제와 0으로 고정된 지표 문제는 같은 곳에서 생깁니다. 도구가 쓰는 파일과 측정하지 않는 값을 분명히 하면 됩니다.</p>
+      <ul>
+        <li>health와 metrics는 기본 실행에서 파일을 쓰지 않고, <code>--report</code>를 줄 때만 보고서를 씁니다.</li>
+        <li>audit의 미커밋 검사(<code>tools/vault_migration/cli.py:612</code>)에서 <code>scratch/reports/</code> 아래 변경은 제외합니다. planning은 이미 이 폴더를 건너뜁니다(<code>planning.py:297</code>).</li>
+        <li>upstream 비교가 없는 동안 <code>Stale sources</code>는 0 대신 "미측정"으로 표시합니다.</li>
+      </ul>
+      <div class="foot"><span>출처: A4, B1(약점5)</span><span>선행: 없음</span></div>
+    </article>
+
+    <article class="prop is-done" id="p11">
+      <header><span class="code">제안11</span><h3>MCP 서버를 하나로 줄이고 설치와 제거를 깔끔하게 만든다</h3><span class="st done">✓ 구현 완료</span></header>
+      <p>install을 점검해서 MCP 등록 문제 6개를 찾았습니다.</p>
+      <ul>
+        <li><code>발견1</code> 같은 서버를 <code>.mcp.json</code>과 <code>~/.claude.json</code> 두 곳에 무조건 등록합니다(<code>installing.py:528</code>, <code>:570</code>).</li>
+        <li><code>발견2</code> doctor가 지워진 <code>.mcp.json</code>을 다시 만듭니다(<code>uninstalling.py:642-680</code>).</li>
+        <li><code>발견3</code> doctor가 user scope 항목의 interpreter를 검사하지 않습니다(<code>uninstalling.py:591-604</code>).</li>
+        <li><code>발견4</code> interpreter 경로가 <code>python@3.12</code>처럼 특정 버전에 고정됩니다.</li>
+        <li><code>발견5</code> 쓰기 도구가 모든 저장소 세션에 노출됩니다.</li>
+        <li><code>발견6</code> <code>~/.claude.json</code> 전체를 다시 쓰므로 실행 중인 앱과 쓰기가 겹칠 수 있습니다.</li>
+      </ul>
+      <p>바꾸는 방향(효율안1)은 다음과 같습니다.</p>
+      <ul>
+        <li>사용자 단위 MCP 서버 하나를 user scope에 한 번만 등록합니다. 이 서버는 <code>vault-map.json</code>을 읽고 요청마다 대상 vault의 <code>tools/wiki/cli.py</code>를 실행합니다. 그래서 각 vault의 검사는 그 vault의 도구 버전이 그대로 맡습니다.</li>
+        <li><code>.mcp.json</code>은 만들지 않고, doctor도 다시 만들지 않습니다. vault가 늘어나도 서버는 하나입니다.</li>
+        <li>서버는 상태를 두지 않습니다. 호출마다 <code>vault-map.json</code>을 다시 읽고 대상 vault의 CLI를 새 프로세스로 실행합니다.</li>
+        <li>읽기와 검색은 OpenWiki처럼 이 세션이 닿는 vault(세션 vault, 또는 저장소에 연결된 vault)만 대상으로 하고, 결과마다 vault 이름을 붙입니다.</li>
+        <li>쓰기는 OpenWiki처럼 모든 세션에 보입니다. <code>vault</code> 인자를 반드시 받고, team vault를 포함해 어떤 vault에도 쓸 수 있으며, publish-draft 검증이 막습니다. 경로 인자는 고른 vault 안의 상대 경로만 받습니다.</li>
+        <li>uninstall한 vault는 install 하나로 다시 설치됩니다(결정42, 결정44).</li>
+        <li>doctor는 등록된 명령으로 서버를 실제로 띄워 MCP 시작 요청과 도구 목록 요청에 응답하는지 확인합니다.</li>
+        <li>uninstall은 마지막 vault를 제거할 때 서버 등록과 공용 파일을 모두 지웁니다. 다른 vault가 남아 있으면 그 vault에 관한 기록만 지웁니다.</li>
+      </ul>
+      <div class="foot"><span>출처: A3, 결정4, 효율안1, 발견1~6</span><span>선행: 없음</span><span>구현 완료, main 병합(<code>a843778</code>), 이 Mac 설치와 수동 점검 M1~M3 통과(2026-10-29). 테스트 582개 통과, 리뷰 Ready to merge.</span></div>
+    </article>
+
+    <article class="prop is-done" id="p12">
+      <header><span class="code">제안12</span><h3>저장소 연결을 명령으로 한다</h3><span class="st done">✓ 구현 완료</span></header>
+      <p>지금은 <code>vault-map.json</code>을 손으로 고쳐야 저장소가 연결됩니다(<code>recall.sh</code> 96~98행). <code>link</code>, <code>unlink</code>, <code>list</code> 명령을 추가하고, <code>/project-memory</code>가 연결되지 않은 저장소를 만나면 <code>link</code> 명령을 안내하게 합니다.</p>
+      <div class="foot"><span>출처: 효율안2</span><span>선행: 없음</span><span>구현 완료, main 병합(<code>a843778</code>), 이 Mac 설치와 수동 점검 M1~M3 통과(2026-10-29). 테스트 582개 통과, 리뷰 Ready to merge.</span></div>
+    </article>
+
+    <article class="prop is-done" id="p13">
+      <header><span class="code">제안13</span><h3>저장소를 경로, remote, 이름 순서로 찾는다</h3><span class="st done">✓ 구현 완료</span></header>
+      <p>지금은 폴더 이름만으로 저장소를 찾습니다(<code>project_id = root.name</code>). 그래서 이름이 같은 다른 저장소의 기억이 섞이고, 폴더 이름을 바꾸면 연결이 끊깁니다. 연결을 찾는 순서를 <code>root</code> 경로, git remote URL, 폴더 이름으로 바꿉니다.</p>
+      <div class="foot"><span>출처: 효율안3</span><span>선행: 제안12(link가 remote를 기록)</span><span>구현 완료, main 병합(<code>a843778</code>), 이 Mac 설치와 수동 점검 M1~M3 통과(2026-10-29). 테스트 582개 통과, 리뷰 Ready to merge.</span></div>
+    </article>
+
+    <article class="prop" id="p2">
+      <header><span class="code">제안2</span><h3>문서를 현재 구현에 맞춘다</h3><span class="st part">일부 완료</span></header>
+      <ul>
+        <li><code>docs/html/project-memory-structure.html</code>: SessionStart hook, <code>hook.sh</code>, <code>settings.json</code> 항목, "MCP 읽기 도구 없음", 진행 상태 등 A1의 7곳과 질문1, 400행 문구를 고칩니다.</li>
+        <li><code>docs/usage.md</code> 17.6절: "앱 종료 → 터미널에서 install → 앱 재시작 → doctor" 순서를 적습니다(A5).</li>
+        <li>vault의 <code>build-vault-graph-as-read-only-projection-layer</code> 결정 페이지: <code>decision_status: proposed</code>를 실제 구현 상태에 맞게 wiki-update로 갱신합니다.</li>
+        <li>AGENTS.md: "작업 시작 때 미리 읽지 말고, 확실하지 않은 내용이 작업에 영향을 줄 때만 검색한다. 코드가 권위다" 규칙을 넣습니다. 어느 MCP 도구를 먼저 쓸지는 결정4 뒤에 적습니다.</li>
+      </ul>
+      <div class="foot"><span>출처: A1, A5, B1(약점9, 14), B4 일부</span><span>선행: 없음</span></div>
+      <div class="foot"><span><span class="st done">✓ 완료</span> html의 실행 순서(commit <code>99a00ee</code>), <code>docs/usage.md</code> install 순서와 MCP·연결·설치 절(같은 branch)</span><span><span class="st part">남음</span> html의 나머지 6곳, AGENTS.md 검색 규칙, vault의 결정 페이지 상태</span></div>
+    </article>
+
+    <div class="stage-h">단계1 · 근거 기반</div>
+
+    <article class="prop" id="p3">
+      <header><span class="code">제안3</span><h3>claim 근거를 줄 범위로 바꾼다</h3></header>
+      <ul>
+        <li>evidence 형식을 <code>raw/...#L12-L30#sha256=...</code>로 넓히고, 줄 범위 해시, 첫 줄과 끝 줄 해시, 주변 문맥 해시를 함께 저장합니다.</li>
+        <li>새 명령 <code>claims-check</code>는 각 claim을 current, stale, unresolved 중 하나로 판정합니다. 줄이 밀리면 첫 줄과 끝 줄, 그다음 주변 문맥 순서로 위치를 다시 찾습니다.</li>
+        <li>stale이면 자동으로 고치지 않고 <code>scratch/review/</code>에 항목을 만듭니다. 바뀐 claim만 <code>patch-page</code> draft 대상으로 좁힙니다. 이렇게 해서 규칙4(모순은 사람이 판단)를 유지합니다.</li>
+        <li>계약 버전을 v3로 올립니다. 기존 claim 페이지 55개는 파일 전체 해시를 그대로 허용하고, 새 claim부터 줄 범위를 요구합니다.</li>
+      </ul>
+      <div class="foot"><span>출처: B2</span><span>선행: 없음</span><span>후속: 제안4, 6, 8</span></div>
+    </article>
+
+    <article class="prop" id="p4">
+      <header><span class="code">제안4</span><h3>원본 위치를 기록하고 코드 repo를 증거로 인정한다</h3></header>
+      <ul>
+        <li>source 페이지에 <code>upstream: {repo, path, commit}</code>를 더하고, source-drift 검사가 현재 upstream 내용과 raw 사본을 비교합니다. 이때부터 <code>Stale sources</code>가 실제 값을 갖습니다.</li>
+        <li>결정1을 확장 방식으로 정하면 <code>lint.py:508</code>의 raw 전용 규칙을 넓혀 등록된 repo의 <code>repo://path#L</code> 증거를 받습니다.</li>
+      </ul>
+      <div class="foot"><span>출처: B2, 결정1</span><span>선행: 제안3(앵커 형식)</span></div>
+    </article>
+
+    <article class="prop" id="p5">
+      <header><span class="code">제안5</span><h3>여러 저장소에 공통인 규칙은 검색으로 찾게 한다</h3></header>
+      <p>정리 skill에 <code>feedback</code> 메모의 분류 기준이 없어서 "PR 설명은 쉬운 말로" 같은 규칙에 <code>project: sgp-981-app</code>가 붙었습니다. 결정3에 따라 요약 생성 코드(<code>tools/wiki/lib/maps.py:273</code>)는 바꾸지 않고, 공통 규칙은 검색으로 찾습니다.</p>
+      <ul>
+        <li><code>memory-cleanup</code> 7단계: 특정 저장소에만 해당하는 규칙에만 <code>project</code>를 붙인다고 적습니다.</li>
+        <li>이미 만든 두 페이지(<code>pr-body-plain-language</code>, <code>decision-requests-need-context</code>)는 <code>patch-page</code>로 <code>project</code>를 뺍니다.</li>
+        <li>제안2의 AGENTS.md 지침에 "작업 규칙이 확실하지 않으면 personal vault에서 <code>rule</code> 태그로 검색한다"는 문장을 넣습니다.</li>
+      </ul>
+      <div class="foot"><span>출처: A2, 결정3</span><span>선행: 없음</span></div>
+    </article>
+
+    <article class="prop" id="p10">
+      <header><span class="code">제안10</span><h3>vault-graph 범위를 줄인다</h3></header>
+      <p>우선순위를 검색, 코드 projection, MCP, workspace 네 가지로 줄이고 explorer UI와 issue/timeline memory는 보류합니다. 다만 <code>get_decision_trace</code>, <code>summarize_project_memory</code>, <code>get_open_questions</code>는 이미 구현되어 있으므로, 보류 목록은 구현된 것을 빼고 다시 정해야 합니다. 현재 <code>docs/</code> 폴더는 5.1MB입니다.</p>
+      <div class="foot"><span>출처: B6(약점12)</span><span>선행: 없음. 제안6보다 먼저 정하면 workspace 작업 범위가 분명해집니다</span></div>
+    </article>
+
+    <div class="stage-h">단계2 · 연결과 점검</div>
+
+    <article class="prop" id="p6">
+      <header><span class="code">제안6</span><h3>연결 설정을 하나로 합치고 workspace를 더한다</h3></header>
+      <ul>
+        <li><code>vault-map.json</code>과 <code>VaultCatalog</code> 중 하나를 기준으로 삼고 다른 쪽은 그것을 읽습니다(결정2).</li>
+        <li><code>workspaces[]</code>(id, 멤버 vault)와 <code>active[]</code>를 더하고 파일 권한은 0600으로 둡니다. 검색 범위 규칙은 이렇습니다. workspace가 없으면 자기 vault만, 하나면 그 workspace, 여러 개면 <code>active</code>를 씁니다. <code>active</code>가 없으면 오류를 냅니다.</li>
+        <li>모든 검색 결과에 vault id를 싣고, 읽기는 (vault, path, anchor)로 받습니다.</li>
+        <li><code>[[vault-id:path]]</code> 형식의 vault 간 링크를 정의해 그래프 엣지로 만듭니다. spec에서 phase 3 밖으로 미룬 부분을 앞당깁니다.</li>
+        <li>등록된 코드 repo는 읽기 전용 권위로 두고, 제안4의 <code>repo://</code> 증거를 여기서 해석합니다. 코드와 wiki가 다르면 경고만 냅니다.</li>
+      </ul>
+      <div class="foot"><span>출처: B3(약점7, 16)</span><span>선행: 제안3, 제안4, 결정2</span></div>
+    </article>
+
+    <article class="prop" id="p7">
+      <header><span class="code">제안7</span><h3>MCP 진입점을 정리한다</h3></header>
+      <ul>
+        <li>제안11의 서버가 진입점이 됩니다. vault-graph가 연결되면 이 서버의 검색만 vault-graph로 넘기고, 서버 등록은 그대로 둡니다.</li>
+        <li>user scope에 등록된 쓰기 도구가 모든 저장소 세션에 노출되는 문제(spec 위험17의 뒷부분)도 여기서 다룹니다.</li>
+      </ul>
+      <div class="foot"><span>출처: B4</span><span>선행: 제안6</span></div>
+    </article>
+
+    <article class="prop" id="p8">
+      <header><span class="code">제안8</span><h3>점검만 예약해서 돌린다</h3></header>
+      <p>vault의 <code>release-gate.yml</code>에 <code>schedule:</code>을 더해 매일 source-drift와 <code>claims-check</code>를 실행하고, 결과를 이슈로 올립니다. 내용을 자동으로 생성하거나 고치지는 않습니다.</p>
+      <div class="foot"><span>출처: B4(약점5, 17)</span><span>선행: 제안3, 제안4</span></div>
+    </article>
+
+    <article class="prop" id="p9">
+      <header><span class="code">제안9</span><h3>visualizer용 <code>graph.json</code> 계약만 정한다</h3></header>
+      <p>OpenWiki의 <code>root, generatedAt, types, nodes, edges</code> 구조에서 시작하고, 노드에 vault id, claim 상태, freshness, 증거 chunk id를 더합니다. 뷰어는 오프라인에서 동작하도록 라이브러리를 번들한다는 조건만 요구사항에 적고, UI는 만들지 않습니다.</p>
+      <div class="foot"><span>출처: B5</span><span>선행: 제안6(vault id와 링크 형식)</span></div>
+    </article>
+  </div>
+  <p class="lede">보류: 재개 가능한 갱신 상태(OpenWiki의 begin, plan, next, submit, finish)는 대규모 ingest에서 필요해질 때까지 미룹니다. 제외: 설치 영수증은 정정3에 따라 이미 있습니다.</p>
+</section>
+
+<section>
+  <h2>줄 범위 근거가 바꾸는 것</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>항목</th><th>vault 현재</th><th>OpenWiki</th><th>제안3·4 뒤 vault</th></tr></thead>
+      <tbody>
+        <tr><td>근거 단위</td><td>파일 전체 해시</td><td><code>repo://경로#L시작-L끝</code></td><td class="new"><code>raw/...#L12-L30#sha256=</code>, 결정1이면 <code>repo://</code>도 허용</td></tr>
+        <tr><td>코드 이동 대응</td><td>없음</td><td>정확 일치 → 첫·끝 줄 → 주변 문맥 순서로 재탐색</td><td class="new">같은 규칙</td></tr>
+        <tr><td>판정</td><td>해시 불일치 한 종류</td><td>current, stale, unresolved</td><td class="new">같은 세 종류</td></tr>
+        <tr><td>stale일 때</td><td>오류만 보고</td><td>페이지 갱신 작업 자동 등록</td><td class="new">review 항목 생성, 바뀐 claim만 draft 대상</td></tr>
+        <tr><td>원본 변경 감지</td><td>raw 사본만 비교</td><td>repo 직접 추적</td><td class="new">source의 <code>upstream</code>과 비교</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="anchor">
+    <div style="display:grid;gap:10px;min-width:0">
+      <div class="states" role="group" aria-label="소스 변경 예시">
+        <button type="button" data-s="same" aria-pressed="true">변경 없음</button>
+        <button type="button" data-s="moved" aria-pressed="false">위에 줄 추가</button>
+        <button type="button" data-s="edited" aria-pressed="false">구간 내용 수정</button>
+        <button type="button" data-s="deleted" aria-pressed="false">구간 삭제</button>
+      </div>
+      <div class="src" id="src" aria-live="polite"></div>
+    </div>
+    <div class="verdict">
+      <span class="eyebrow">예시 claim의 근거</span>
+      <code id="evid"></code>
+      <span class="pill current" id="pill">current</span>
+      <p id="why"></p>
+    </div>
+  </div>
+</section>
+
+<section class="risks">
+  <h2>OpenWiki를 그대로 따르지 않을 부분</h2>
+  <ul class="dlist">
+    <li><span class="code">위험1</span><div><h3>규모와 비용</h3><p>stale claim이 하나만 있어도 페이지 전체에 모델 작업이 걸리고, 대형 repo에서는 토큰 사용량이 크게 늘었다는 사례(#934)가 있습니다. vault는 점검만 자동으로 하고, 갱신은 사람이 승인합니다(제안3, 제안8).</p></div></li>
+    <li><span class="code">위험2</span><div><h3>검증 범위</h3><p>OpenWiki는 소스 구간이 바뀌었는지만 추적하고 페이지 내용이 맞는지는 검증하지 않습니다. vault의 모순 처리와 human-lock은 그대로 유지합니다.</p></div></li>
+    <li><span class="code">위험3</span><div><h3>의존성</h3><p>OpenWiki는 LangChain DeepAgents에 의존하고 텔레메트리가 기본으로 켜져 있습니다. 코드는 가져오지 않고 설계만 참고합니다.</p></div></li>
+  </ul>
+</section>
+
+<section>
+  <h2>결정이 필요한 항목</h2>
+  <ul class="dlist">
+    <li><span class="code">결정1</span><div><h3>코드 repo를 claim 근거로 직접 가리킬 것인가</h3><p>등록된 repo를 읽기 전용 외부 권위로 인정할지, 아니면 repo 사본을 <code>raw/</code>에 주기적으로 저장할지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 직접 가리키기.</b> 사본을 저장하면 저장 직후부터 낡기 때문에 약점1이 그대로 남습니다. 제안4는 <code>repo://</code> 증거를 받는 범위로 진행합니다.</p></div></li>
+    <li><span class="code">결정2</span><div><h3>vault 연결 설정은 어느 쪽을 기준으로 할 것인가</h3><p>builder의 <code>vault-map.json</code>과 vault-graph의 <code>VaultCatalog</code> 중 하나를 기준으로 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): <code>vault-map.json</code>을 기준으로 하고 workspace를 여기에 더합니다.</b> AGENTS.md 규칙9에 따라 계약은 vault-builder가 관리하고, install과 uninstall이 이미 이 파일을 manifest에 기록합니다. vault-graph는 이 파일을 읽기만 합니다.</p></div></li>
+    <li><span class="code">결정3</span><div><h3>공통 규칙을 어느 요약까지 보여줄 것인가</h3><p>personal 역할 vault의 공통 규칙만 보여줄지, team vault의 공통 규칙도 보여줄지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 요약에 넣지 않습니다.</b> OpenWiki도 모든 repo에 적용되는 공통 규칙 개념이 없고, 위키 내용을 미리 주입하지 않고 필요할 때 검색합니다. 공통 규칙은 <code>project</code> 없이 personal vault에 두고 검색으로 찾습니다. 검색하지 않으면 규칙을 놓칠 수 있다는 점은 감수합니다.</p></div></li>
+    <li><span class="code">결정4</span><div><h3>MCP 읽기 진입점과 중복 등록을 어떻게 정리할 것인가</h3><p>vault-graph를 읽기 진입점으로 삼을지, 그리고 user scope 항목이 있을 때 <code>.mcp.json</code>을 만들지 않도록 결정7을 바꿀지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 중복 등록을 지금 고치고, user scope 등록을 남깁니다.</b> 원인은 같은 서버를 두 곳에서 따로 등록하기 때문입니다. vault의 <code>.mcp.json</code>은 결정7에 따라 vault 안 세션용 <code>llm-wiki</code>를 등록하고, <code>~/.claude.json</code>은 결정20에 따라 모든 세션용 <code>llm-wiki-personal</code>을 등록합니다. 이후 검토에서 방향을 넓혔습니다. 서버를 하나로 만들어 user scope에 한 번만 등록하고, <code>.mcp.json</code>은 만들지 않습니다(제안11, 효율안1).</p></div></li>
+  </ul>
+  <p class="lede">남은 처리: vault에 commit되지 않은 <code>scratch/reports/2026-10-28-lint.md</code>가 남아 있습니다. 제안1을 적용하면 이런 파일은 더 생기지 않지만, 지금 있는 파일을 commit할지 지울지는 따로 정해야 합니다.</p>
+</section>
+
+<section>
+  <h2>출처 대응표</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>원래 항목</th><th>내용</th><th>반영</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag a">A1</span></td><td>구조 문서를 구현에 맞춤</td><td>제안2</td></tr>
+        <tr><td><span class="tag a">A2</span></td><td>공통 규칙 전달</td><td>제안5, 결정3</td></tr>
+        <tr><td><span class="tag a">A3</span></td><td>wiki 도구 중복 표시</td><td>제안11, 결정4</td></tr>
+        <tr><td><span class="tag a">A4</span></td><td>lint 보고서로 인한 audit 경고</td><td>제안1</td></tr>
+        <tr><td><span class="tag a">A5</span></td><td>install 전 종료 안내</td><td>제안2</td></tr>
+        <tr><td><span class="tag b">B1</span></td><td>지표를 정직하게</td><td>제안1, 제안2</td></tr>
+        <tr><td><span class="tag b">B2</span></td><td>줄 범위 근거와 upstream</td><td>제안3, 제안4, 결정1</td></tr>
+        <tr><td><span class="tag b">B3</span></td><td>workspace 격상</td><td>제안6, 결정2(정정1, 정정2 반영)</td></tr>
+        <tr><td><span class="tag b">B4</span></td><td>MCP, 진입점, 자동화</td><td>제안7, 제안8, 제안2 일부. 설치 영수증은 제외(정정3), 재개 상태는 보류</td></tr>
+        <tr><td><span class="tag b">B5</span></td><td>visualizer 데이터 계약</td><td>제안9</td></tr>
+        <tr><td><span class="tag b">B6</span></td><td>vault-graph 범위 축소</td><td>제안10</td></tr>
+        <tr><td><span class="tag">효율안1</span></td><td>사용자 단위 MCP 서버 하나</td><td>제안11</td></tr>
+        <tr><td><span class="tag">효율안2</span></td><td>link, unlink, list 명령</td><td>제안12</td></tr>
+        <tr><td><span class="tag">효율안3</span></td><td>경로, remote, 이름 순서로 찾기</td><td>제안13</td></tr>
+        <tr><td><span class="tag">발견1~6</span></td><td>MCP 설치 점검 결과</td><td>제안11</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  var road = document.getElementById('road');
+  var note = document.getElementById('roadNote');
+  var cards = Array.prototype.slice.call(road.querySelectorAll('.card'));
+  var deps = {};
+  cards.forEach(function (c) { deps[c.dataset.id] = c.dataset.deps ? c.dataset.deps.split(' ') : []; });
+  function upstream(id, acc) { deps[id].forEach(function (d) { if (acc.indexOf(d) < 0) { acc.push(d); upstream(d, acc); } }); return acc; }
+  function downstream(id) {
+    var out = [];
+    Object.keys(deps).forEach(function (k) { if (k !== id && upstream(k, []).indexOf(id) >= 0) out.push(k); });
+    return out;
+  }
+  var current = null;
+  function names(ids) { return ids.sort(function (a, b) { return a - b; }).map(function (i) { return '제안' + i; }).join(', '); }
+  cards.forEach(function (c) {
+    c.addEventListener('click', function () {
+      var id = c.dataset.id;
+      cards.forEach(function (x) { x.classList.remove('sel', 'up', 'down'); });
+      if (current === id) { current = null; road.classList.remove('focus'); note.textContent = '카드를 눌러 의존 관계를 확인하세요.'; return; }
+      current = id;
+      var up = upstream(id, []), down = downstream(id);
+      road.classList.add('focus');
+      c.classList.add('sel');
+      cards.forEach(function (x) {
+        if (up.indexOf(x.dataset.id) >= 0) x.classList.add('up');
+        if (down.indexOf(x.dataset.id) >= 0) x.classList.add('down');
+      });
+      note.innerHTML = '<a href="#p' + id + '">제안' + id + ' 상세</a> · 선행: ' + (up.length ? names(up) : '없음') + ' · 후속: ' + (down.length ? names(down) : '없음');
+    });
+  });
+
+  var base = [
+    '---',
+    'type: feedback',
+    '---',
+    'PR 설명은 쉬운 한국어로 쓴다.',
+    '내부 spec 코드(결정3 등)를 본문에 쓰지 않는다.',
+    '바뀐 동작을 사용자 관점에서 먼저 설명한다.',
+    '',
+    '**Why:** 리뷰어가 spec 없이 읽는다.'
+  ];
+  var states = {
+    same:    { lines: base, hit: [4, 6], cls: '', ev: '#L4-L6#sha256=9c1e…', pill: 'current', why: '줄 범위 해시가 그대로 일치합니다. 파일 다른 곳이 바뀌어도 이 claim은 current입니다.' },
+    moved:   { lines: base.slice(0, 3).concat(['<!-- 2026-10-30 추가 -->', '']).concat(base.slice(3)), hit: [6, 8], cls: '', ev: '#L4-L6 → L6-L8', pill: 'current', why: '정확한 위치에서는 맞지 않지만 첫 줄과 끝 줄 해시로 두 줄 아래에서 같은 구간을 찾았습니다. 앵커를 L6-L8로 고치는 것만 제안합니다.' },
+    edited:  { lines: base.slice(0, 4).concat(['내부 spec 코드는 괄호 안에서만 쓴다.']).concat(base.slice(5)), hit: [4, 6], cls: 'stale', ev: '#L4-L6#sha256=9c1e… ≠ 4a07…', pill: 'stale', why: '구간은 찾았지만 내용 해시가 다릅니다. scratch/review/에 항목을 만들고, 이 claim 하나만 patch-page draft 대상으로 넘깁니다.' },
+    deleted: { lines: base.slice(0, 3).concat(['~~(구간 삭제됨)~~']).concat(base.slice(6)), hit: null, cls: '', ev: '#L4-L6', pill: 'unresolved', why: '정확한 위치, 첫·끝 줄, 주변 문맥 어느 방법으로도 구간을 찾지 못했습니다. 사람이 판단하도록 review 항목으로 넘깁니다.' }
+  };
+  var src = document.getElementById('src'), pill = document.getElementById('pill');
+  var evid = document.getElementById('evid'), why = document.getElementById('why');
+  var path = 'raw/imports/claude-memory/sgp-981-app--pr-body-plain-language--10b3865f.md';
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function show(key) {
+    var s = states[key];
+    src.innerHTML = s.lines.map(function (l, i) {
+      var n = i + 1, inHit = s.hit && n >= s.hit[0] && n <= s.hit[1];
+      var cls = inHit ? 'hit ' + s.cls : (l.indexOf('~~') === 0 ? 'gone' : '');
+      return '<div class="' + cls + '"><span>' + n + '</span>' + esc(l.replace(/~~/g, '')) + '</div>';
+    }).join('');
+    evid.textContent = path + s.ev;
+    pill.className = 'pill ' + s.pill; pill.textContent = s.pill;
+    why.textContent = s.why;
+    document.querySelectorAll('.states button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.s === key ? 'true' : 'false'); });
+  }
+  document.querySelectorAll('.states button').forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.s); }); });
+  show('same');
+})();
+</script>
+</body></html>

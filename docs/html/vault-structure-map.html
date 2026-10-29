@@ -1,0 +1,472 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Vault 구조 지도</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: one column; a fixed-scale SVG map with flow buttons, then reference tables. */
+:root {
+  --bg: #F3F5F4; --surface: #FFFFFF; --ink: #15201C; --muted: #5B6863; --line: #D3DBD8;
+  --zone-a: #EAF0EE; --zone-b: #EEF0F6; --zone-c: #EEF4EC;
+  --flow: #0F7A6C; --flow-soft: #DDF1EC; --warn: #B4581F; --warn-soft: #FBE9DD; --dim: #A9B4B0;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #101614; --surface: #18201D; --ink: #E3EBE8; --muted: #95A39E; --line: #2C3834;
+  --zone-a: #16211E; --zone-b: #181C26; --zone-c: #18231A;
+  --flow: #4FD1BC; --flow-soft: #12302B; --warn: #F0995F; --warn-soft: #3A2316; --dim: #4A5753; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #101614; --surface: #18201D; --ink: #E3EBE8; --muted: #95A39E; --line: #2C3834;
+  --zone-a: #16211E; --zone-b: #181C26; --zone-c: #18231A;
+  --flow: #4FD1BC; --flow-soft: #12302B; --warn: #F0995F; --warn-soft: #3A2316; --dim: #4A5753; color-scheme: dark; }
+
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.65; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 52px; }
+h1, h2, h3 { margin: 0; line-height: 1.3; text-wrap: balance; }
+h1 { font-size: 30px; font-weight: 700; }
+h2 { font-size: 21px; font-weight: 700; }
+h3 { font-size: 15.5px; font-weight: 700; }
+p { margin: 0; max-width: 70ch; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--flow-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+section { display: grid; gap: 18px; min-width: 0; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.lede { color: var(--muted); }
+.head { display: grid; gap: 10px; }
+
+/* rules */
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.rules div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.rules b { font-family: var(--mono); font-size: 12px; color: var(--flow); font-weight: 500; }
+
+/* flow buttons */
+.flows { display: flex; flex-wrap: wrap; gap: 8px; }
+.flows button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.flows button[aria-pressed="true"] { background: var(--flow); border-color: var(--flow); color: var(--bg); }
+.flows button:focus-visible { outline: 2px solid var(--flow); outline-offset: 2px; }
+
+/* map */
+.map-box { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+svg.map { display: block; width: 100%; min-width: 860px; height: auto; font-family: var(--sans); }
+.zone { stroke: none; }
+.za { fill: var(--zone-a); } .zb { fill: var(--zone-b); } .zc { fill: var(--zone-c); }
+.zl { font-size: 12.5px; font-weight: 700; fill: var(--muted); letter-spacing: 0.02em; }
+.node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.node.group > rect { fill: none; stroke: var(--ink); stroke-width: 1.2; }
+.node.ghost rect { stroke-dasharray: 5 4; }
+.node .t { font-size: 13.5px; font-weight: 700; fill: var(--ink); }
+.node .s { font-size: 11.5px; fill: var(--muted); }
+.node .m { font-family: var(--mono); }
+.node { transition: opacity .2s; }
+.map.active .node.off { opacity: .32; }
+.map.active .node.on rect { stroke: var(--flow); stroke-width: 2; }
+.map.active .node.group.on > rect { stroke: var(--flow); }
+.note { font-size: 11.5px; fill: var(--muted); }
+.e { fill: none; stroke: var(--flow); stroke-width: 2; opacity: 0; transition: opacity .2s; }
+.e.warn { stroke: var(--warn); stroke-dasharray: 6 4; }
+.e.back { stroke-dasharray: 3 4; }
+.badge { opacity: 0; transition: opacity .2s; }
+.badge circle { fill: var(--flow); }
+.badge.warn circle { fill: var(--warn); }
+.badge text { font-size: 11px; font-weight: 700; fill: var(--bg); text-anchor: middle; dominant-baseline: central; }
+.mk { fill: var(--flow); } .mk-w { fill: var(--warn); }
+.newmark { display: none; }
+.map[data-view="new"] .newmark { display: inline; }
+.newmark rect { fill: var(--flow); }
+.newmark text { font-size: 10.5px; font-weight: 700; fill: var(--bg); text-anchor: middle; dominant-baseline: central; }
+.newmark.gone rect { fill: var(--warn); }
+.map[data-view="new"] .old-only { display: none; }
+.map[data-view="new"] .node.removed rect { stroke-dasharray: 4 3; }
+.map[data-view="new"] .node.removed .t { text-decoration: line-through; fill: var(--muted); }
+.views { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.views button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.views button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); font-weight: 700; }
+.views button:focus-visible { outline: 2px solid var(--flow); outline-offset: 2px; }
+.views .hint { font-size: 13px; color: var(--muted); }
+.st { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--flow-soft); color: var(--flow); white-space: nowrap; vertical-align: 2px; }
+.st.keep { background: var(--warn-soft); color: var(--warn); }
+.map[data-flow="recall"] .f-recall, .map[data-flow="mcp"] .f-mcp, .map[data-flow="cleanup"] .f-cleanup, .map[data-flow="install"] .f-install { opacity: 1; }
+
+/* steps */
+.steps { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; display: grid; gap: 10px; }
+.steps ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; counter-increment: s; }
+.steps li::before { content: counter(s); width: 22px; height: 22px; border-radius: 50%; background: var(--flow); color: var(--bg); font-size: 12px; font-weight: 700; display: grid; place-items: center; margin-top: 2px; }
+.steps li.warn::before { background: var(--warn); }
+.steps li > span { min-width: 0; }
+.steps .who { font-size: 13px; color: var(--muted); }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 700; white-space: nowrap; }
+
+pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+.cmt { color: var(--muted); }
+.add { color: var(--flow); font-weight: 500; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.two > div { display: grid; gap: 8px; align-content: start; min-width: 0; }
+
+.gaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.gaps li { display: grid; grid-template-columns: 56px 1fr; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.gaps li > div { min-width: 0; display: grid; gap: 4px; }
+.gaps .code { font-family: var(--mono); font-size: 13px; color: var(--warn); font-weight: 500; }
+.pipe { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; counter-reset: p; }
+.pipe li { counter-increment: p; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--flow); border-radius: 6px; padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.pipe li::before { content: counter(p); font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--flow); }
+.pipe li.side { border-top-color: var(--warn); }
+.pipe li.side::before { content: "예외"; color: var(--warn); }
+.pipe b { font-size: 14px; }
+.pipe span { font-size: 13px; color: var(--muted); }
+.who-tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--flow-soft); color: var(--ink); white-space: nowrap; }
+.who-tag.lock { background: var(--warn-soft); }
+@media (max-width: 520px) { h1 { font-size: 25px; } .gaps li { grid-template-columns: 1fr; gap: 2px; } }
+@media (prefers-reduced-motion: reduce) { .e, .badge, .node { transition: none; } }
+</style>
+
+<div class="wrap">
+
+<header class="head">
+  <span class="eyebrow">vault · vault-builder · Claude Code</span>
+  <h1>Vault 구조 지도</h1>
+  <p class="lede">이 페이지는 두 부분입니다. 앞부분은 vault 하나의 폴더 구성과 지식이 쌓이는 순서를 설명합니다. 뒷부분은 vault 여러 개가 코드 저장소, 사용자 설정과 어떻게 연결되어 동작하는지 설명합니다. 2026-10-28 이 machine의 personal vault(<code>$HOME/vault</code>)와 vault-builder 코드를 기준으로 그렸습니다.</p>
+</header>
+
+<section>
+  <h2>vault 하나의 안</h2>
+  <p class="lede">vault는 markdown 파일로 된 wiki를 담은 git 저장소입니다. 폴더마다 쓰는 주체가 정해져 있습니다.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>폴더 · 파일</th><th>들어 있는 것</th><th>누가 쓰나</th></tr></thead>
+      <tbody>
+        <tr><td><code>raw/</code></td><td>원본 사본입니다. <code>sources/</code>에 문서 8개, <code>imports/claude-memory/</code>에 메모 사본, <code>assets/</code>에 첨부가 있습니다.</td><td><span class="who-tag lock">추가만 하고 바꾸지 않음</span></td></tr>
+        <tr><td><code>wiki/</code></td><td>검증을 통과한 지식입니다. 유형별 폴더에 페이지가 있습니다. 원본을 등록하는 <code>sources</code> 49개, <code>workflows</code> 22개, <code>decisions</code> 14개, <code>concepts</code> 13개, <code>systems</code> 9개, <code>maps</code> 8개, <code>comparisons</code> 3개, <code>timelines</code> 3개입니다.</td><td><span class="who-tag">publish-draft 명령만</span></td></tr>
+        <tr><td><code>wiki/index.md</code>, <code>log.md</code></td><td>전체 페이지 목록과 변경 기록입니다.</td><td><span class="who-tag">publish 때 함께 갱신</span></td></tr>
+        <tr><td><code>wiki/maps/</code></td><td>주제별 지도와 저장소별 요약 페이지(<code>maps/projects/&lt;id&gt;.md</code>)입니다.</td><td><span class="who-tag">maps build가 생성</span></td></tr>
+        <tr><td><code>scratch/</code></td><td><code>drafts/</code>는 LLM이 쓴 초안, <code>reports/</code>는 lint와 ingest 보고서, <code>review/</code>는 사람 판단을 기다리는 항목입니다.</td><td><span class="who-tag">agent, 도구</span></td></tr>
+        <tr><td><code>tools/wiki/</code></td><td><code>cli.py</code>(검증, publish, 검색 명령), <code>mcp_server.py</code>(같은 기능을 MCP 도구로 제공), <code>lib/</code>입니다.</td><td><span class="who-tag lock">vault-builder가 설치</span></td></tr>
+        <tr><td><code>.agents/skills/</code></td><td><code>wiki-ingest</code>, <code>wiki-update</code>, <code>wiki-query</code>, <code>memory-cleanup</code> 같은 작업 절차서입니다.</td><td><span class="who-tag lock">vault-builder가 설치</span></td></tr>
+        <tr><td><code>AGENTS.md</code>, <code>CLAUDE.md</code></td><td>agent가 지킬 규칙입니다. raw는 바꾸지 않고, 근거 없는 주장은 넣지 않으며, 검증 전 초안을 지식으로 쓰지 않습니다.</td><td><span class="who-tag lock">vault-builder가 설치</span></td></tr>
+        <tr><td><code>.vault-builder/manifest.json</code></td><td>설치된 파일과 vault 밖에 쓴 항목을 hash와 함께 적은 기록입니다.</td><td><span class="who-tag lock">install, migration만</span></td></tr>
+        <tr><td><code>.mcp.json</code></td><td>vault 폴더에서 연 세션에 <code>llm-wiki</code> MCP 서버를 등록합니다.</td><td><span class="who-tag lock">install, doctor가 생성</span></td></tr>
+        <tr><td><code>scripts/</code>, <code>.github/</code></td><td>release gate 스크립트와 CI입니다. 모든 검사를 한 번에 돌립니다.</td><td><span class="who-tag lock">vault-builder가 설치</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>지식이 쌓이는 순서</h3>
+  <ol class="pipe">
+    <li><b>원본 추가</b><span><code>raw/</code>에 문서나 메모 사본을 넣습니다.</span></li>
+    <li><b>원본 등록</b><span><code>ingest-source</code>가 hash를 계산해 <code>wiki/sources/</code>에 등록 페이지를 만듭니다.</span></li>
+    <li><b>초안 작성</b><span>LLM이 원본을 읽고 <code>scratch/drafts/</code>에 페이지 초안을 씁니다.</span></li>
+    <li><b>검증과 기록</b><span><code>publish-draft</code>가 frontmatter, 링크, 근거를 검사하고 통과하면 <code>wiki/</code>에 씁니다. <code>index.md</code>, <code>log.md</code>, <code>maps/</code>도 함께 갱신합니다.</span></li>
+    <li><b>commit</b><span><code>scripts/release_gate.sh</code>가 통과하면 git에 commit합니다.</span></li>
+    <li class="side"><b>모순 발견</b><span>기존 지식과 맞지 않으면 바로 고치지 않고 <code>scratch/review/</code>에 올려 사람이 판단합니다.</span></li>
+  </ol>
+</section>
+
+<section>
+  <h2>여러 vault를 묶는 규칙 네 가지</h2>
+  <div class="rules">
+    <div><b>규칙1</b><h3>vault 하나는 폴더 하나이자 git 저장소 하나입니다</h3><p>각 vault는 <code>tools/wiki</code> 사본, <code>wiki/</code>, <code>raw/</code>를 자기 폴더에 따로 가집니다.</p></div>
+    <div><b>규칙2</b><h3>MCP 서버 하나는 vault 하나만 다룹니다</h3><p>서버는 자기 파일 위치에서 두 단계 위 폴더를 vault로 봅니다(<code>mcp_server.py:11</code>). vault가 두 개면 서버도 두 개입니다.</p></div>
+    <div><b>규칙3</b><h3>vault를 묶는 파일은 <code>vault-map.json</code> 하나뿐입니다</h3><p>어떤 vault가 있는지, 어느 저장소가 어느 vault에 연결되는지를 이 파일만 알고 있습니다.</p></div>
+    <div><b>규칙4</b><h3>저장소 이름이 project id입니다</h3><p>git 최상위 폴더 이름(<code>sgp-981-app</code>)이 project id입니다. worktree에서도 원래 저장소 이름을 씁니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>한 장으로 보는 구조</h2>
+  <p class="lede">버튼을 누르면 그 동작이 지나가는 길과 순서가 표시됩니다. 번호는 아래 단계 목록과 같습니다.</p>
+  <div class="views" role="group" aria-label="구조 선택">
+    <button type="button" id="v-new" data-view="new" aria-pressed="true">지금 구조 (2026-10-29 설치)</button>
+    <button type="button" id="v-old" data-view="old" aria-pressed="false">이전 구조</button>
+    <span class="hint"><span class="st">구현됨</span> 표시가 이번 작업으로 바뀐 부분입니다. 새 구조는 이 Mac에 설치되어 동작하고 있습니다.</span>
+  </div>
+  <div class="flows" role="group" aria-label="동작 선택">
+    <button type="button" id="b-recall" data-flow="recall" aria-pressed="true">요약 불러오기 (/project-memory)</button>
+    <button type="button" id="b-mcp" data-flow="mcp" aria-pressed="false">wiki 도구 호출 (MCP)</button>
+    <button type="button" id="b-cleanup" data-flow="cleanup" aria-pressed="false">메모 정리 (memory-cleanup)</button>
+    <button type="button" id="b-install" data-flow="install" aria-pressed="false">설치 (install)</button>
+  </div>
+
+  <div class="map-box">
+    <svg class="map active" id="map" data-flow="recall" data-view="new" viewBox="0 0 1000 560" role="img" aria-label="vault, 사용자 설정, 코드 저장소 사이의 연결 구조">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+        <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-w" d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+
+      <rect class="zone za" x="20" y="34" width="270" height="390" rx="10"/>
+      <text class="zl" x="36" y="58">코드 저장소</text>
+      <rect class="zone zb" x="330" y="34" width="300" height="390" rx="10"/>
+      <text class="zl" x="346" y="58">사용자 설정 · machine에 하나</text>
+      <rect class="zone zc" x="670" y="34" width="310" height="390" rx="10"/>
+      <text class="zl" x="686" y="58">vault 폴더 · vault마다 하나</text>
+
+      <g class="node" data-f="recall mcp"><rect x="40" y="90" width="230" height="70" rx="7"/><text class="t m" x="54" y="118">sgp-981-app</text><text class="s" x="54" y="140">코드 저장소에서 연 Claude 세션</text></g>
+      <g class="node" data-f=""><rect x="40" y="180" width="230" height="56" rx="7"/><text class="t" x="54" y="203">bake, vault-builder 등</text><text class="s" x="54" y="223">같은 방식으로 연결된 저장소</text></g>
+      <text class="note" x="40" y="268">project id = git 최상위 폴더 이름</text>
+      <text class="note" x="40" y="288">연결된 저장소 5개: sgp-981-app, bake,</text>
+      <text class="note" x="40" y="306">vault-builder, vault-graph, 981park-flutter-app</text>
+
+      <g class="node" data-f="install recall cleanup"><rect x="350" y="90" width="260" height="60" rx="7"/><text class="t m" x="364" y="116">vault-map.json</text><text class="s swap" x="364" y="137" data-old="vault 목록, 저장소와 vault의 연결" data-new="version 2, remote 추가, link 명령이 씀">vault 목록, 저장소와 vault의 연결</text><g class="newmark"><rect x="548" y="96" width="54" height="18" rx="9"/><text x="575" y="105">구현됨</text></g></g>
+      <g class="node" data-f="install recall"><rect x="350" y="165" width="260" height="60" rx="7"/><text class="t m" x="364" y="191">skills/project-memory</text><text class="s swap" x="364" y="212" data-old="recall.sh가 요약을 읽어 출력" data-new="recall.sh: 경로, remote, 이름 순서로 찾기">recall.sh가 요약을 읽어 출력</text><g class="newmark"><rect x="548" y="171" width="54" height="18" rx="9"/><text x="575" y="180">구현됨</text></g></g>
+      <g class="node" data-f="install mcp"><rect x="350" y="240" width="260" height="60" rx="7"/><text class="t m" x="364" y="266">~/.claude.json</text><text class="s swap" x="364" y="287" data-old="llm-wiki-personal 서버 등록" data-new="llm-wiki 하나 → llm_wiki_router.py">llm-wiki-personal 서버 등록</text><g class="newmark"><rect x="548" y="246" width="54" height="18" rx="9"/><text x="575" y="255">구현됨</text></g></g>
+      <g class="node" data-f="cleanup"><rect x="350" y="315" width="260" height="60" rx="7"/><text class="t m" x="364" y="341">projects/&lt;key&gt;/memory</text><text class="s" x="364" y="362">Claude가 쓴 L1 메모, 읽기만 함</text></g>
+
+      <g class="node group" data-f="install recall mcp cleanup"><rect x="690" y="72" width="272" height="238" rx="8"/><text class="t" x="704" y="94">personal vault · $HOME/vault</text></g>
+      <g class="node" data-f="install mcp cleanup"><rect x="705" y="108" width="240" height="42" rx="6"/><text class="t m" x="717" y="126">tools/wiki</text><text class="s swap" x="717" y="143" data-old="mcp_server.py, cli.py" data-new="라우터가 호출마다 cli.py 실행">mcp_server.py, cli.py</text><g class="newmark"><rect x="885" y="112" width="54" height="18" rx="9"/><text x="912" y="121">구현됨</text></g></g>
+      <g class="node" data-f="recall mcp cleanup"><rect x="705" y="158" width="240" height="42" rx="6"/><text class="t m" x="717" y="176">wiki/</text><text class="s" x="717" y="193">maps/projects/&lt;id&gt;.md 요약</text></g>
+      <g class="node" data-f="cleanup"><rect x="705" y="208" width="240" height="42" rx="6"/><text class="t m" x="717" y="226">raw/</text><text class="s" x="717" y="243">원본 사본, 바꾸지 않음</text></g>
+      <g class="node" id="n-mcpjson" data-f="install mcp" data-f-new=""><rect x="705" y="258" width="240" height="42" rx="6"/><text class="t m" x="717" y="276">.mcp.json</text><text class="s swap" x="717" y="293" data-old="llm-wiki, vault 폴더 세션 전용" data-new="만들지 않음, 중복 등록 제거">llm-wiki, vault 폴더 세션 전용</text><g class="newmark gone"><rect x="885" y="262" width="54" height="18" rx="9"/><text x="912" y="271">제거됨</text></g></g>
+      <g class="node ghost" data-f=""><rect x="690" y="326" width="272" height="78" rx="8"/><text class="t" x="704" y="352">team vault (예시, 아직 없음)</text><text class="s" x="704" y="374">같은 구조, 자기 MCP 서버</text><text class="s" x="704" y="392">변경은 PR로만</text></g>
+
+      <g class="node" data-f="install"><rect x="20" y="460" width="400" height="76" rx="8"/><text class="t" x="36" y="490">vault-builder checkout</text><text class="s swap" x="36" y="514" data-old="install, doctor, uninstall 명령으로 위 파일을 만들고 기록" data-new="install, doctor, uninstall에 link, unlink, list 추가">install, doctor, uninstall 명령으로 위 파일을 만들고 기록</text><g class="newmark"><rect x="356" y="468" width="54" height="18" rx="9"/><text x="383" y="477">구현됨</text></g></g>
+      <g class="node ghost" data-f=""><rect x="580" y="460" width="400" height="76" rx="8"/><text class="t" x="596" y="490">vault-graph (별도 repo)</text><text class="s" x="596" y="514">여러 vault 통합 검색을 구현 중, 아직 연결 안 됨</text></g>
+
+      <!-- recall -->
+      <path class="e f-recall" d="M270 125 C310 125 310 195 348 195" marker-end="url(#ar)"/>
+      <path class="e f-recall" d="M610 188 C645 188 645 120 612 120" marker-end="url(#ar)"/>
+      <path class="e f-recall" d="M610 202 C660 202 660 179 703 179" marker-end="url(#ar)"/>
+      <path class="e back f-recall" d="M350 212 C295 212 295 145 272 145" marker-end="url(#ar)"/>
+      <g class="badge f-recall"><circle cx="310" cy="160" r="9"/><text x="310" y="160">1</text></g>
+      <g class="badge f-recall"><circle cx="636" cy="154" r="9"/><text x="636" y="154">3</text></g>
+      <g class="badge f-recall"><circle cx="659" cy="190" r="9"/><text x="659" y="190">4</text></g>
+      <g class="badge f-recall"><circle cx="299" cy="182" r="9"/><text x="299" y="182">5</text></g>
+
+      <!-- mcp -->
+      <path class="e f-mcp" d="M270 152 C315 152 305 270 348 270" marker-end="url(#ar)"/>
+      <path class="e f-mcp" d="M610 270 C662 270 655 129 703 129" marker-end="url(#ar)"/>
+      <path class="e f-mcp" d="M945 129 C968 129 968 179 947 179" marker-end="url(#ar)"/>
+      <path class="e warn f-mcp old-only" d="M705 279 C682 279 682 136 703 136" marker-end="url(#arw)"/>
+      <g class="badge f-mcp"><circle cx="310" cy="211" r="9"/><text x="310" y="211">1</text></g>
+      <g class="badge f-mcp"><circle cx="658" cy="200" r="9"/><text x="658" y="200">2</text></g>
+      <g class="badge f-mcp"><circle cx="962" cy="154" r="9"/><text x="962" y="154">3</text></g>
+      <g class="badge warn f-mcp old-only"><circle cx="688" cy="208" r="9"/><text x="688" y="208">4</text></g>
+
+      <!-- cleanup -->
+      <path class="e f-cleanup" d="M610 112 C655 112 660 120 703 120" marker-end="url(#ar)"/>
+      <path class="e f-cleanup" d="M610 345 C660 345 660 229 703 229" marker-end="url(#ar)"/>
+      <path class="e f-cleanup" d="M945 229 C968 229 968 186 947 186" marker-end="url(#ar)"/>
+      <g class="badge f-cleanup"><circle cx="657" cy="116" r="9"/><text x="657" y="116">2</text></g>
+      <g class="badge f-cleanup"><circle cx="659" cy="287" r="9"/><text x="659" y="287">3</text></g>
+      <g class="badge f-cleanup"><circle cx="962" cy="207" r="9"/><text x="962" y="207">5</text></g>
+
+      <!-- install -->
+      <path class="e f-install" d="M260 460 C260 300 300 120 348 120" marker-end="url(#ar)"/>
+      <path class="e f-install" d="M300 460 C300 330 315 195 348 195" marker-end="url(#ar)"/>
+      <path class="e f-install" d="M340 460 C340 360 330 270 348 270" marker-end="url(#ar)"/>
+      <path class="e f-install" d="M420 490 C560 490 640 400 730 312" marker-end="url(#ar)"/>
+      <g class="badge f-install"><circle cx="312" cy="279" r="9"/><text x="312" y="279">3</text></g>
+      <g class="badge f-install"><circle cx="594" cy="434" r="9"/><text x="594" y="434">2</text></g>
+    </svg>
+  </div>
+
+  <div class="steps" id="steps" aria-live="polite"></div>
+</section>
+
+<section>
+  <h2>무엇이 vault마다 있고, 무엇이 하나인가</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>개수</th><th>항목</th><th>설명</th></tr></thead>
+      <tbody>
+        <tr><td>vault마다 하나</td><td>폴더와 git 저장소, <code>tools/wiki</code> 사본, <code>wiki/</code>, <code>raw/</code>, manifest</td><td>vault끼리 파일을 공유하지 않습니다.</td></tr>
+        <tr><td>machine에 하나 <span class="st">구현됨</span></td><td>MCP 서버 (<code>llm-wiki</code>)</td><td>새 구조에서는 <code>~/.claude.json</code>에 항목이 하나만 있고, 라우터 하나가 모든 vault를 다룹니다. 지금 이 Mac에 설치된 옛 구조에서는 vault마다 <code>llm-wiki-&lt;이름&gt;</code> 항목이 하나씩 생깁니다.</td></tr>
+        <tr><td>vault마다 하나</td><td>저장소별 요약 페이지 <code>wiki/maps/projects/&lt;id&gt;.md</code></td><td>같은 저장소라도 vault마다 요약이 따로 있습니다.</td></tr>
+        <tr><td>machine에 하나</td><td><code>vault-map.json</code></td><td>vault 목록과 저장소 연결을 한곳에 둡니다. 새 구조에서는 version 2이고 저장소마다 <code>remote</code>를 기록합니다. <span class="st">구현됨</span></td></tr>
+        <tr><td>machine에 하나 <span class="st">구현됨</span></td><td>라우터 <code>~/.claude/vault-builder/llm_wiki_router.py</code></td><td>MCP 서버 프로그램입니다. 호출마다 대상 vault의 <code>cli.py</code>를 실행하고 상태를 두지 않습니다.</td></tr>
+        <tr><td>machine에 하나</td><td><code>/project-memory</code> skill과 <code>recall.sh</code></td><td>연결된 vault를 모두 돌며 요약을 모아 출력합니다.</td></tr>
+        <tr><td>저장소마다 하나</td><td>project id, <code>vault-map.json</code>의 <code>projects</code> 항목</td><td>이 저장소가 어느 vault를 쓰는지 적습니다. 옛 구조에서는 사람이 직접 추가하고, 새 구조에서는 <code>link</code> 명령으로 추가합니다. <span class="st">구현됨</span></td></tr>
+        <tr><td>저장소마다 하나</td><td>L1 메모 폴더 <code>~/.claude/projects/&lt;key&gt;/memory/</code></td><td>Claude Code가 쓰고, 정리 skill은 읽기만 합니다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>vault-map.json 실제 내용</h2>
+  <p class="lede">이 machine의 파일입니다. 홈 경로는 <code>$HOME</code>으로 바꿨고, 저장소 5개 중 2개만 보여줍니다.</p>
+<pre>{
+  "version": 1,
+  "vaults": {
+    "personal": { "path": "$HOME/vault", "role": "personal" }   <span class="cmt">← vault 이름, 위치, 역할</span>
+  },
+  "projects": {
+    "sgp-981-app":   { "root": "$HOME/workspace/sgp-981-app",   "vaults": ["personal"] },   <span class="cmt">← 이 저장소가 쓰는 vault</span>
+    "vault-graph":   { "root": "$HOME/workspace/vault-graph",   "vaults": ["personal"] }
+    <span class="cmt">… bake, vault-builder, 981park-flutter-app</span>
+  }
+}</pre>
+</section>
+
+<section>
+  <h2>vault를 하나 더 붙이면</h2>
+  <p class="lede">team vault를 추가해 <code>sgp-981-app</code>에 연결한다고 가정한 예시입니다. 지금은 personal vault 하나만 있습니다.</p>
+  <div class="two">
+    <div>
+      <h3>설정에 생기는 변화</h3>
+<pre>"vaults": {
+  "personal": { ... },
+  <span class="add">"team": { "path": "$HOME/team-vault", "role": "team" }</span>
+},
+"projects": {
+  "sgp-981-app": { ..., "vaults": ["personal", <span class="add">"team"</span>] }
+}
+
+<span class="cmt">~/.claude.json mcpServers</span>
+  llm-wiki-personal → $HOME/vault/tools/wiki/mcp_server.py
+  <span class="add">llm-wiki-team     → $HOME/team-vault/tools/wiki/mcp_server.py</span></pre>
+    </div>
+    <div>
+      <h3>동작에 생기는 변화</h3>
+      <div class="tbl"><table>
+        <tbody>
+          <tr><td>/project-memory</td><td>vault마다 블록이 하나씩 출력됩니다. <code># vault personal: ...</code> 다음에 <code># vault team: ...</code>. 전체 1,500 token 안에서 vault끼리 나눠 씁니다.</td></tr>
+          <tr><td>MCP 검색</td><td>옛 구조에서는 서버가 두 개가 되어 서버마다 따로 검색해야 합니다. 새 구조에서는 서버가 하나이고, 저장소에 두 vault가 연결되어 있으면 한 번의 검색으로 둘 다 찾습니다. <span class="st">구현됨</span></td></tr>
+          <tr><td>메모 정리</td><td>메모를 역할에 따라 나눕니다. 팀이 합의한 내용은 team vault로 가고 PR로만 반영합니다.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>지금 구조에서 안 되는 것</h2>
+  <ul class="gaps">
+    <li><span class="code">한계0</span><div><h3>install이 MCP를 등록하는 방식에 문제가 여섯 가지 있습니다 <span class="st">구현으로 해결</span></h3><p>같은 서버를 두 곳에 등록합니다(<code>installing.py:528</code>, <code>:570</code>). doctor는 지워진 <code>.mcp.json</code>을 다시 만들고(<code>uninstalling.py:642-680</code>), user scope 항목의 interpreter는 검사하지 않습니다(<code>uninstalling.py:591-604</code>). interpreter 경로는 <code>python@3.12</code>처럼 특정 버전에 고정됩니다. 쓰기 도구가 모든 세션에 노출되고, install이 <code>~/.claude.json</code> 전체를 다시 씁니다.</p></div></li>
+    <li><span class="code">한계1</span><div><h3>여러 vault를 한 번에 검색하지 못합니다 <span class="st">닿는 vault 검색 구현됨</span></h3><p>MCP 서버가 vault마다 따로 떠 있어서 결과를 합쳐 주는 곳이 없습니다. 별도 repo인 vault-graph가 이 일을 하도록 만들어지고 있지만 아직 연결되지 않았습니다.</p></div></li>
+    <li><span class="code">한계2</span><div><h3>vault 폴더 세션에서 같은 도구가 두 번 보입니다 <span class="st">구현으로 해결</span></h3><p>위 지도의 MCP 동작 4번입니다. 같은 서버를 <code>.mcp.json</code>과 <code>~/.claude.json</code>이 각각 등록하기 때문입니다.</p></div></li>
+    <li><span class="code">한계3</span><div><h3>쓰기 도구가 모든 저장소 세션에 보입니다 <span class="st keep">의도한 동작으로 유지 (W1)</span></h3><p>user scope 등록은 검색 도구뿐 아니라 <code>wiki_publish_draft</code> 같은 쓰기 도구도 모든 세션에 보여줍니다.</p></div></li>
+    <li><span class="code">한계4</span><div><h3>요약에는 그 저장소 페이지만 나옵니다</h3><p>요약 페이지는 <code>project</code> 값이 그 저장소 id인 페이지만 모읍니다. 여러 저장소에 공통인 규칙은 검색으로 찾아야 합니다.</p></div></li>
+    <li><span class="code">한계5</span><div><h3>저장소를 폴더 이름만으로 찾고, 연결은 손으로 합니다 <span class="st">구현으로 해결</span></h3><p><code>recall.sh</code>는 <code>project_id = root.name</code>으로 찾습니다. 그래서 이름이 같은 저장소의 기억이 섞이고, 폴더 이름을 바꾸면 연결이 끊깁니다. 연결하려면 <code>vault-map.json</code>을 직접 고쳐야 합니다.</p></div></li>
+  </ul>
+</section>
+
+<section>
+  <h2>바뀐 구조 (main 병합, 이 Mac 설치 완료)</h2>
+  <p class="lede">위 규칙 네 가지를 다시 검토한 결과입니다. 규칙1과 규칙3은 유지하고, 규칙2와 규칙4는 바꿉니다. 2026-10-29에 구현을 마치고 main에 병합했습니다(<code>a843778</code>). 테스트 582개와 release gate를 통과했고, 리뷰 판정은 Ready to merge입니다. 같은 날 이 Mac에도 새로 설치했습니다. doctor가 통과했고, <code>llm-wiki</code> 서버 하나만 연결되어 있으며, uninstall 뒤 남는 파일이 없고 재설치하면 처음 상태로 돌아오는 것까지 확인했습니다.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>규칙</th><th>지금</th><th>바뀐 뒤</th></tr></thead>
+      <tbody>
+        <tr><td>규칙1</td><td>vault 하나는 폴더 하나이자 git 저장소 하나입니다. 도구 사본도 vault마다 하나입니다.</td><td>유지합니다. 도구 사본은 vault 안의 CI와 release gate가 쓰므로 그대로 둡니다.</td></tr>
+        <tr><td>규칙2</td><td>MCP 서버 하나가 vault 하나만 다룹니다. 등록은 <code>.mcp.json</code>과 <code>~/.claude.json</code> 두 곳에 합니다.</td><td>사용자 단위 서버 하나를 <code>~/.claude.json</code>에 한 번만 등록합니다. 서버는 <code>vault-map.json</code>을 읽고 요청마다 대상 vault의 <code>tools/wiki/cli.py</code>를 실행합니다. 서버는 상태를 두지 않고, 호출마다 지도를 다시 읽고 대상 vault의 CLI를 <code>-I -B</code> 옵션으로 새로 실행합니다. 읽기와 검색은 이 세션이 닿는 vault(세션 vault, 또는 저장소에 연결된 vault)만 대상으로 합니다. 쓰기는 <code>vault</code> 인자를 반드시 받고, team vault를 포함해 어떤 vault에도 쓸 수 있으며, 경로는 그 vault 안의 상대 경로만 받습니다.</td></tr>
+        <tr><td>규칙3</td><td><code>vault-map.json</code>이 vault를 묶는 유일한 파일입니다. 저장소 연결은 손으로 합니다.</td><td>파일은 그대로 기준으로 둡니다. <code>link</code>, <code>unlink</code>, <code>list</code> 명령으로 연결합니다.</td></tr>
+        <tr><td>규칙4</td><td>폴더 이름이 project id입니다.</td><td><code>root</code> 경로, git remote URL, 폴더 이름 순서로 찾습니다. project id는 페이지의 <code>project:</code> 값으로만 씁니다.</td></tr>
+        <tr><td>설치와 제거</td><td>install은 서버를 두 번 등록하고, doctor는 <code>.mcp.json</code>을 다시 만듭니다.</td><td>install은 서버를 한 번만 등록하고 <code>.mcp.json</code>은 만들지 않습니다. doctor는 서버를 실제로 띄워 동작을 확인합니다. uninstall은 마지막 vault를 제거할 때 서버 등록과 공용 파일까지 지웁니다. uninstall한 vault는 install 하나로 다시 설치됩니다. interpreter는 patch 번호가 없는 경로로 고릅니다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  var STEPS = {
+    recall: { title: '요약 불러오기: sgp-981-app 세션에서 /project-memory를 부를 때', items: [
+      ['skill이 <code>recall.sh</code>를 실행합니다.', '사용자가 부르거나, spec을 쓸 때 Claude가 스스로 부릅니다.'],
+      ['<code>recall.sh</code>가 git 최상위 폴더 이름으로 project id <code>sgp-981-app</code>를 정합니다.', '지도에는 화살표가 없는 단계입니다.'],
+      ['<code>vault-map.json</code>에서 <code>sgp-981-app</code>에 연결된 vault 목록(<code>personal</code>)과 그 경로를 읽습니다.', ''],
+      ['각 vault의 <code>wiki/maps/projects/sgp-981-app.md</code>에서 Open Work, Current Decisions, Corrections and Rules 섹션을 읽습니다.', 'MCP 서버를 거치지 않고 파일을 직접 읽습니다.'],
+      ['vault마다 <code># vault personal: ...</code> 블록으로 세션에 출력합니다.', '섹션당 750 token, 전체 1,500 token을 넘으면 자릅니다.']
+    ]},
+    mcp: { title: 'wiki 도구 호출: Claude가 wiki_search 같은 도구를 쓸 때', items: [
+      ['세션이 시작되면 Claude Code가 <code>~/.claude.json</code>의 <code>llm-wiki-personal</code> 항목을 읽고 서버를 띄웁니다.', 'user scope라서 어느 저장소 세션에서나 뜹니다.'],
+      ['서버 프로그램은 <code>$HOME/vault/tools/wiki/mcp_server.py</code>입니다.', '자기 파일 위치에서 두 단계 위 폴더를 vault로 보므로, 이 서버는 personal vault만 다룹니다.'],
+      ['<code>wiki_search</code>, <code>wiki_read_page</code>, <code>wiki_publish_draft</code> 같은 도구가 그 vault의 <code>wiki/</code>를 읽고 씁니다.', ''],
+      ['vault 폴더에서 세션을 열면 <code>.mcp.json</code>의 <code>llm-wiki</code>도 같은 서버를 하나 더 띄웁니다.', '그래서 vault 폴더 세션에서는 같은 도구가 두 번 보입니다.', 'warn'],
+      ['vault가 여러 개면 <code>llm-wiki-&lt;이름&gt;</code> 서버도 vault 수만큼 뜹니다.', '서버끼리는 서로 모르므로 여러 vault를 한 번에 검색하는 도구는 없습니다.']
+    ]},
+    cleanup: { title: '메모 정리: vault 폴더 세션에서 memory-cleanup을 요청할 때', items: [
+      ['vault 폴더에서 Claude 세션을 열고 메모 정리를 요청합니다.', '정리는 vault 안에서만 합니다.'],
+      ['<code>memory-scan</code>이 <code>vault-map.json</code>에서 이 vault에 연결된 저장소 목록을 읽습니다.', ''],
+      ['각 저장소의 L1 메모 <code>~/.claude/projects/&lt;key&gt;/memory/</code>를 읽기만 합니다.', '이미 가져온 메모는 hash로 확인해 건너뜁니다.'],
+      ['메모마다 보낼 vault를 역할로 고릅니다.', '프로젝트 결정은 project vault, 팀 합의는 team vault(PR), 그 밖은 personal vault로 보냅니다. 지금은 personal뿐입니다.'],
+      ['원본을 <code>raw/imports/claude-memory/</code>에 그대로 복사하고, 검증을 거쳐 wiki 페이지로 publish합니다.', '마지막에 <code>maps build</code>가 저장소별 요약 페이지를 다시 만듭니다.']
+    ]},
+    install: { title: '설치: vault-builder에서 install을 실행할 때', items: [
+      ['Claude Code를 모두 종료하고 터미널에서 <code>python3 tools/vault_migration/cli.py install $HOME/vault --name personal</code>을 실행합니다.', ''],
+      ['vault 안에 <code>tools/</code>, wiki skill, AGENTS.md 같은 관리 파일과 <code>.mcp.json</code>(<code>llm-wiki</code>)을 만듭니다.', ''],
+      ['vault 밖에 세 가지를 씁니다.', '<code>vault-map.json</code>에 vault를 추가하고, <code>~/.claude/skills/project-memory</code>를 설치하고, <code>~/.claude.json</code>에 <code>llm-wiki-personal</code>을 등록합니다.'],
+      ['vault 밖에 쓴 항목을 hash와 함께 vault의 manifest에 기록합니다.', 'uninstall과 doctor가 이 기록을 보고 지우거나 점검합니다.'],
+      ['저장소 연결은 사람이 직접 합니다.', '<code>vault-map.json</code>의 <code>projects</code>에 저장소와 vault 목록을 추가합니다.']
+    ]}
+  };
+  var map = document.getElementById('map');
+  var steps = document.getElementById('steps');
+  var nodes = Array.prototype.slice.call(map.querySelectorAll('.node'));
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('.flows button'));
+  var STEPS_NEW = {
+    recall: { title: '요약 불러오기 (구현된 새 구조)', items: [
+      ['skill이 <code>recall.sh</code>를 실행합니다.', '사용자가 부르거나, spec을 쓸 때 Claude가 스스로 부릅니다.'],
+      ['<code>recall.sh</code>가 저장소를 root 경로, git remote, 폴더 이름 순서로 찾습니다.', '한 단계에서 둘 이상 맞으면 추측하지 않고 멈춥니다. 폴더 이름을 바꾸거나 다른 이름으로 clone해도 연결이 유지됩니다.', 'new'],
+      ['<code>vault-map.json</code>(version 2)에서 연결된 vault 목록과 경로를 읽습니다.', ''],
+      ['각 vault의 <code>wiki/maps/projects/&lt;id&gt;.md</code>에서 섹션을 읽습니다.', 'MCP 서버를 거치지 않고 파일을 직접 읽습니다.'],
+      ['vault마다 블록으로 출력합니다. 연결되지 않은 저장소면 이유 한 줄과 <code>link</code> 명령 한 줄을 출력합니다.', '섹션당 750 token, 전체 1,500 token을 넘으면 자릅니다.', 'new']
+    ]},
+    mcp: { title: 'wiki 도구 호출 (구현된 새 구조)', items: [
+      ['세션이 시작되면 Claude Code가 <code>~/.claude.json</code>의 <code>llm-wiki</code> 항목 하나를 읽고 라우터를 띄웁니다.', '라우터 파일은 <code>~/.claude/vault-builder/llm_wiki_router.py</code>입니다. vault 폴더 세션이든 저장소 세션이든 서버는 하나입니다.', 'new'],
+      ['라우터는 상태를 두지 않습니다. 호출마다 <code>vault-map.json</code>을 다시 읽고 대상 vault의 <code>tools/wiki/cli.py</code>를 <code>-I -B</code> 옵션으로 새 프로세스에서 실행합니다.', '각 vault는 자기 도구 버전으로 검사받습니다. <code>link</code> 결과는 서버를 다시 시작하지 않아도 다음 호출부터 적용됩니다.', 'new'],
+      ['읽기와 검색은 이 세션이 닿는 vault(세션 vault, 또는 저장소에 연결된 vault)만 대상으로 하고, 결과에 vault 이름을 붙입니다.', '쓰기는 <code>vault</code> 인자를 반드시 받고 어떤 vault에나 쓸 수 있습니다. publish-draft 검증이 막습니다.', 'new'],
+      ['경로 인자는 고른 vault 안의 상대 경로만 받습니다. 호출마다 stderr에 로그 한 줄을 남깁니다.', '로그에는 인자 값을 쓰지 않습니다.', 'new'],
+      ['vault가 늘어도 서버는 하나입니다. vault 폴더 세션에서 도구가 두 번 보이던 문제는 없어집니다.', '', 'new']
+    ]},
+    cleanup: { title: '메모 정리 (구현된 새 구조)', items: [
+      ['vault 폴더에서 Claude 세션을 열고 메모 정리를 요청합니다.', '정리는 vault 안에서만 합니다.'],
+      ['<code>memory-scan</code>이 <code>vault-map.json</code>에서 이 vault에 연결된 저장소 목록을 읽습니다.', '<code>--repo PATH</code>를 주면 recall과 같은 규칙(경로, remote, 이름)으로 저장소를 찾습니다.', 'new'],
+      ['각 저장소의 L1 메모를 읽기만 합니다.', '이미 가져온 메모는 hash로 확인해 건너뜁니다.'],
+      ['메모마다 보낼 vault를 역할로 고릅니다.', '지금은 personal뿐입니다.'],
+      ['원본을 <code>raw/imports/claude-memory/</code>에 복사하고, 검증을 거쳐 wiki 페이지로 publish합니다.', '마지막에 <code>maps build</code>가 저장소별 요약 페이지를 다시 만듭니다.']
+    ]},
+    install: { title: '설치 (구현된 새 구조)', items: [
+      ['Claude Code를 모두 종료하고 터미널에서 <code>install $HOME/vault --name personal</code>을 실행합니다.', 'interpreter는 patch 번호가 없는 경로로 고릅니다.', 'new'],
+      ['vault 안에는 관리 파일만 만들고 <code>.mcp.json</code>은 만들지 않습니다.', 'uninstall 뒤 vault(manifest 없음)도 받아서 빠진 파일을 다시 만듭니다.', 'new'],
+      ['vault 밖에 <code>vault-map.json</code>(version 2), project-memory skill, 라우터 파일, <code>~/.claude.json</code>의 <code>llm-wiki</code> 항목 하나를 씁니다.', '두 번째 vault부터는 <code>~/.claude.json</code>을 다시 쓰지 않습니다.', 'new'],
+      ['vault 밖에 쓴 항목을 manifest에 기록합니다.', 'uninstall은 마지막 vault에서 서버 항목과 공용 파일을 모두 지웁니다. doctor는 파일을 쓰지 않고 서버를 실제로 띄워 확인합니다.', 'new'],
+      ['저장소 연결은 <code>link personal --repo &lt;저장소&gt;</code> 명령으로 합니다.', '<code>unlink</code>로 끊고 <code>list</code>로 확인합니다.', 'new']
+    ]}
+  };
+  var view = 'new';
+  var swaps = Array.prototype.slice.call(map.querySelectorAll('.swap'));
+  var views = Array.prototype.slice.call(document.querySelectorAll('.views button'));
+  var current = 'recall';
+  function setView(v) {
+    view = v;
+    map.setAttribute('data-view', v);
+    swaps.forEach(function (t) { t.textContent = t.getAttribute(v === 'new' ? 'data-new' : 'data-old'); });
+    var mj = document.getElementById('n-mcpjson');
+    mj.classList.toggle('removed', v === 'new');
+    views.forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.view === v ? 'true' : 'false'); });
+    show(current);
+  }
+  views.forEach(function (b) { b.addEventListener('click', function () { setView(b.dataset.view); }); });
+  function show(flow) {
+    current = flow;
+    map.setAttribute('data-flow', flow);
+    nodes.forEach(function (n) {
+      var attr = (view === 'new' && n.hasAttribute('data-f-new')) ? 'data-f-new' : 'data-f';
+      var on = (' ' + n.getAttribute(attr) + ' ').indexOf(' ' + flow + ' ') >= 0;
+      n.classList.toggle('on', on); n.classList.toggle('off', !on);
+    });
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.flow === flow ? 'true' : 'false'); });
+    var s = (view === 'new' ? STEPS_NEW : STEPS)[flow];
+    steps.innerHTML = '<h3>' + s.title + '</h3><ol>' + s.items.map(function (it) {
+      var cls = it[2] === 'new' ? '' : (it[2] ? ' class="warn"' : '');
+      var tag = it[2] === 'new' ? ' <span class="st">구현됨</span>' : '';
+      return '<li' + cls + '><span>' + it[0] + tag + (it[1] ? '<br><span class="who">' + it[1] + '</span>' : '') + '</span></li>';
+    }).join('') + '</ol>';
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.flow); }); });
+  setView('new');
+})();
+</script>
+</body></html>
