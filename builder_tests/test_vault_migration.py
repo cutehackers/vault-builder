@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable
 from unittest import mock
 
+from builder_tests import test_llm_wiki_router as _router_tests
 from tools.vault_migration import cli
 from tools.vault_migration import applying
 from tools.vault_migration import installing
@@ -76,6 +77,19 @@ def tearDownModule() -> None:
             os.environ[key] = value
     if _MODULE_HOME is not None:
         _MODULE_HOME.cleanup()
+
+
+def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
+    """Run the router tests (builder_tests/test_llm_wiki_router.py) with this file.
+
+    The release gate runs only this file. The router tests come first as one block, so the router
+    module's own setUpModule (temporary HOME, template vault) runs once and is not interleaved with
+    this module's fixtures. loader.loadTestsFromModule applies the same -k patterns.
+    """
+    suite = unittest.TestSuite()
+    suite.addTests(loader.loadTestsFromModule(_router_tests))
+    suite.addTests(tests)
+    return suite
 
 
 def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -8452,3 +8466,351 @@ class LinkingTests(unittest.TestCase):
                 self.assertEqual(1, result.returncode, result.stdout + result.stderr)
                 self.assertIn("Run install first", result.stderr)
                 self.assertFalse(self.vault_map.exists())
+
+
+_ROUTER = _router_tests.router
+_VAULT_MAP_SEVERAL_IDS = re.compile(r"by \w+: ([^;]+?)(?:;|\. \(vault map|\.$)", re.MULTILINE)
+_RECALL_PAGE_ID = re.compile(r"wiki/maps/projects/(.+?)\.md")
+
+
+def _several(text: str) -> tuple[str, ...]:
+    match = _VAULT_MAP_SEVERAL_IDS.search(text)
+    assert match is not None, text
+    return tuple(sorted(item.strip() for item in match.group(1).split(",")))
+
+
+class _ProjectLookupCase(_UserHomeTestCase):
+    """Runs the three project lookups on one link config (spec 4.3, decision 36).
+
+    Each answer is ("found", id, relink line shown), ("none",), ("several", ids), or ("damaged",).
+    The link config names this checkout as vault "builder", because memory-scan --repo runs from
+    tools/wiki/cli.py here and needs the project linked to the vault it runs in.
+    """
+
+    def setUp(self):
+        super().setUp()
+        ceiling = mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)})
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
+        self.vault_map_path = self.config / "vault-builder" / "vault-map.json"
+        self.recall_script = _materialize_recall_script(
+            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
+        )
+
+    def _write_vault_map(self, projects: dict[str, dict[str, object]], version: object = 2) -> None:
+        data: dict[str, object] = {
+            "vaults": {"builder": {"path": str(ROOT), "role": "personal"}},
+            "projects": {key: {**entry, "vaults": ["builder"]} for key, entry in projects.items()},
+        }
+        if version is not None:
+            data["version"] = version
+        self.vault_map_path.parent.mkdir(parents=True, exist_ok=True)
+        self.vault_map_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def _repo(self, path: Path, origin: str | None = None) -> Path:
+        repo = _init_git_repo(path)
+        if origin is not None:
+            _git(repo, "remote", "add", "origin", origin)
+        return repo
+
+    def _router_answer(self, start: Path) -> tuple[object, ...]:
+        try:
+            data = _ROUTER.read_vault_map(self.vault_map_path)
+        except _ROUTER.VaultMapError:
+            return ("damaged",)
+        found = _ROUTER.find_project(start, data)
+        if isinstance(found, _ROUTER.Stop):
+            return ("several", tuple(sorted(found.ids))) if found.ids else ("none",)
+        return ("found", found.project_id, found.note is not None)
+
+    def _recall_answer(self, start: Path) -> tuple[object, ...]:
+        result = subprocess.run(
+            [str(self.recall_script), "open"],
+            cwd=start,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=60,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        output = result.stdout
+        if "is damaged" in output:
+            return ("damaged",)
+        if "Several projects" in output:
+            return ("several", _several(output))
+        if "is not linked to a project" in output or "is not inside a git repository" in output:
+            return ("none",)
+        match = _RECALL_PAGE_ID.search(output)
+        self.assertIsNotNone(match, output)
+        assert match is not None
+        return ("found", match.group(1), "Run link again" in output)
+
+    def _memory_scan_answer(self, start: Path) -> tuple[object, ...]:
+        result = subprocess.run(
+            [sys.executable, "tools/wiki/cli.py", "memory-scan", "--repo", str(start), "--json"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=120,
+        )
+        if result.returncode == 0:
+            repo = json.loads(result.stdout)["repo"]
+            return ("found", repo["project"], repo["hint"] is not None)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        error = result.stderr
+        if "unsupported version" in error:
+            return ("damaged",)
+        if "Several projects" in error:
+            return ("several", _several(error))
+        if "is not linked to a project" in error or "is not inside a git repository" in error:
+            return ("none",)
+        self.fail(f"unexpected memory-scan error: {error}")
+
+    def _answers(self, start: Path) -> dict[str, tuple[object, ...]]:
+        return {
+            "router": self._router_answer(start),
+            "recall": self._recall_answer(start),
+            "memory-scan": self._memory_scan_answer(start),
+        }
+
+
+class ProjectLookupParityTests(_ProjectLookupCase):
+    """One fixture table for router find_project, recall, and memory-scan --repo (A-10, version rule)."""
+
+    def _cases(self) -> list[tuple[str, Callable[[Path], tuple[Path, dict[str, dict[str, object]], object]], tuple[object, ...]]]:
+        """(name, build(case folder) -> (start folder, projects, version), expected answer)."""
+
+        def same_root(base: Path):
+            repo = self._repo(base / "checkout")
+            return repo, {"app": {"root": str(repo)}}, 2
+
+        def moved(origin: str, recorded: str):
+            def build(base: Path):
+                repo = self._repo(base / "moved", origin)
+                return repo, {"app": {"root": str(base / "old" / "app"), "remote": recorded}}, 2
+
+            return build
+
+        def same_name_without_origin(base: Path):
+            repo = self._repo(base / "named-app")
+            entry = {"root": str(base / "elsewhere" / "named-app"), "remote": "git@github.com:acme/named-app.git"}
+            return repo, {"named-app": entry}, 2
+
+        def same_name_other_origin(base: Path):
+            repo = self._repo(base / "named-app", "https://github.com/acme/named-app.git")
+            entry = {"root": str(base / "elsewhere" / "named-app"), "remote": "git@github.com:other/named-app.git"}
+            return repo, {"named-app": entry}, 2
+
+        def two_projects_same_remote(base: Path):
+            repo = self._repo(base / "moved", "git@github.com:acme/app.git")
+            remote = "https://github.com/acme/app"
+            return repo, {
+                "alpha": {"root": str(base / "a"), "remote": remote},
+                "beta": {"root": str(base / "b"), "remote": remote},
+            }, 2
+
+        def version_1(base: Path):
+            repo = self._repo(base / "checkout")
+            return repo, {"legacy": {"root": str(repo)}, "v1-other": {"root": str(base / "other")}}, 1
+
+        def outside_git(base: Path):
+            plain = base / "plain"
+            plain.mkdir(parents=True)
+            return plain, {"plain": {"root": str(plain)}}, 2
+
+        def version(value: object):
+            def build(base: Path):
+                repo = self._repo(base / "checkout")
+                return repo, {"app": {"root": str(repo)}}, value
+
+            return build
+
+        return [
+            ("same root", same_root, ("found", "app", False)),
+            ("moved, scp origin", moved("git@GitHub.com:acme/app.git", "https://github.com/acme/app"), ("found", "app", True)),
+            ("moved, https origin", moved("https://user@github.com/acme/app.git/", "git@github.com:acme/app.git"), ("found", "app", True)),
+            ("same name, no origin", same_name_without_origin, ("found", "named-app", True)),
+            ("same name, other origin", same_name_other_origin, ("none",)),
+            ("two projects, same remote", two_projects_same_remote, ("several", ("alpha", "beta"))),
+            ("link config version 1", version_1, ("found", "legacy", False)),
+            ("outside git", outside_git, ("none",)),
+            ("version missing", version(None), ("damaged",)),
+            ("version as string", version("2"), ("damaged",)),
+            ("version as bool", version(True), ("damaged",)),
+            ("version 3", version(3), ("damaged",)),
+        ]
+
+    def test_three_lookups_give_the_same_answer_for_every_case(self):
+        for index, (name, build, expected) in enumerate(self._cases()):
+            with self.subTest(case=name):
+                start, projects, version = build(self.tmp / f"case-{index}")
+                self._write_vault_map(projects, version=version)
+                answers = self._answers(start)
+                self.assertEqual(
+                    {"router": expected, "recall": expected, "memory-scan": expected},
+                    answers,
+                )
+
+
+class VaultMapV1CompatTests(_ProjectLookupCase):
+    """A version 1 link config without remote is read by all three, and install rewrites it as version 2 (A-20)."""
+
+    def test_version_1_map_without_remote_is_read_by_router_recall_and_memory_scan(self):
+        by_root = self._repo(self.tmp / "work" / "checkout")
+        by_name = self._repo(self.tmp / "work" / "named-app", "git@github.com:acme/named-app.git")
+        self._write_vault_map(
+            {
+                "app": {"root": str(by_root)},
+                "named-app": {"root": str(self.tmp / "old" / "named-app")},
+            },
+            version=1,
+        )
+        data = json.loads(self.vault_map_path.read_text(encoding="utf-8"))
+        self.assertEqual(1, data["version"])
+        self.assertFalse(any("remote" in entry for entry in data["projects"].values()))
+
+        for start, expected in ((by_root, ("found", "app", False)), (by_name, ("found", "named-app", True))):
+            with self.subTest(start=start.name):
+                self.assertEqual(
+                    {"router": expected, "recall": expected, "memory-scan": expected},
+                    self._answers(start),
+                )
+
+    def test_install_rewrites_version_1_map_as_version_2_without_losing_content(self):
+        original = {
+            "version": 1,
+            "vaults": {
+                "team": {"path": str(self.tmp / "vaults" / "team"), "role": "team"},
+                "old": {"path": "~/vaults/old", "role": "personal"},
+            },
+            "projects": {
+                "app": {"root": str(self.tmp / "work" / "app"), "vaults": ["team", "old"]},
+                "tool": {"root": "~/work/tool", "vaults": ["old"]},
+            },
+        }
+        self.vault_map_path.parent.mkdir(parents=True, exist_ok=True)
+        self.vault_map_path.write_text(json.dumps(original, indent=2), encoding="utf-8")
+        target = self.work / "vault-a"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        rewritten = json.loads(self.vault_map_path.read_text(encoding="utf-8"))
+        self.assertEqual(2, rewritten["version"])
+        self.assertEqual(
+            {**original["vaults"], "a": {"path": str(target), "role": "personal"}},  # type: ignore[dict-item]
+            rewritten["vaults"],
+        )
+        self.assertEqual(original["projects"], rewritten["projects"])
+
+
+def _changed_paths(before: dict[str, tuple[str, int]], after: dict[str, tuple[str, int]]) -> list[str]:
+    """Paths added, removed, or changed between two _tree_snapshot results."""
+    return sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+
+
+class ReinstallRoundTripTests(_RouterVaultTestCase):
+    """install, publish, uninstall, install, twice, with the real commands (decision 42, A-23)."""
+
+    def _publish(self, target: Path, index: int) -> Path:
+        slug = f"round-trip-{index}"
+        claim = f"Round trip page {index} stays through uninstall and install."
+        draft = json.loads(json.dumps(_router_tests.VALID_DRAFT))
+        draft["path"] = f"wiki/concepts/{slug}.md"
+        frontmatter = draft["frontmatter"]
+        frontmatter["title"] = f"Round Trip {index}"
+        frontmatter["summary"] = f"A page published before uninstall round {index}."
+        frontmatter["source_count"] = 1
+        frontmatter["related"] = ["concepts/compiled-knowledge"]
+        frontmatter["derived_from"] = ["AGENTS.md"]
+        # The vault release gate that install runs through apply requires claim-level provenance.
+        frontmatter["quality"]["provenance"] = "claim"
+        draft["body"] = (
+            f"# Round Trip {index}\n\n## Definition\n\n{claim}\n\n"
+            "Source: Human instruction in `AGENTS.md`.\n\n"
+            "## Related Concepts\n\n- [[concepts/compiled-knowledge]]\n\n"
+            "## Claim Evidence\n\n| Claim | Status | Evidence |\n|---|---|---|\n"
+            f"| {claim} | stated | Human instruction in `AGENTS.md`. |\n"
+        )
+        draft["index"] = {"section": "Concepts", "target": f"concepts/{slug}", "summary": frontmatter["summary"]}
+        draft["log"] = {"event_type": "repair", "title": f"Round Trip {index}", "items": [f"Added [[concepts/{slug}]]."]}
+        draft_path = target / "scratch" / "drafts" / f"{slug}.json"
+        draft_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, "tools/wiki/cli.py", "publish-draft", f"scratch/drafts/{slug}.json"],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=300,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        page = target / draft["path"]
+        self.assertTrue(page.is_file())
+        return page
+
+    def _knowledge(self, target: Path) -> dict[str, tuple[str, int]]:
+        """raw/, wiki/, scratch/, and .git, without the two .git files the vault release gate refreshes.
+
+        install runs the vault release gate through apply_plan (decision 42). The gate stores its
+        test cache in .git/llm-wiki-gate-tests.cache, and its git commands refresh the stat data in
+        .git/index. The index entries themselves are compared through git ls-files --stage.
+        """
+        git_dir = target / ".git"
+        runtime = {str(git_dir / "index"), str(git_dir / "llm-wiki-gate-tests.cache")}
+        snapshot = {path: state for path, state in self._knowledge_snapshot(target).items() if path not in runtime}
+        staged = subprocess.run(
+            ["git", "-C", str(target), "ls-files", "--stage"], text=True, capture_output=True, check=True
+        ).stdout
+        snapshot["git ls-files --stage"] = (hashlib.sha256(staged.encode("utf-8")).hexdigest(), 0)
+        return snapshot
+
+    def _doctor_ok(self, target: Path) -> None:
+        result = self._cli("doctor", str(target))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual([], [line for line in result.stdout.splitlines() if line.startswith("Problem:")])
+
+    def _installed_state(self, target: Path) -> dict[str, object]:
+        manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
+        return {
+            "external_records": sorted(manifest["external_records"], key=lambda record: record["location"]),
+            "managed_files": {path: entry["sha256"] for path, entry in manifest["managed_files"].items()},
+            "managed_bytes": {path: sha256_file(target / path) for path in manifest["managed_files"]},
+            "mcp_config": self._claude(),
+            "vault_map": json.loads(self.vault_map.read_text(encoding="utf-8")),
+        }
+
+    def test_uninstall_then_install_twice_returns_to_the_first_install_state(self):
+        target = self.work / "vault-a"
+        self._install_ok(target, "a")
+        _git(target, "init", "-q")
+        _git(target, "add", "-A")
+        _git(target, "commit", "-q", "-m", "seed")
+        self._doctor_ok(target)
+        first = self._installed_state(target)
+        self.assertEqual(first["managed_files"], first["managed_bytes"])
+
+        # Rounds run in order and stop at the first failure, because each round starts from the last.
+        for round_number in (1, 2):
+            page = self._publish(target, round_number)
+            page_bytes = page.read_bytes()
+            knowledge = self._knowledge(target)
+
+            uninstalled = self._cli("uninstall", str(target))
+            self.assertEqual(0, uninstalled.returncode, uninstalled.stdout + uninstalled.stderr)
+            self.assertFalse((target / ".vault-builder" / "manifest.json").exists())
+            self.assertFalse(self.router.exists())
+            self.assertEqual([], _changed_paths(knowledge, self._knowledge(target)), f"round {round_number} uninstall")
+
+            reinstalled = self._install(str(target), "--name", "a")
+            self.assertEqual(0, reinstalled.returncode, reinstalled.stdout + reinstalled.stderr)
+            self._doctor_ok(target)
+            self.assertEqual(first, self._installed_state(target), f"round {round_number} install")
+            self.assertEqual(page_bytes, page.read_bytes())
+            self.assertEqual([], _changed_paths(knowledge, self._knowledge(target)), f"round {round_number} install")
+            self.assertFalse((target / ".mcp.json").exists())
