@@ -7632,6 +7632,64 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
 
+class VaultMapVersionStrictTests(_UserHomeTestCase):
+    """install and uninstall accept only an int version 1 or 2, like the router, recall and memory-scan."""
+
+    BAD_VERSIONS = {"true": True, "1.0": 1.0, "string 2": "2", "missing": None}
+
+    @property
+    def vault_map(self) -> Path:
+        return self.config / "vault-builder" / "vault-map.json"
+
+    def _write_map(self, version: object, vaults: dict[str, object]) -> None:
+        value: dict[str, object] = {"vaults": vaults, "projects": {}}
+        if version is not None:
+            value["version"] = version
+        self.vault_map.parent.mkdir(parents=True, exist_ok=True)
+        self.vault_map.write_text(json.dumps(value), encoding="utf-8")
+
+    def test_install_refuses_non_int_or_missing_version_without_writes(self):
+        target = self.work / "vault-a"
+        for label, version in self.BAD_VERSIONS.items():
+            with self.subTest(version=label):
+                self._write_map(version, {})
+                before = _tree_snapshot(self.tmp)
+
+                for arguments in (("--dry-run",), ()):
+                    result = self._install(str(target), "--name", "a", *arguments)
+
+                    self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                    self.assertIn("vault-map.json", result.stderr)
+                    self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_uninstall_refuses_non_int_or_missing_version_without_writes(self):
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        saved = self.vault_map.read_bytes()
+        vaults = json.loads(saved)["vaults"]
+        for label, version in self.BAD_VERSIONS.items():
+            with self.subTest(version=label):
+                self._write_map(version, vaults)
+                try:
+                    before = _tree_snapshot(self.tmp)
+                    for arguments in (("--dry-run",), ()):
+                        result = subprocess.run(
+                            [sys.executable, "tools/vault_migration/cli.py", "uninstall", str(target), *arguments],
+                            cwd=ROOT,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            env=self._env(),
+                            timeout=300,
+                        )
+
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn("vault-map.json", result.stderr)
+                        self.assertEqual(before, _tree_snapshot(self.tmp))
+                finally:
+                    self.vault_map.write_bytes(saved)
+
+
 class UninstallDoctorTest(_UserHomeTestCase):
     """uninstall and doctor run with a temporary HOME and without CLAUDE_CONFIG_DIR (A-15, A-16, A-17, A-26)."""
 

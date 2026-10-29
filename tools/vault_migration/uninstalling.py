@@ -53,6 +53,7 @@ from .installing import (
     _ROUTER_ASSET,
     _VAULT_MAP_READ_VERSIONS,
     _VAULT_MAP_VERSION,
+    _vault_map_version_ok,
     _absolute_target,
     _entry_server,
     _json_bytes,
@@ -329,7 +330,7 @@ def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: P
         vault_map = _load_json_object(path, "Vault map")
         vaults = vault_map.get("vaults")
         projects = vault_map.get("projects", {})
-        if vault_map.get("version") not in _VAULT_MAP_READ_VERSIONS or not isinstance(vaults, dict):
+        if not _vault_map_version_ok(vault_map.get("version")) or not isinstance(vaults, dict):
             versions = " or ".join(str(version) for version in _VAULT_MAP_READ_VERSIONS)
             raise UninstallError(
                 f"Vault map {path} must be a JSON object with version {versions} and a vaults object; "

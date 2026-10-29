@@ -59,6 +59,11 @@ _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "
 _REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
 _VAULT_MAP_VERSION = 2  # the version install writes
 _VAULT_MAP_READ_VERSIONS = (1, 2)
+
+
+def _vault_map_version_ok(version: object) -> bool:
+    """Only a JSON integer 1 or 2, as the router, recall and memory-scan read it (not true or 1.0)."""
+    return type(version) is int and version in _VAULT_MAP_READ_VERSIONS
 _PATCH_VERSION = re.compile(r"\d+\.\d+\.\d+")
 _PREVIOUS_VERSION_HINT = "Run uninstall with the previous vault-builder version, then run install again."
 
@@ -341,8 +346,8 @@ def _precheck(
         notes.append(f"Replacing mcpServers.{MCP_SERVER_KEY} interpreter {old_command} with {python}.")
 
     vault_map = _load_json_object(user.vault_map, "Vault map")
-    if vault_map:
-        if vault_map.get("version") not in _VAULT_MAP_READ_VERSIONS:
+    if user.vault_map.exists():
+        if not _vault_map_version_ok(vault_map.get("version")):
             versions = " or ".join(str(version) for version in _VAULT_MAP_READ_VERSIONS)
             raise InstallError(f"Vault map {user.vault_map}: version must be {versions}.")
         for section in ("vaults", "projects"):
