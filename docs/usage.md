@@ -587,16 +587,41 @@ python3 tools/wiki/cli.py metrics --check --policy tools/wiki/metrics-policy.jso
 
 ## 16. MCP 사용하기
 
-MCP를 지원하는 agent는 `tools/wiki/mcp_server.py`를 stdio MCP server로 연결할 수 있습니다.
+install(17.6)은 Claude Code의 user scope MCP 설정 파일에 서버 항목 `mcpServers.llm-wiki` 하나만 등록합니다. 모든 vault가 이 서버 하나를 함께 씁니다. 그래서 어느 저장소 세션에서든 `/mcp` 목록에는 vault 서버 `llm-wiki` 하나만 보입니다. vault 안에 `.mcp.json` 파일은 만들지 않습니다.
+
+서버 항목은 `<설정 폴더>/vault-builder/llm_wiki_router.py` 라우터를 실행합니다. 라우터는 도구 호출을 받을 때마다 대상 vault를 정하고, 그 vault 폴더에서 그 vault의 `tools/wiki/cli.py`를 실행합니다. 그래서 각 vault는 자기 tools 버전으로 검사받습니다. 라우터는 호출 사이에 아무것도 기억하지 않고, 호출마다 연결 설정(17.1)을 다시 읽습니다. 따라서 `link` 명령(17.3)으로 연결을 바꾸면 Claude Code를 다시 시작하지 않아도 다음 호출부터 적용됩니다.
+
+#### `vault` 인자와 읽기 범위
+
+모든 도구에는 선택 인자 `vault`(연결 설정의 vault 이름)와 `cwd`(절대 경로)가 있습니다.
+
+- **닿는 vault:** 세션 폴더가 vault 폴더이면 그 vault 하나입니다. 아니면 세션 저장소에 연결된 vault 전체입니다(17.3). 둘 다 없으면 닿는 vault는 없습니다. 라우터는 호출마다 세션 폴더로 이 값을 다시 구합니다. 호출에 `cwd` 값을 주면 그 폴더를 세션 폴더로 씁니다.
+- **읽기 호출:** 닿는 vault만 읽습니다. 읽기 호출의 `vault` 값은 닿는 vault 이름이어야 합니다. 연결 설정에는 있지만 닿지 않는 이름을 주면 실행하지 않고, 닿는 vault 이름 목록과 `link` 안내를 담은 오류를 돌려줍니다. 그 vault를 읽으려면 먼저 `link` 명령으로 저장소에 연결합니다.
+- `vault` 값이 없는 읽기 호출은 닿는 vault가 하나일 때 그 vault를 씁니다. 닿는 vault가 0개이거나 2개 이상이면 고를 수 있는 이름 목록을 담은 오류를 돌려줍니다.
+- `wiki_search` 도구는 `vault` 값이 없으면 닿는 vault 전체를 찾습니다. 결과는 vault 이름 순서로 `# vault <이름> (<역할>)` 머리 줄 아래에 붙고, `limit` 값은 vault마다 적용됩니다. 닿는 vault가 없으면 검색하지 않고 vault 이름 목록과 `link` 안내를 담은 오류를 돌려줍니다.
+- **쓰기 호출:** `vault` 인자가 꼭 있어야 합니다. 값은 연결 설정의 어떤 vault 이름이든 됩니다. 닿는 vault가 아니어도 되고, 역할이 `team`인 vault도 받습니다. 쓰는 내용은 대상 vault의 `publish-draft` 검증이 검사합니다. 라우터는 별도의 승인 단계를 두지 않고, Claude Code의 도구별 권한 확인을 따릅니다.
+- **경로 인자:** `path`, `paths`, `source`, `target`, `draft`, `report` 값은 대상 vault 기준 상대 경로여야 합니다. 절대 경로, `..`로 vault 밖을 가리키는 경로, vault 밖으로 이어지는 symlink는 실행하기 전에 거부합니다. 그래서 `vault` 인자로 고른 vault 밖에는 쓸 수 없습니다.
+
+#### 도구 분류
+
+| 분류 | 도구 |
+|---|---|
+| 항상 읽기 | `wiki_search`, `wiki_read_page`, `wiki_validate_page`, `wiki_hash_source`, `wiki_review_list` |
+| 쓰기 옵션이 없을 때만 읽기 | `wiki_lint`(`report` 없음), `wiki_source_registry`(`report` 없음), `wiki_apply_draft`(`report` 없음), `wiki_merge_scan`(`report`와 `create_review` 없음), `wiki_maps_build`(`dry_run` 또는 `check` 값이 true) |
+| 항상 쓰기 | `wiki_health`, `wiki_metrics`, `wiki_ingest_source`, `wiki_bulk_ingest`, `wiki_publish_draft`, `wiki_publish_batch`, `wiki_review_create`, `wiki_review_resolve`, `wiki_workflow_ingest`, `wiki_workflow_update_preflight`, `wiki_workflow_update_publish`, `wiki_workflow_query_prepare`, `wiki_workflow_query_capture`, `wiki_workflow_query_publish` |
+
+표에 없는 조합은 쓰기 호출로 봅니다. 예를 들어 `report` 값을 준 `wiki_lint` 호출은 `vault` 인자가 필요합니다.
+
+#### 수동 실행
+
+vault 안의 `tools/wiki/mcp_server.py` 파일은 그 vault 하나만 다루는 stdio MCP server입니다. install은 이 파일을 등록하지 않습니다. 다른 MCP client에서 vault 하나를 직접 연결할 때만 씁니다.
 
 ```bash
 python3 tools/wiki/mcp_server.py
 ```
 
-주의할 점:
-
 - 이 명령은 일반 CLI처럼 결과를 출력하고 바로 종료하는 명령이 아닙니다.
-- MCP client나 agent가 stdio로 연결해 tool call을 보낼 때 사용합니다.
+- MCP client가 stdio로 연결해 tool call을 보낼 때 사용합니다.
 - 터미널에서 직접 실행하면 입력을 기다리는 것처럼 보일 수 있습니다.
 
 제공되는 MCP tool:
@@ -628,7 +653,7 @@ python3 tools/wiki/mcp_server.py
 | `wiki_workflow_query_capture` | query 답변과 재사용 가능한 capture draft scaffold를 만듭니다. |
 | `wiki_workflow_query_publish` | reusable query capture draft를 `publish-draft`로 반영합니다. |
 
-MCP wrapper는 CLI를 얇게 감싸는 역할입니다. 같은 작업은 CLI로도 실행할 수 있습니다.
+라우터와 MCP wrapper는 CLI를 얇게 감싸는 역할입니다. 같은 작업은 vault 폴더에서 CLI로도 실행할 수 있습니다.
 
 ## 17. 여러 vault를 저장소에 연결하기 (project memory)
 
@@ -659,27 +684,31 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "vaults": {
     "personal": {"path": "/path/to/vault", "role": "personal"},
     "team": {"path": "/path/to/team-vault", "role": "team"},
     "app": {"path": "/path/to/app-vault", "role": "project"}
   },
   "projects": {
-    "my-app": {"root": "/path/to/my-app", "vaults": ["personal", "team", "app"]}
+    "my-app": {
+      "root": "/path/to/my-app",
+      "vaults": ["personal", "team", "app"],
+      "remote": "git@github.com:example/my-app.git"
+    }
   }
 }
 ```
 
 | key | 뜻 |
 |---|---|
-| `version` | 파일 형식 version입니다. 지금은 `1` 값을 씁니다. |
+| `version` | 파일 형식 version입니다. 지금은 `2` 값을 씁니다. 읽는 쪽은 `1`과 `2`를 모두 받고, install, uninstall, `link`, `unlink` 명령은 항상 `2` 값으로 씁니다. |
 | `vaults` | vault 이름별 항목입니다. `path` 값은 vault 폴더의 절대 경로이고, `role` 값은 아래 역할 3가지 가운데 하나입니다. |
-| `projects` | project id별 항목입니다. `root` 값은 저장소 main worktree root의 절대 경로이고, `vaults` 값은 이 저장소가 쓰는 vault 이름 목록입니다. |
+| `projects` | project id별 항목입니다. `root` 값은 저장소 main worktree root의 절대 경로이고, `vaults` 값은 이 저장소가 쓰는 vault 이름 목록입니다. 선택 key `remote` 값은 `link` 명령을 실행할 때의 `origin` remote URL 원문입니다. |
 
-project id는 저장소 main worktree root 폴더의 이름입니다. 예를 들어 저장소가 `/path/to/my-app` 폴더에 있으면 project id는 `my-app` 값입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다. 이름이 같은 저장소 두 개는 구분하지 못합니다.
+저장소가 어느 project 항목에 해당하는지는 17.3의 project 찾기 순서(root 경로, remote URL, 폴더 이름)로 정합니다. `link` 명령으로 새 항목을 만들면 project id는 기본으로 저장소 root 폴더 이름입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다.
 
-이 파일은 사용자가 직접 편집하는 파일입니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
+저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 합니다. vault 역할(17.2)을 바꿀 때만 이 파일을 직접 고칩니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
 
 ### 17.2 vault 역할
 
@@ -695,15 +724,49 @@ install은 새로 등록하는 vault를 역할 `personal` 값으로 연결 설�
 
 ### 17.3 저장소 연결하기
 
-저장소를 연결하려면 연결 설정의 `projects` 항목에 한 줄을 더합니다.
+저장소 연결은 builder checkout의 `link`, `unlink`, `list` 명령으로 합니다. 연결 설정 JSON 파일을 손으로 고치지 않아도 됩니다.
 
-```json
-"my-app": {"root": "/path/to/my-app", "vaults": ["personal"]}
+```bash
+cd /path/to/vault-builder
+
+python3 tools/vault_migration/cli.py link personal --repo /path/to/my-app --dry-run
+python3 tools/vault_migration/cli.py link personal --repo /path/to/my-app
+python3 tools/vault_migration/cli.py unlink personal --repo /path/to/my-app
+python3 tools/vault_migration/cli.py list --repo /path/to/my-app
 ```
 
-- 이름(`my-app`)은 project id, 즉 저장소 root 폴더 이름과 같아야 합니다.
-- `vaults` 목록에는 `vaults` 항목에 이미 있는 vault 이름만 씁니다.
-- 저장소 안의 파일은 하나도 바꾸지 않습니다.
+`link <vault> [--repo PATH] [--project ID] [--dry-run]`
+
+- `<vault>` 값은 연결 설정 `vaults` 항목에 있는 이름이어야 합니다. 없는 이름이면 이름 목록을 출력하고 exit 1로 끝납니다.
+- `--repo` 옵션이 없으면 현재 폴더의 저장소를 씁니다. git 저장소 밖이면 exit 1로 끝납니다.
+- 아래 project 찾기 순서로 이미 연결된 project를 찾으면 그 project의 `vaults` 목록에 vault를 더합니다. 이때 `root` 값을 현재 저장소 root로, `remote` 값을 현재 `origin` URL로 고칩니다. `origin` remote가 없으면 `remote` 값은 그대로 둡니다.
+- 찾지 못하면 새 project 항목을 만듭니다. project id는 `--project` 옵션 값이고, 옵션이 없으면 저장소 root 폴더 이름입니다. 그 id를 다른 저장소가 이미 쓰고 있으면 거부하므로 `--project` 옵션으로 다른 id를 줍니다.
+- `--project` 옵션을 주었는데 project 찾기가 다른 id를 찾으면 거부하고 찾은 id를 알려 줍니다.
+- 역할이 `team`인 vault도 연결할 수 있습니다. 연결하면 그 저장소 세션에서 MCP로 읽을 수 있는 vault(16절의 닿는 vault)가 늘어납니다.
+
+`unlink <vault> [--repo PATH] [--dry-run]`
+
+- 찾은 project의 `vaults` 목록에서 vault를 뺍니다. 목록이 비면 그 project 항목을 지웁니다.
+- project를 찾지 못했거나 vault가 이미 목록에 없으면 그 사실을 한 줄로 출력하고 exit 0으로 끝납니다.
+
+`list [--repo PATH]`
+
+- 읽기 전용입니다. vault마다 이름, 역할, 경로, 경로 존재 여부를 출력하고, project마다 id, root, remote, vault 목록을 출력합니다.
+- 마지막 줄에는 `--repo` 저장소(옵션이 없으면 현재 폴더)가 어느 project에 어느 단계로 연결되었는지, 또는 연결되지 않았는지를 출력합니다.
+
+세 명령 모두 연결 설정이 없으면 "먼저 install을 실행하라"는 줄을 출력하고 exit 1로 끝납니다. MCP 설정 파일과 저장소 안의 파일은 바꾸지 않습니다.
+
+#### project 찾기 순서
+
+`link`, `unlink`, `list` 명령, recall 스크립트, `memory-scan --repo` 명령, MCP 라우터는 같은 순서로 저장소의 project 항목을 찾습니다. 먼저 저장소의 main worktree root를 구합니다. 같은 저장소의 `git worktree` 폴더도 같은 root가 됩니다.
+
+1. root 경로: `projects[*].root` 값이 현재 저장소 root와 같은 항목
+2. remote URL: 저장소에 `origin` remote가 있으면 그 URL과 `projects[*].remote` 값이 같은 항목. `git@host:path`, `https://host/path` 형태와 끝의 `.git` 차이는 무시하고 비교합니다.
+3. 폴더 이름: project id가 저장소 root 폴더 이름과 같은 항목. 단, 그 항목의 `remote` 값과 저장소 `origin` URL이 서로 다르면 제외합니다.
+
+한 단계에서 하나가 맞으면 그 항목을 씁니다. 0개면 다음 단계로 갑니다. 2개 이상이면 추측하지 않고 "여러 project가 맞는다"는 이유와 id 목록을 출력합니다. 그래서 저장소 폴더 이름을 바꾸거나 다른 이름으로 clone해도 remote URL로 연결이 유지됩니다. 이름이 같고 `origin` remote도 없는 두 저장소는 구분하지 못합니다.
+
+2단계나 3단계로 찾았는데 연결 설정의 `root` 값이 현재 위치와 다르면 "`link`를 다시 실행하라"는 줄이 출력에 붙습니다. `link` 명령을 다시 실행하면 `root` 값이 현재 위치로 바뀝니다.
 
 연결한 뒤 그 vault에서 memory-cleanup skill을 실행하면 요약 페이지가 생깁니다. 요약 페이지가 생기기 전에는 `/project-memory`가 "요약 페이지 없음" 한 줄만 출력합니다.
 
@@ -716,7 +779,10 @@ L1 메모리는 `<설정 폴더>/projects/<key>/memory/` 폴더입니다. `<key>
 ```bash
 python3 tools/wiki/cli.py memory-scan
 python3 tools/wiki/cli.py memory-scan --project my-app --json
+python3 tools/wiki/cli.py memory-scan --repo /path/to/my-app --json
 ```
+
+`--project ID` 옵션은 연결 설정의 project id로 바로 찾습니다. `--repo PATH` 옵션은 그 폴더의 저장소를 17.3의 project 찾기 순서로 찾습니다. 두 옵션은 함께 쓸 수 없습니다.
 
 `memory-scan` 명령은 이 vault에 연결된 project마다 L1 note 목록, note별 sha256과 type, 그리고 같은 project에 연결된 모든 vault에 이미 들어왔는지(`imported` 또는 `new`)를 출력합니다. 파일은 하나도 쓰지 않습니다. 연결 설정이 없거나 이 vault가 `vaults` 항목에 없으면 이유 한 줄과 함께 exit 1로 끝납니다. 이 경우 17.1과 17.3을 따라 연결 설정을 먼저 만듭니다.
 
@@ -776,7 +842,7 @@ recall 스크립트는 세션의 현재 작업 폴더로 저장소를 찾습니�
 | 상황 | 출력 |
 |---|---|
 | git 저장소 밖 | git 저장소가 아니라는 줄 |
-| 연결되지 않은 저장소 | project id와 연결 방법(이 문서 17.3)을 담은 줄 |
+| 연결되지 않은 저장소 | 찾지 못한 이유 한 줄과 `link: run tools/vault_migration/cli.py link <vault 이름> --repo <root> from the vault-builder checkout (vaults: a, b)` 형식의 연결 명령 한 줄. 이 명령은 builder checkout에서 실행합니다(17.3). |
 | 연결 설정이 없거나 손상됨 | 그 사실을 담은 줄 |
 | 연결된 vault 폴더나 요약 페이지가 없음 | 그 vault를 건너뛰었다는 줄 |
 | 요청한 섹션 heading이 요약 페이지에 없음 | 그 vault의 섹션이 없다는 줄 |
@@ -784,18 +850,23 @@ recall 스크립트는 세션의 현재 작업 폴더로 저장소를 찾습니�
 
 ### 17.6 install, uninstall, doctor
 
-불러오기 skill, recall 스크립트, 연결 설정, MCP 등록은 builder checkout의 `tools/vault_migration/cli.py` 명령으로 설치하고 지웁니다. Python 3.10 이상으로 실행합니다.
+불러오기 skill, recall 스크립트, 라우터, 연결 설정, MCP 서버 항목은 builder checkout의 `tools/vault_migration/cli.py` 명령으로 설치하고 지웁니다. Python 3.10 이상으로 실행합니다.
 
-먼저 Claude Code를 모두 종료하세요. install과 uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` 파일을 고칩니다(`CLAUDE_CONFIG_DIR` 값이 있으면 `<설정 폴더>/.claude.json` 파일). Claude Code는 실행 중에 이 파일을 자주 씁니다. 파일 교체는 원자적이라 파일이 깨지지는 않지만, 두 쓰기가 겹치면 한쪽 변경이 사라질 수 있습니다.
+install과 uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` 파일을 고칩니다(`CLAUDE_CONFIG_DIR` 값이 있으면 `<설정 폴더>/.claude.json` 파일). Claude Code는 실행 중에 이 파일을 자주 씁니다. 파일 교체는 원자적이라 파일이 깨지지는 않지만, 두 쓰기가 겹치면 한쪽 변경이 사라질 수 있습니다. 이 경합을 피하려면 install과 uninstall을 아래 순서로 실행합니다.
+
+1. Claude Code를 모두 종료합니다. 터미널의 `claude` 세션과 IDE 안의 Claude Code도 포함합니다.
+2. 터미널에서 install 또는 uninstall 명령을 실행합니다.
+3. Claude Code를 다시 시작합니다. install 뒤라면 `/mcp` 목록에서 vault 서버가 `llm-wiki` 하나인지 확인합니다.
+4. doctor 명령을 실행합니다.
 
 ```bash
 cd /path/to/vault-builder
 
-python3 tools/vault_migration/cli.py install /path/to/vault --name personal --dry-run
-python3 tools/vault_migration/cli.py install /path/to/vault --name personal
-python3 tools/vault_migration/cli.py doctor /path/to/vault
-python3 tools/vault_migration/cli.py uninstall /path/to/vault --dry-run
-python3 tools/vault_migration/cli.py uninstall /path/to/vault
+python3 tools/vault_migration/cli.py install "$HOME/vault" --name personal --dry-run
+python3 tools/vault_migration/cli.py install "$HOME/vault" --name personal
+python3 tools/vault_migration/cli.py doctor "$HOME/vault"
+python3 tools/vault_migration/cli.py uninstall "$HOME/vault" --dry-run
+python3 tools/vault_migration/cli.py uninstall "$HOME/vault"
 ```
 
 `--dry-run` 옵션은 계획만 출력하고 아무 파일도 쓰지 않습니다.
@@ -806,27 +877,40 @@ python3 tools/vault_migration/cli.py uninstall /path/to/vault
 
 - 대상 폴더가 없거나 비어 있으면 새 vault를 만듭니다. 임시 폴더에서 vault를 조립하고 lint로 검사한 뒤 한 번에 대상 경로로 옮깁니다. 중간에 실패하면 대상 폴더는 생기지 않습니다.
 - 대상이 이미 vault이면 vault 밖 파일만 설치합니다. 이때 audit 결과에 `create`, `replace`, `review-required`, `invalid` 항목이 하나라도 있으면 거부합니다. 1.1절의 audit/apply를 먼저 실행하세요.
-- 불러오기 skill과 recall 스크립트를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
-- 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 역할 `personal` 값으로 더합니다. 저장소 연결(17.3)은 사용자가 직접 합니다.
-- MCP 설정 파일의 `mcpServers` 객체 아래에 `llm-wiki-<vault 이름>` 항목을 더합니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다. 그래서 다른 저장소의 세션에서도 이 vault의 MCP 도구를 쓸 수 있습니다. 대신 모든 저장소 세션에 vault 쓰기 도구도 보이고, vault 안의 세션에서는 `llm-wiki` 서버와 `llm-wiki-<vault 이름>` 서버가 같은 도구를 보여 줍니다.
+- uninstall한 vault(manifest는 없고 `wiki/index.md` 파일은 있는 폴더)는 install 한 번으로 다시 설치됩니다. install이 audit 계획을 만들고, `review-required`나 `invalid` 항목이 없으면 apply와 같은 방법으로 managed 파일과 manifest를 되돌린 뒤 vault 밖 파일을 설치합니다. 계획에 그런 항목이 있으면 경로 목록과 audit/apply 안내를 출력하고 아무것도 쓰지 않습니다. `--dry-run` 옵션을 주면 audit 계획 요약과 vault 밖 계획만 출력합니다. vault 밖 설치가 실패하면 vault 밖 변경만 되돌리고, 되돌린 managed 파일과 manifest는 남습니다. 이때 install을 다시 실행하면 vault 밖 설치부터 이어갑니다.
+- 불러오기 skill, recall 스크립트, 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
+- 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 역할 `personal` 값으로 더합니다. 저장소 연결은 `link` 명령(17.3)으로 합니다.
+- MCP 설정 파일의 `mcpServers` 객체 아래에 서버 항목 `llm-wiki` 하나를 둡니다. 값은 `{"command": <interpreter>, "args": ["-I", <라우터 경로>]}` 형태입니다. 모든 vault가 이 항목 하나를 함께 쓰므로, 두 번째 vault부터는 항목이 이미 같으면 MCP 설정 파일을 다시 쓰지 않습니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다.
+- interpreter 경로는 install을 실행한 Python과 같은 파일을 가리키는 경로 가운데 patch version(`3.12.4` 같은 형태)이 없는 경로를 고릅니다. 그런 경로가 없으면 실행한 경로를 그대로 쓰고, Python을 올리면 install을 다시 실행하라는 알림을 출력합니다. 서버 항목과 recall 스크립트의 `PYTHON=` 줄에 같은 경로를 씁니다.
+- 이미 있는 `llm-wiki` 항목이 이 설정 폴더의 라우터를 가리키지 않으면 다른 프로그램의 항목으로 보고 아무것도 쓰지 않고 거부합니다.
+- 이전 버전 builder가 만든 MCP 등록(vault 이름이 붙은 서버 항목이나 vault 안의 MCP 설정 파일)이 있으면 고치지 않고 거부합니다. 이전 버전 builder로 uninstall한 뒤 이 버전으로 install합니다.
 - `--name` 옵션이 없으면 대상 폴더 이름을 vault 이름으로 씁니다. 폴더 이름이 `^[A-Za-z0-9][A-Za-z0-9_.-]*$` 형식이 아니면 거부하고 `--name` 옵션을 요구합니다.
-- 같은 이름의 MCP 항목이 다른 vault를 가리키면 아무것도 쓰지 않고 거부합니다. `--name` 옵션으로 다른 이름을 쓰세요. 가리키는 vault 폴더가 더는 없으면 그 항목을 새 vault로 바꾸고 알림 줄을 출력합니다.
 - `CLAUDE_CONFIG_DIR` 폴더는 `$HOME` 안에 있어야 합니다. vault 밖 기록은 `$HOME` 기준 상대 경로로만 적기 때문입니다.
 - vault 밖 변경 중 실패하면 바꾼 파일을 backup으로 되돌립니다.
-- 설치한 vault 밖 파일과 MCP 항목은 `.vault-builder/manifest.json`의 vault 밖 기록에 남깁니다. `CLAUDE_CONFIG_DIR` 값이 있으면 그 폴더 아래에 설치합니다.
+- 설치한 vault 밖 파일과 서버 항목은 `.vault-builder/manifest.json`의 vault 밖 기록에 남깁니다. 라우터와 서버 항목은 여러 vault가 함께 쓰는 파일로 기록합니다. `CLAUDE_CONFIG_DIR` 값이 있으면 그 폴더 아래에 설치합니다.
 
 `uninstall <path> [--dry-run]`
 
-- vault 안에서는 기록된 hash와 같은 managed 파일, `.mcp.json`, manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
+- vault 안에서는 기록된 hash와 같은 managed 파일과 manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
 - `raw/`, `wiki/`, `scratch/`, `.git` 폴더와 manifest에 없는 파일은 어떤 경우에도 지우지 않습니다. commit도 하지 않습니다.
-- 이 vault의 MCP 항목을 지우고, 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 뺍니다.
-- 남은 vault가 없을 때만 불러오기 skill, recall 스크립트, 연결 설정을 지웁니다. skill과 recall 스크립트는 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
-- MCP 항목은 기록된 hash와 같을 때만 지웁니다. 사용자가 고친 항목은 남기고 출력합니다.
+- 다른 vault가 남으면 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 빼고, `vaults` 목록이 빈 project 항목을 지웁니다. 서버 항목, 라우터, skill, recall 스크립트는 그대로 둡니다.
+- 마지막 vault이면 서버 항목, 라우터, 불러오기 skill, recall 스크립트, 연결 설정을 지우고, 비게 된 `<설정 폴더>/vault-builder/` 폴더와 `<설정 폴더>/skills/project-memory/` 폴더를 지웁니다. `mcpServers` key는 비어도 남깁니다.
+- 공유 파일은 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. 서버 항목은 `command` 값이 다른 interpreter여도 `args` 값이 `["-I", <라우터 경로>]`이면 같은 형태로 보고, recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
+- 이전 버전 builder로 설치한 vault이면 아무것도 쓰지 않고 거부합니다. 이전 버전의 uninstall을 사용합니다.
 - vault 밖 변경이 중간에 실패하면 모두 되돌리고 vault 안은 건드리지 않습니다.
+- uninstall 뒤 같은 vault를 다시 쓰려면 install만 다시 실행합니다. 연결 설정이 지워졌다면 `link` 명령도 다시 실행합니다.
 
 `doctor <path>`
 
-manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(실행 권한, `PYTHON=` 줄의 interpreter, git 밖 폴더에서의 실행 결과), 연결 설정, MCP 항목, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 사용자가 고친 managed 파일도 문제로 셉니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. vault의 `.mcp.json` 파일이 없거나 다른 vault 또는 Python 3.10 미만을 가리키면 다시 만듭니다. doctor가 쓰는 파일은 이것 하나뿐입니다.
+manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(실행 권한, `PYTHON=` 줄의 interpreter, git 밖 폴더에서의 실행 결과), 연결 설정, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 사용자가 고친 managed 파일도 문제로 셉니다. MCP 등록은 아래를 검사합니다.
+
+- 서버 항목 `llm-wiki`가 있고 `args` 값이 `["-I", <라우터 경로>]`인지
+- 라우터 파일이 있고 내용이 builder 원본이나 기록된 hash와 같은지
+- 서버 항목의 `command` 값이 Python 3.10 이상으로 실행되는지
+- 서버 항목의 `command`와 `args` 값으로 라우터를 실제로 시작해 30초 안에 `initialize`와 `tools/list` 요청에 응답하고, 도구 24개를 모두 돌려주는지
+- 이전 버전 builder가 만든 MCP 등록이 남아 있지 않은지
+
+문제가 없으면 exit 0, 있으면 exit 1입니다. 서버 항목의 interpreter 경로에 patch version이 들어 있고 고를 수 있는 다른 경로가 있으면 install을 다시 실행하라는 알림만 출력하고 exit 값에는 넣지 않습니다. doctor는 어떤 파일도 쓰지 않습니다.
 
 ## 18. Git 사용하기
 
@@ -888,6 +972,9 @@ git commit -m "wiki: update example concept"
 | maintenance metrics gate | `python3 tools/wiki/cli.py metrics --check --report` |
 | MCP server 실행 | `python3 tools/wiki/mcp_server.py` |
 | L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
+| 저장소를 vault에 연결 (builder checkout) | `python3 tools/vault_migration/cli.py link personal --repo /path/to/my-app` |
+| 저장소 연결 해제 (builder checkout) | `python3 tools/vault_migration/cli.py unlink personal --repo /path/to/my-app` |
+| 연결 상태 확인 (builder checkout, 읽기 전용) | `python3 tools/vault_migration/cli.py list --repo /path/to/my-app` |
 | project 요약 불러오기 (Claude Code 세션) | `/project-memory [open\|decisions\|corrections]` |
 | vault 밖 파일 설치 (builder checkout) | `python3 tools/vault_migration/cli.py install /path/to/vault --name personal` |
 | vault 밖 파일 점검 (builder checkout) | `python3 tools/vault_migration/cli.py doctor /path/to/vault` |

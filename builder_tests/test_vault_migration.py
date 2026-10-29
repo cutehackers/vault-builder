@@ -7562,3 +7562,216 @@ class UninstallDoctorTest(_UserHomeTestCase):
         result = self._cli("doctor", str(target), env=environment)
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("claude mcp list", result.stdout)
+
+
+class LinkingTests(unittest.TestCase):
+    """link, unlink, and list edit the link config only (spec 4.4, A-12)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name).resolve()
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.vault_map = self.home / ".claude" / "vault-builder" / "vault-map.json"
+        self.vault_map.parent.mkdir(parents=True)
+        self.vault_map.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "vaults": {
+                        "a": {"path": str(self.tmp / "vault-a"), "role": "personal"},
+                        "b": {"path": str(self.tmp / "missing-b"), "role": "team"},
+                    },
+                    "projects": {},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (self.tmp / "vault-a").mkdir()
+        self.mcp_config = self.home / ".claude.json"
+        self.mcp_config.write_text('{"mcpServers": {"other": {"command": "x"}}}\n', encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _env(self) -> dict[str, str]:
+        environment = dict(os.environ)
+        environment["HOME"] = str(self.home)
+        environment.pop("CLAUDE_CONFIG_DIR", None)
+        return environment
+
+    def _cli(self, *arguments: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "vault_migration" / "cli.py"), *arguments],
+            cwd=cwd or ROOT,
+            env=self._env(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def _repo(self, name: str, origin: str | None = None) -> Path:
+        repo = self.tmp / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, env=self._env())
+        if origin is not None:
+            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", origin], check=True, env=self._env())
+        return repo
+
+    def _map(self) -> dict[str, object]:
+        return json.loads(self.vault_map.read_text(encoding="utf-8"))
+
+    def _digest(self, path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_link_creates_version_2_project_and_repeat_keeps_bytes(self):
+        repo = self._repo("r", "git@github.com:me/r.git")
+        mcp_before = self._digest(self.mcp_config)
+        result = self._cli("link", "a", "--repo", str(repo))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        data = self._map()
+        self.assertEqual(2, data["version"])
+        self.assertEqual(
+            {"root": str(repo), "vaults": ["a"], "remote": "git@github.com:me/r.git"}, data["projects"]["r"]
+        )
+        before = self.vault_map.read_bytes()
+        again = self._cli("link", "a", "--repo", str(repo))
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertEqual(before, self.vault_map.read_bytes())
+        self.assertEqual(mcp_before, self._digest(self.mcp_config))
+
+    def test_link_uses_cwd_and_adds_team_vault(self):
+        repo = self._repo("r")
+        self.assertEqual(0, self._cli("link", "a", cwd=repo).returncode)
+        result = self._cli("link", "b", cwd=repo)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual({"root": str(repo), "vaults": ["a", "b"]}, self._map()["projects"]["r"])
+
+    def test_link_after_move_updates_root_of_same_id(self):
+        repo = self._repo("r", "https://github.com/me/r.git")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        moved = self.tmp / "moved" / "renamed"
+        moved.parent.mkdir()
+        repo.rename(moved)
+        result = self._cli("link", "a", "--repo", str(moved))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        projects = self._map()["projects"]
+        self.assertEqual(["r"], list(projects))
+        self.assertEqual(str(moved), projects["r"]["root"])
+        self.assertEqual(["a"], projects["r"]["vaults"])
+
+    def test_link_refuses_same_name_other_repo_until_project_given(self):
+        first = self._repo("one/r", "git@github.com:me/r.git")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(first)).returncode)
+        other = self._repo("two/r", "git@github.com:someone/r.git")
+        before = self.vault_map.read_bytes()
+        refused = self._cli("link", "a", "--repo", str(other))
+        self.assertEqual(1, refused.returncode, refused.stdout + refused.stderr)
+        self.assertIn("--project", refused.stderr)
+        self.assertEqual(before, self.vault_map.read_bytes())
+        created = self._cli("link", "a", "--repo", str(other), "--project", "r2")
+        self.assertEqual(0, created.returncode, created.stdout + created.stderr)
+        projects = self._map()["projects"]
+        self.assertEqual(str(other), projects["r2"]["root"])
+        self.assertEqual(str(first), projects["r"]["root"])
+
+    def test_link_refuses_project_that_differs_from_found_id(self):
+        repo = self._repo("r")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        before = self.vault_map.read_bytes()
+        result = self._cli("link", "b", "--repo", str(repo), "--project", "other")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("r", result.stderr)
+        self.assertEqual(before, self.vault_map.read_bytes())
+
+    def test_link_refuses_unknown_vault_and_folder_outside_git(self):
+        repo = self._repo("r")
+        before = self.vault_map.read_bytes()
+        unknown = self._cli("link", "zzz", "--repo", str(repo))
+        self.assertEqual(1, unknown.returncode)
+        self.assertIn("a, b", unknown.stderr)
+        plain = self.tmp / "plain"
+        plain.mkdir()
+        outside = self._cli("link", "a", "--repo", str(plain))
+        self.assertEqual(1, outside.returncode)
+        self.assertIn("git", outside.stderr)
+        self.assertEqual(before, self.vault_map.read_bytes())
+
+    def test_unlink_last_vault_removes_project_and_missing_link_exits_0(self):
+        repo = self._repo("r", "git@github.com:me/r.git")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        self.assertEqual(0, self._cli("link", "b", "--repo", str(repo)).returncode)
+        mcp_before = self._digest(self.mcp_config)
+        first = self._cli("unlink", "b", "--repo", str(repo))
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertEqual(["a"], self._map()["projects"]["r"]["vaults"])
+        last = self._cli("unlink", "a", "--repo", str(repo))
+        self.assertEqual(0, last.returncode, last.stdout + last.stderr)
+        data = self._map()
+        self.assertEqual(2, data["version"])
+        self.assertEqual({}, data["projects"])
+        before = self.vault_map.read_bytes()
+        again = self._cli("unlink", "a", "--repo", str(repo))
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertEqual(1, len(again.stdout.strip().splitlines()))
+        self.assertEqual(before, self.vault_map.read_bytes())
+        self.assertEqual(mcp_before, self._digest(self.mcp_config))
+
+    def test_unlink_vault_not_in_project_exits_0_without_writing(self):
+        repo = self._repo("r")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        before = self.vault_map.read_bytes()
+        result = self._cli("unlink", "b", "--repo", str(repo))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(before, self.vault_map.read_bytes())
+
+    def test_list_and_dry_run_write_nothing(self):
+        repo = self._repo("r", "git@github.com:me/r.git")
+        map_before = self._digest(self.vault_map)
+        mcp_before = self._digest(self.mcp_config)
+        dry_link = self._cli("link", "a", "--repo", str(repo), "--dry-run")
+        self.assertEqual(0, dry_link.returncode, dry_link.stdout + dry_link.stderr)
+        self.assertEqual(map_before, self._digest(self.vault_map))
+        listed = self._cli("list", "--repo", str(repo))
+        self.assertEqual(0, listed.returncode, listed.stdout + listed.stderr)
+        self.assertIn("not linked", listed.stdout)
+        self.assertEqual(map_before, self._digest(self.vault_map))
+
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        map_before = self._digest(self.vault_map)
+        dry_unlink = self._cli("unlink", "a", "--repo", str(repo), "--dry-run")
+        self.assertEqual(0, dry_unlink.returncode, dry_unlink.stdout + dry_unlink.stderr)
+        self.assertEqual(map_before, self._digest(self.vault_map))
+        listed = self._cli("list", "--repo", str(repo))
+        self.assertEqual(0, listed.returncode, listed.stdout + listed.stderr)
+        self.assertEqual(map_before, self._digest(self.vault_map))
+        self.assertEqual(mcp_before, self._digest(self.mcp_config))
+        output = listed.stdout
+        self.assertIn("a", output)
+        self.assertIn("personal", output)
+        self.assertIn(str(self.tmp / "missing-b"), output)
+        self.assertIn("missing", output)
+        self.assertIn("git@github.com:me/r.git", output)
+        self.assertIn("linked to project r by root", output)
+
+    def test_list_reports_stage_and_relink_note_after_move(self):
+        repo = self._repo("r", "git@github.com:me/r.git")
+        self.assertEqual(0, self._cli("link", "a", "--repo", str(repo)).returncode)
+        moved = self.tmp / "elsewhere"
+        repo.rename(moved)
+        listed = self._cli("list", "--repo", str(moved))
+        self.assertEqual(0, listed.returncode, listed.stdout + listed.stderr)
+        self.assertIn("linked to project r by remote", listed.stdout)
+        self.assertIn("Run link again", listed.stdout)
+
+    def test_all_commands_exit_1_without_link_config(self):
+        self.vault_map.unlink()
+        repo = self._repo("r")
+        for arguments in (("link", "a"), ("unlink", "a"), ("list",)):
+            with self.subTest(command=arguments[0]):
+                result = self._cli(*arguments, "--repo", str(repo))
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("Run install first", result.stderr)
+                self.assertFalse(self.vault_map.exists())
