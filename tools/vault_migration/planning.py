@@ -31,6 +31,7 @@ _REQUIRED_TOPOLOGY = (
     "wiki/log.md",
     "tools/wiki/cli.py",
 )
+_UNINSTALLED_OPTIONAL_TOPOLOGY = frozenset({"AGENTS.md", "tools/wiki/cli.py"})
 _LEGACY_BUILDER_COPIES = ("init-vault.sh", "scripts/bootstrap.sh")
 _SYSTEM_SYMLINK_COMPONENTS = frozenset({Path("/etc"), Path("/tmp"), Path("/var")})
 _MIGRATION_METADATA_PATHS = frozenset({".vault-builder/manifest.json"})
@@ -183,17 +184,34 @@ def _safe_target_path(target: Path, relative: str, *, reject_leaf_symlink: bool 
 
 
 def _validate_topology(target: Path) -> None:
+    # Decision 44: uninstall deletes unmodified builder files with the manifest, so a Vault without a
+    # manifest that keeps wiki/log.md may lack them; the catalog actions then plan them as create.
+    optional = _UNINSTALLED_OPTIONAL_TOPOLOGY if _is_uninstalled_vault(target) else frozenset()
     for relative in _REQUIRED_TOPOLOGY:
         path = _safe_target_path(target, relative)
         try:
             state = path.lstat()
         except FileNotFoundError as exc:
+            if relative in optional:
+                continue
             raise ValueError(f"Vault topology is missing required file: {relative}") from exc
         except OSError as exc:
             raise ValueError(f"Vault topology is unreadable: {relative}") from exc
         if not stat.S_ISREG(state.st_mode):
             raise ValueError(f"Vault topology requires a regular file: {relative}")
         _read_file(path, relative)
+
+
+def _is_uninstalled_vault(target: Path) -> bool:
+    """True when the manifest path is absent and wiki/log.md is a regular file."""
+    manifest = _safe_target_path(target, ".vault-builder/manifest.json")
+    log = _safe_target_path(target, "wiki/log.md")
+    if manifest.exists() or manifest.is_symlink():
+        return False
+    try:
+        return stat.S_ISREG(log.lstat().st_mode)
+    except OSError:
+        return False
 
 
 def _load_catalog(builder: Path, relative: str) -> ContractCatalog:

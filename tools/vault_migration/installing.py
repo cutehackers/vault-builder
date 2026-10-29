@@ -1,15 +1,22 @@
-"""Install a Vault plus its user-level files: project-memory skill, recall script, vault map, MCP entry.
+"""Install a Vault plus its user-level files: project-memory skill, recall script, router, vault map,
+and the one shared MCP server entry `mcpServers.llm-wiki`. No Vault gets a .mcp.json.
 
 New Vault: precheck, assemble and self-check in a temporary sibling folder, one rename, then the
 changes outside the Vault, then the final manifest. A failure after the rename restores every
 outside file from its backup and removes the new Vault folder, which holds only seed content.
 
-Existing Vault (valid manifest): refuse unless a catalog v2 audit needs no changes, then regenerate
-.mcp.json and run only the outside-Vault steps. A failure restores only the outside files.
+Existing Vault (valid manifest): refuse unless a catalog v2 audit needs no changes, then run only the
+outside-Vault steps. A failure restores only the outside files.
+
+Vault without a manifest but with wiki/index.md (left by uninstall): audit it, refuse when the plan
+holds review-required or invalid actions, restore managed files and the manifest with apply_plan,
+then continue as an existing Vault. A failure after apply restores only the outside files and
+leaves a valid existing Vault, so running install again finishes the job.
 
 Outside files live beneath the config folder: CLAUDE_CONFIG_DIR when set, else $HOME/.claude.
 The MCP settings file is $HOME/.claude.json, or <config folder>/.claude.json when CLAUDE_CONFIG_DIR
 is set. Manifest records locate them relative to $HOME, so the config folder must be inside $HOME.
+The server entry is rewritten only when it changes, so a second Vault usually leaves that file alone.
 """
 from __future__ import annotations
 
@@ -31,20 +38,29 @@ from typing import TextIO
 
 from tools.wiki.lib.vault_manifest import normalized_json_sha256
 
+from .applying import apply_plan
 from .catalogs import load_catalog, sha256_file
 from .durability import fsync_directory
 from .manifests import create_manifest, load_manifest, write_manifest
+from .models import MigrationPlan
 from .planning import audit_vault
 
 
 ROOT = Path(__file__).resolve().parents[2]
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+MCP_SERVER_KEY = "llm-wiki"
+# Entries named llm-wiki-<name> come from the previous builder version, which install refuses.
 MCP_ENTRY_PREFIX = "llm-wiki-"
 RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
 _ASSET_ROOT = Path("tools/vault_migration/assets/project-memory")
+_ROUTER_ASSET = Path("tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py")
 _CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
-_VAULT_MAP_VERSION = 1
+_REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
+_VAULT_MAP_VERSION = 2  # the version install writes
+_VAULT_MAP_READ_VERSIONS = (1, 2)
+_PATCH_VERSION = re.compile(r"\d+\.\d+\.\d+")
+_PREVIOUS_VERSION_HINT = "Run uninstall with the previous vault-builder version, then run install again."
 
 # The same file set init-vault.sh copied before it became a wrapper.
 _COPY_FILES = (
@@ -129,8 +145,36 @@ class UserPaths:
     def vault_map(self) -> Path:
         return self.config_dir / "vault-builder" / "vault-map.json"
 
+    @property
+    def router(self) -> Path:
+        return self.config_dir / "vault-builder" / "llm_wiki_router.py"
+
     def relative(self, path: Path) -> str:
         return path.relative_to(self.home).as_posix()
+
+
+def choose_interpreter(executable: str, environ: Mapping[str, str]) -> tuple[str, str | None]:
+    """Return (interpreter path, note). Prefer a path to the same real file without a patch version.
+
+    Candidates in order: the absolute executable path, python<major>.<minor> on PATH, python3 on PATH.
+    major.minor is the running interpreter's version. With no match, return the executable path and a
+    note, because a path with a patch version stops working after a Python patch update.
+    """
+    original = os.path.abspath(executable)
+    real = os.path.realpath(executable)
+    search = environ.get("PATH", "")
+    candidates = [original]
+    for name in (f"python{sys.version_info[0]}.{sys.version_info[1]}", "python3"):
+        found = shutil.which(name, path=search) if search else None
+        if found:
+            candidates.append(os.path.abspath(found))
+    for candidate in candidates:
+        if os.path.realpath(candidate) == real and not _PATCH_VERSION.search(candidate):
+            return candidate, None
+    return original, (
+        f"Used a version-bound interpreter path ({original}). "
+        "After you upgrade Python, run install again."
+    )
 
 
 def resolve_user_paths(environ: Mapping[str, str]) -> UserPaths:
@@ -177,13 +221,15 @@ class _InstallPlan:
     files: list[_FilePlan]
     vault_map: dict[str, object]
     vault_map_action: str
+    vault_map_write: bool
     mcp_entry: dict[str, object]
     mcp_entry_action: str
     notes: list[str] = field(default_factory=list)
+    restore_plan: MigrationPlan | None = None  # set for a Vault without a manifest
 
     @property
     def mcp_key(self) -> str:
-        return MCP_ENTRY_PREFIX + self.name
+        return MCP_SERVER_KEY
 
 
 def install(
@@ -200,19 +246,28 @@ def install(
     """Install or register a Vault. Raise InstallError after restoring the prior state."""
     stream = out if out is not None else sys.stdout
     require_python(tuple(sys.version_info))
+    environment = os.environ if environ is None else environ
+    notes: list[str] = []
+    if python is None:
+        python, note = choose_interpreter(sys.executable, environment)
+        if note is not None:
+            notes.append(note)
     plan = _precheck(
         Path(target),
         name=name,
         with_stenc=with_stenc,
         builder_root=builder_root,
-        environ=os.environ if environ is None else environ,
-        python=python or os.path.abspath(sys.executable),
+        environ=environment,
+        python=python,
     )
+    plan.notes[:0] = notes
     if dry_run:
         _print_dry_run(plan, stream)
         return 0
     if plan.new_vault:
         _install_new_vault(plan, builder_root)
+    elif plan.restore_plan is not None:
+        _install_restored_vault(plan, builder_root)
     else:
         _install_existing_vault(plan, builder_root)
     _print_result(plan, stream)
@@ -235,10 +290,15 @@ def _precheck(
         raise InstallError(f"Interpreter path must be absolute: {python}")
     user = resolve_user_paths(environ)
     target = _absolute_target(target)
-    new_vault, empty_dir = _target_state(target, builder_root)
+    state, empty_dir = _target_state(target, builder_root)
+    new_vault = state == "new"
     vault_name = _vault_name(target, name)
-    if not new_vault:
-        _require_same_entry_key(target, MCP_ENTRY_PREFIX + vault_name, user)
+    if state == "existing":
+        _require_current_records(target, user)
+    if state != "new" and (target / ".mcp.json").exists():
+        raise InstallError(
+            f"Vault {target} has a .mcp.json from the previous vault-builder version. {_PREVIOUS_VERSION_HINT}"
+        )
     if with_stenc and new_vault:
         missing = [path for path in _STENC_REQUIRED if not (builder_root / path).exists()]
         if missing:
@@ -247,45 +307,57 @@ def _precheck(
                 + ", ".join(missing)
                 + ". Create the vault without --with-stenc, or run --with-stenc from a template that includes Stenc."
             )
-    for path in (user.skill, user.recall, user.vault_map, user.mcp_config):
+    for path in (user.skill, user.recall, user.router, user.vault_map, user.mcp_config):
         _require_regular_or_absent(path)
-    server = target / "tools" / "wiki" / "mcp_server.py"
-    entry: dict[str, object] = {"command": python, "args": [str(server)]}
+    entry: dict[str, object] = {"command": python, "args": ["-I", str(user.router)]}
     notes: list[str] = []
 
     claude_config = _load_json_object(user.mcp_config, "MCP settings file")
     servers = claude_config.get("mcpServers", {})
     if not isinstance(servers, dict):
         raise InstallError(f"MCP settings file {user.mcp_config}: mcpServers must be a JSON object.")
-    key = MCP_ENTRY_PREFIX + vault_name
-    existing_entry = servers.get(key)
+    old_keys = sorted(
+        key for key, value in servers.items() if key.startswith(MCP_ENTRY_PREFIX) and _entry_server(value) is not None
+    )
+    if old_keys:
+        raise InstallError(
+            f"MCP settings file {user.mcp_config} has entries from the previous vault-builder version: "
+            + ", ".join(f"mcpServers.{key}" for key in old_keys)
+            + f". {_PREVIOUS_VERSION_HINT}"
+        )
+    existing_entry = servers.get(MCP_SERVER_KEY)
     if existing_entry is None:
         entry_action = "create"
+    elif not _runs_router(existing_entry, user.router):
+        raise InstallError(
+            f"MCP settings file {user.mcp_config} already has mcpServers.{MCP_SERVER_KEY} for another program "
+            f"(its args do not include {user.router}). Remove or rename that entry, then run install again."
+        )
+    elif existing_entry == entry:
+        entry_action = "unchanged"
     else:
-        owner = _entry_server(existing_entry)
-        if owner is not None and _same_path(owner, server):
-            entry_action = "unchanged" if existing_entry == entry else "replace"
-        elif owner is not None and not owner.exists():
-            entry_action = "replace"
-            notes.append(f"Replacing mcpServers.{key}: its vault no longer exists ({owner}).")
-        else:
-            raise InstallError(
-                f"MCP settings file {user.mcp_config} already has mcpServers.{key} for another vault. "
-                "Choose a different name with --name."
-            )
+        entry_action = "replace"
+        old_command = existing_entry.get("command") if isinstance(existing_entry, dict) else None
+        notes.append(f"Replacing mcpServers.{MCP_SERVER_KEY} interpreter {old_command} with {python}.")
 
     vault_map = _load_json_object(user.vault_map, "Vault map")
     if vault_map:
-        if vault_map.get("version") != _VAULT_MAP_VERSION:
-            raise InstallError(f"Vault map {user.vault_map}: version must be {_VAULT_MAP_VERSION}.")
+        if vault_map.get("version") not in _VAULT_MAP_READ_VERSIONS:
+            versions = " or ".join(str(version) for version in _VAULT_MAP_READ_VERSIONS)
+            raise InstallError(f"Vault map {user.vault_map}: version must be {versions}.")
         for section in ("vaults", "projects"):
             if not isinstance(vault_map.get(section, {}), dict):
                 raise InstallError(f"Vault map {user.vault_map}: {section} must be a JSON object.")
+        map_upgrade = vault_map.get("version") != _VAULT_MAP_VERSION
+        vault_map["version"] = _VAULT_MAP_VERSION
     else:
         vault_map = {"version": _VAULT_MAP_VERSION, "vaults": {}, "projects": {}}
+        map_upgrade = False
     vaults = vault_map.setdefault("vaults", {})
     vault_map.setdefault("projects", {})
     assert isinstance(vaults, dict)
+    if state != "new":
+        _require_one_vault_name(target, vault_name, vaults, user)
     existing_vault = vaults.get(vault_name)
     if existing_vault is None:
         vaults[vault_name] = {"path": str(target), "role": "personal"}
@@ -309,16 +381,21 @@ def _precheck(
             )
 
     skill_asset = (builder_root / _ASSET_ROOT / "SKILL.md").read_bytes()
+    router_asset = (builder_root / _ROUTER_ASSET).read_bytes()
     files = [
         _file_plan(user.skill, skill_asset, 0o644, lambda current: current == skill_asset),
         _file_plan(user.recall, _recall_bytes(builder_root, python), 0o755, _recall_is_known(builder_root)),
+        _file_plan(user.router, router_asset, 0o644, lambda current: current == router_asset),
     ]
     for item in files:
         if item.action == "keep":
             notes.append(f"Kept existing file with unknown content (not replaced): {item.path}")
 
-    if not new_vault:
+    restore_plan = None
+    if state == "existing":
         _require_audit_clean(builder_root, target)
+    elif state == "restore":
+        restore_plan = _restore_audit(builder_root, target)
 
     return _InstallPlan(
         target=target,
@@ -331,9 +408,11 @@ def _precheck(
         files=files,
         vault_map=vault_map,
         vault_map_action=map_action,
+        vault_map_write=map_upgrade or map_action != "unchanged" or not user.vault_map.exists(),
         mcp_entry=entry,
         mcp_entry_action=entry_action,
         notes=notes,
+        restore_plan=restore_plan,
     )
 
 
@@ -346,16 +425,16 @@ def _absolute_target(target: Path) -> Path:
     return absolute.parent.resolve() / absolute.name
 
 
-def _target_state(target: Path, builder_root: Path) -> tuple[bool, bool]:
-    """Return (new_vault, target_is_empty_directory)."""
+def _target_state(target: Path, builder_root: Path) -> tuple[str, bool]:
+    """Return (state, target_is_empty_directory). state is new, existing, or restore (no manifest)."""
     if _same_path(target, builder_root) or _is_within(target, builder_root):
         raise InstallError(f"Target must be outside the builder checkout: {target}")
     if not target.exists():
-        return True, False
+        return "new", False
     if not target.is_dir():
         raise InstallError(f"Target exists and is not a directory: {target}")
     if not any(target.iterdir()):
-        return True, True
+        return "new", True
     try:
         manifest = load_manifest(target)
     except ValueError as exc:
@@ -366,11 +445,9 @@ def _target_state(target: Path, builder_root: Path) -> tuple[bool, bool]:
                 f"Target manifest is schema version {manifest.schema_version}. Run audit and apply first: "
                 f"tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json>"
             )
-        return False, False
+        return "existing", False
     if (target / "wiki" / "index.md").exists() or (target / "tools" / "wiki" / "cli.py").exists():
-        raise InstallError(
-            f"Target is an initialized vault without a Vault builder manifest: {target}. Run audit and apply first."
-        )
+        return "restore", False
     raise InstallError(f"Target is not empty: {target}. Choose an empty or new directory.")
 
 
@@ -389,26 +466,48 @@ def _vault_name(target: Path, name: str | None) -> str:
     )
 
 
-def _require_same_entry_key(target: Path, key: str, user: UserPaths) -> None:
-    """Refuse a second MCP entry name or config folder: uninstall accepts only one of each."""
+def _require_current_records(target: Path, user: UserPaths) -> None:
+    """Refuse records from another config folder or another server entry: uninstall accepts only these."""
     manifest = load_manifest(target)
     assert manifest is not None
-    expected = {user.relative(path) for path in (user.skill, user.recall, user.vault_map, user.mcp_config)}
+    expected = {
+        user.relative(path) for path in (user.skill, user.recall, user.router, user.vault_map, user.mcp_config)
+    }
     for record in manifest.external_records:
+        key_path = str(record.get("key_path", ""))
+        if record["kind"] == "json-entry" and key_path.startswith("mcpServers." + MCP_ENTRY_PREFIX):
+            raise InstallError(
+                f"Vault {target} was installed by the previous vault-builder version ({key_path}). "
+                f"{_PREVIOUS_VERSION_HINT}"
+            )
         if str(record["location"]) not in expected:
             raise InstallError(
                 f"Vault {target} was installed with another HOME or CLAUDE_CONFIG_DIR "
                 f"({record['location']} is not under the current config folder). "
                 "Run uninstall with the original HOME and CLAUDE_CONFIG_DIR first."
             )
-        key_path = str(record.get("key_path", ""))
-        if record["kind"] == "json-entry" and key_path != f"mcpServers.{key}":
-            registered = key_path.split(".", 1)[1]
-            name = registered[len(MCP_ENTRY_PREFIX):] if registered.startswith(MCP_ENTRY_PREFIX) else registered
+        if record["kind"] == "json-entry" and key_path != f"mcpServers.{MCP_SERVER_KEY}":
             raise InstallError(
-                f"Vault {target} is already registered as {key_path}. Run uninstall first to change "
-                f"its name, or install again with --name {name}."
+                f"Vault {target} has an unexpected server entry record {key_path}; "
+                f"install records only mcpServers.{MCP_SERVER_KEY}. Run uninstall first."
             )
+
+
+def _require_one_vault_name(target: Path, name: str, vaults: dict[str, object], user: UserPaths) -> None:
+    """Refuse a second vault map name for the same folder: uninstall removes only one."""
+    for other, value in vaults.items():
+        path = value.get("path") if isinstance(value, dict) else None
+        if other != name and isinstance(path, str) and _same_path(Path(path).expanduser(), target):
+            raise InstallError(
+                f"Vault {target} is already registered as vault {other} in {user.vault_map}. "
+                f"Run uninstall first to change its name, or install again with --name {other}."
+            )
+
+
+def _runs_router(entry: object, router: Path) -> bool:
+    if not isinstance(entry, dict) or not isinstance(entry.get("args"), list):
+        return False
+    return any(isinstance(argument, str) and _same_path(Path(argument), router) for argument in entry["args"])
 
 
 def _require_regular_or_absent(path: Path) -> None:
@@ -510,6 +609,27 @@ def _require_audit_clean(builder_root: Path, target: Path) -> None:
         )
 
 
+def _restore_audit(builder_root: Path, target: Path) -> MigrationPlan:
+    """Audit a Vault without a manifest. Refuse when any file needs human review (decision 42)."""
+    try:
+        plan = audit_vault(builder_root, target)
+    except ValueError as exc:
+        raise InstallError(
+            f"Target is a vault without a Vault builder manifest, and its audit failed: {exc} "
+            f"Run tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json> "
+            "to inspect it."
+        ) from exc
+    blocked = sorted(f"{action.action} {action.path}" for action in plan.actions if action.action in _REFUSED_RESTORE_ACTIONS)
+    if blocked:
+        raise InstallError(
+            f"Target is a vault without a Vault builder manifest, and {len(blocked)} paths need review before "
+            f"install can restore its managed files: {'; '.join(blocked)}. Run "
+            f"tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json>, "
+            "resolve those paths, apply the plan, then run install again."
+        )
+    return plan
+
+
 # New Vault assembly. Only the staging folder is written; failure removes it.
 
 
@@ -525,7 +645,6 @@ def _install_new_vault(plan: _InstallPlan, builder_root: Path) -> None:
         draft = create_manifest(builder_root, staging, "")
         write_manifest(staging, draft)
         _self_check(staging, builder_root, plan.python)
-        _write_mcp_json(staging, plan)  # final paths, so it is valid only after the rename
         if plan.target_was_empty_dir:
             os.rmdir(plan.target)
         os.rename(staging, plan.target)
@@ -564,10 +683,34 @@ def _install_new_vault(plan: _InstallPlan, builder_root: Path) -> None:
         changes.finish()
 
 
-def _install_existing_vault(plan: _InstallPlan, builder_root: Path) -> None:
+def _install_restored_vault(plan: _InstallPlan, builder_root: Path) -> None:
+    """Restore managed files and the manifest with apply, then continue as an existing Vault."""
+    assert plan.restore_plan is not None
+    try:
+        apply_plan(builder_root, plan.target, plan.restore_plan)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise InstallError(
+            "Restoring the vault's managed files and manifest failed; apply restored the vault and nothing "
+            f"outside the vault changed: {exc}"
+        ) from exc
+    _install_existing_vault(
+        plan,
+        builder_root,
+        failure=(
+            "Install failed after the vault's managed files and manifest were restored; outside files were "
+            "restored. The vault is now a valid existing vault, so run install again to finish"
+        ),
+    )
+
+
+def _install_existing_vault(
+    plan: _InstallPlan,
+    builder_root: Path,
+    *,
+    failure: str = "Install failed; outside files were restored",
+) -> None:
     manifest = load_manifest(plan.target)
     assert manifest is not None
-    _write_mcp_json(plan.target, plan)
     changes = _OutsideChanges()
     try:
         records = _apply_outside_changes(plan, changes)
@@ -583,7 +726,7 @@ def _install_existing_vault(plan: _InstallPlan, builder_root: Path) -> None:
     except BaseException as exc:
         changes.rollback()
         if isinstance(exc, (OSError, ValueError)):
-            raise InstallError(f"Install failed; outside files were restored: {exc}") from exc
+            raise InstallError(f"{failure}: {exc}") from exc
         raise
     finally:
         changes.finish()
@@ -677,12 +820,6 @@ def _self_check(staging: Path, builder_root: Path, python: str) -> None:
     )
     if lint.returncode != 0:
         raise InstallError("Self-check failed: lint reported errors.\n" + (lint.stdout + lint.stderr).strip())
-
-
-def _write_mcp_json(directory: Path, plan: _InstallPlan) -> None:
-    # .mcp.json is machine-specific (interpreter, absolute path), so it is not a managed file.
-    config = {"mcpServers": {"llm-wiki": plan.mcp_entry}}
-    _atomic_write(directory / ".mcp.json", (json.dumps(config, indent=2) + "\n").encode("utf-8"), 0o644)
 
 
 # Changes outside the Vault: backup, atomic write, restore on failure.
@@ -797,7 +934,7 @@ def _missing_directories(path: Path) -> list[Path]:
 
 
 def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list[dict[str, object]]:
-    """Write skill, recall script, vault map and MCP entry. Return the manifest external records.
+    """Write skill, recall script, router, vault map and server entry. Return the manifest external records.
 
     The caller rolls back `changes` on any failure, including failures after this returns.
     """
@@ -810,15 +947,15 @@ def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list
             records.append(
                 {"kind": "file", "location": user.relative(item.path), "sha256": sha256_file(item.path), "shared": True}
             )
-    if plan.vault_map_action != "unchanged" or not user.vault_map.exists():
+    if plan.vault_map_write:
         changes.write(user.vault_map, _json_bytes(plan.vault_map, indent=2), 0o644)
     records.append({"kind": "config", "location": user.relative(user.vault_map), "shared": True})
-    # Re-read just before writing: Claude Code may have rewritten the file since the precheck.
-    config = _load_json_object(user.mcp_config, "MCP settings file")
-    servers = dict(config.get("mcpServers", {}))  # type: ignore[arg-type]
-    servers[plan.mcp_key] = plan.mcp_entry
-    config["mcpServers"] = servers
-    if plan.mcp_entry_action != "unchanged" or not user.mcp_config.exists():
+    if plan.mcp_entry_action != "unchanged":
+        # Re-read just before writing: Claude Code may have rewritten the file since the precheck.
+        config = _load_json_object(user.mcp_config, "MCP settings file")
+        servers = dict(config.get("mcpServers", {}))  # type: ignore[arg-type]
+        servers[plan.mcp_key] = plan.mcp_entry
+        config["mcpServers"] = servers
         mode = stat.S_IMODE(user.mcp_config.stat().st_mode) if user.mcp_config.exists() else 0o600
         changes.write(user.mcp_config, _json_bytes(config, indent=2), mode)
     records.append(
@@ -827,7 +964,7 @@ def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list
             "location": user.relative(user.mcp_config),
             "key_path": f"mcpServers.{plan.mcp_key}",
             "sha256": normalized_json_sha256(plan.mcp_entry),
-            "shared": False,
+            "shared": True,
         }
     )
     return records
@@ -840,13 +977,31 @@ def _json_bytes(value: object, *, indent: int) -> bytes:
 # Output.
 
 
+def _restore_changes(plan: MigrationPlan) -> list[str]:
+    return sorted(f"{action.action} {action.path}" for action in plan.actions if action.action in {"create", "replace"})
+
+
 def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
-    print(f"Dry run: install {'new vault' if plan.new_vault else 'existing vault'} {plan.target}", file=stream)
+    if plan.new_vault:
+        kind = "new vault"
+    elif plan.restore_plan is not None:
+        kind = "vault without a manifest"
+    else:
+        kind = "existing vault"
+    print(f"Dry run: install {kind} {plan.target}", file=stream)
     print(f"Vault name: {plan.name}", file=stream)
     print(f"Interpreter: {plan.python}", file=stream)
     if plan.new_vault:
         print(f"  create vault {plan.target} (assembled in a temporary sibling folder, then renamed)", file=stream)
-    print(f"  write {plan.target / '.mcp.json'}", file=stream)
+    if plan.restore_plan is not None:
+        counts: dict[str, int] = {}
+        for action in plan.restore_plan.actions:
+            counts[action.action] = counts.get(action.action, 0) + 1
+        summary = ", ".join(f"{action}: {counts[action]}" for action in sorted(counts))
+        print(f"  audit plan {plan.restore_plan.migration_id} ({summary})", file=stream)
+        for line in _restore_changes(plan.restore_plan):
+            print(f"    {line}", file=stream)
+        print("  apply the audit plan (release gate runs twice), which writes the manifest", file=stream)
     for item in plan.files:
         print(f"  {item.action} {item.path}", file=stream)
     print(f"  {plan.vault_map_action} vault {plan.name} in {plan.user.vault_map}", file=stream)
@@ -867,13 +1022,22 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
             print("Optional Stenc docs and tools skipped. Re-run with --with-stenc to include them.", file=stream)
     else:
         print(f"LLM Wiki Vault registered: {plan.target}", file=stream)
+    if plan.restore_plan is not None:
+        print("Restored managed files and the manifest:", file=stream)
+        for line in _restore_changes(plan.restore_plan) or ["none"]:
+            print(f"  {line}", file=stream)
     print(f"Vault name: {plan.name}", file=stream)
-    print(f"MCP server: mcpServers.{plan.mcp_key} in {plan.user.mcp_config}", file=stream)
+    print(f"MCP server: mcpServers.{plan.mcp_key} ({plan.mcp_entry_action}) in {plan.user.mcp_config}", file=stream)
+    print(f"Router: {plan.user.router}", file=stream)
     print(f"Vault map: {plan.user.vault_map}", file=stream)
     print(f"Skill: {plan.user.skill}", file=stream)
     for note in plan.notes:
         print(f"Note: {note}", file=stream)
-    print("Restart Claude Code to load the new MCP server and the project-memory skill.", file=stream)
+    print(
+        "Restart Claude Code, check that /mcp lists one llm-wiki server, then run "
+        f"tools/vault_migration/cli.py doctor {shlex.quote(str(plan.target))} from the vault-builder checkout.",
+        file=stream,
+    )
     print("Next:", file=stream)
     print(f"  cd {plan.target}", file=stream)
     print(f"  {python} tools/wiki/cli.py lint --report", file=stream)

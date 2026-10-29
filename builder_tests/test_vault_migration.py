@@ -612,9 +612,9 @@ def _external_records() -> list[dict[str, object]]:
         {
             "kind": "json-entry",
             "location": ".claude.json",
-            "key_path": "mcpServers.llm-wiki-personal",
+            "key_path": "mcpServers.llm-wiki",
             "sha256": "b" * 64,
-            "shared": False,
+            "shared": True,
         },
     ]
 
@@ -744,11 +744,10 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
         cases["shared-missing"] = drop(1, "shared")
         cases["unknown-record-field"] = record(1, "extra", True)
         cases["entry-missing-key-path"] = drop(2, "key_path")
-        cases["entry-other-root-key"] = record(2, "key_path", "projects.llm-wiki-personal")
+        cases["entry-other-root-key"] = record(2, "key_path", "projects.llm-wiki")
         cases["entry-empty-name"] = record(2, "key_path", "mcpServers.")
         cases["entry-nested-name"] = record(2, "key_path", "mcpServers.a/b")
         cases["entry-missing-sha256"] = drop(2, "sha256")
-        cases["entry-shared"] = record(2, "shared", True)
         cases["duplicate-file"] = duplicate(0)
         cases["duplicate-entry"] = duplicate(2)
         cases["file-location-reused"] = file_location_reused_by_entry
@@ -1283,6 +1282,43 @@ class MigrationPlanningTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             actions = {action.path: action for action in plan.actions}
             self.assertEqual("invalid", actions["tools/wiki/lib/authority.py"].action)
+
+    def test_audit_plans_missing_builder_topology_as_create_without_manifest(self):
+        # Decision 44: uninstall deletes unmodified AGENTS.md and tools/wiki/cli.py with the manifest.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            _copy_legacy_fixture(target)
+            (target / "AGENTS.md").unlink()
+            (target / "tools" / "wiki" / "cli.py").unlink()
+            before = _tree_digest(target)
+
+            plan = audit_vault(ROOT, target)
+
+            self.assertEqual(before, _tree_digest(target))
+            actions = {action.path: action for action in plan.actions}
+            self.assertEqual("create", actions["AGENTS.md"].action)
+            self.assertEqual("create", actions["tools/wiki/cli.py"].action)
+
+    def test_audit_keeps_builder_topology_required_with_manifest_or_without_wiki_log(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with_manifest = root / "with-manifest"
+            _copy_legacy_fixture(with_manifest)
+            write_manifest(with_manifest, create_manifest(ROOT, with_manifest, "test"))
+            (with_manifest / "AGENTS.md").unlink()
+            without_log = root / "without-log"
+            _copy_legacy_fixture(without_log)
+            (without_log / "AGENTS.md").unlink()
+            (without_log / "wiki" / "log.md").unlink()
+            plain = root / "plain"
+            plain.mkdir()
+            (plain / "notes.txt").write_text("keep\n")
+            for target, missing in ((with_manifest, "AGENTS.md"), (without_log, "AGENTS.md"), (plain, "AGENTS.md")):
+                with self.subTest(target=target.name):
+                    before = _tree_digest(target)
+                    with self.assertRaisesRegex(ValueError, f"missing required file: {re.escape(missing)}"):
+                        audit_vault(ROOT, target)
+                    self.assertEqual(before, _tree_digest(target))
 
     def test_audit_forces_authority_scan_and_reports_duplicate_canonical_bodies(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6046,21 +6082,18 @@ class FreshVaultClaudeIntegrationTest(unittest.TestCase):
                     self.assertEqual(original_fields["description"], pointer_fields["description"])
                     self.assertIn(original_relative, pointer.read_text(encoding="utf-8"))
 
-    def test_fresh_vault_mcp_json_uses_chosen_python_and_absolute_server_path(self):
-        config_path = self.target / ".mcp.json"
-        self.assertTrue(config_path.is_file())
-        config = json.loads(config_path.read_text(encoding="utf-8"))
+    def test_fresh_vault_registers_router_with_absolute_interpreter_and_no_mcp_json(self):
+        self.assertFalse((self.target / ".mcp.json").exists())
+        home = Path(os.environ["HOME"])
+        config = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
         server = config["mcpServers"]["llm-wiki"]
         command = Path(server["command"])
         self.assertTrue(command.is_absolute(), command)
         self.assertTrue(command.is_file(), command)
         self.assertTrue(os.access(command, os.X_OK), command)
-        script_args = [arg for arg in server["args"] if arg.endswith("tools/wiki/mcp_server.py")]
-        self.assertEqual(1, len(script_args), server["args"])
-        script = Path(script_args[0])
-        self.assertTrue(script.is_absolute(), script)
-        self.assertTrue(script.is_file(), script)
-        self.assertEqual((self.target / "tools" / "wiki" / "mcp_server.py").resolve(), script.resolve())
+        router = home.resolve() / ".claude" / "vault-builder" / "llm_wiki_router.py"
+        self.assertEqual(["-I", str(router)], server["args"])
+        self.assertEqual(ROUTER_ASSET.read_bytes(), router.read_bytes())
         version = subprocess.run(
             [server["command"], "-c", "import sys; print(sys.version_info >= (3, 10))"],
             text=True,
@@ -6141,6 +6174,7 @@ PROJECT_MEMORY_ASSET = ROOT / "tools" / "vault_migration" / "assets" / "project-
 RECALL_ASSET = PROJECT_MEMORY_ASSET / "scripts" / "recall.sh"
 PROJECT_MEMORY_SKILL_ASSET = PROJECT_MEMORY_ASSET / "SKILL.md"
 RECALL_PYTHON_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
+ROUTER_ASSET = ROOT / "tools" / "vault_migration" / "assets" / "llm-wiki-router" / "llm_wiki_router.py"
 RECALL_SECTIONS = ("open", "decisions", "corrections")
 
 
@@ -6753,30 +6787,34 @@ class _UserHomeTestCase(unittest.TestCase):
     def _user_snapshot(self) -> dict[str, tuple[str, int]]:
         return _tree_snapshot(self.home)
 
+    def _chosen_python(self) -> str:
+        """The interpreter install picks for sys.executable with this test's PATH (spec 4.8)."""
+        return installing.choose_interpreter(sys.executable, self._env())[0]
+
     def _assert_installed(self, target: Path, name: str, config: Path, claude_json: Path) -> dict[str, object]:
+        python = self._chosen_python()
         self.assertTrue((target / "tools" / "wiki" / "cli.py").is_file())
         self.assertTrue((target / "wiki" / "index.md").is_file())
         skill = config / "skills" / "project-memory" / "SKILL.md"
         recall = config / "skills" / "project-memory" / "scripts" / "recall.sh"
         vault_map_path = config / "vault-builder" / "vault-map.json"
+        router = config / "vault-builder" / "llm_wiki_router.py"
         self.assertIn("name: project-memory", skill.read_text(encoding="utf-8").splitlines())
         self.assertEqual(PROJECT_MEMORY_SKILL_ASSET.read_bytes(), skill.read_bytes())
         self.assertTrue(os.access(recall, os.X_OK))
         recall_text = recall.read_text(encoding="utf-8")
         self.assertNotIn(RECALL_PYTHON_PLACEHOLDER, recall_text)
-        self.assertIn(f"PYTHON={shlex.quote(sys.executable)}\n", recall_text)
+        self.assertIn(f"PYTHON={shlex.quote(python)}\n", recall_text)
+        self.assertEqual(ROUTER_ASSET.read_bytes(), router.read_bytes())
         vault_map = json.loads(vault_map_path.read_text(encoding="utf-8"))
-        self.assertEqual(1, vault_map["version"])
+        self.assertEqual(2, vault_map["version"])
         self.assertEqual({"path": str(target), "role": "personal"}, vault_map["vaults"][name])
         self.assertIsInstance(vault_map["projects"], dict)
         claude = json.loads(claude_json.read_text(encoding="utf-8"))
-        entry = claude["mcpServers"][f"llm-wiki-{name}"]
-        self.assertEqual(
-            {"command": sys.executable, "args": [str(target / "tools" / "wiki" / "mcp_server.py")]},
-            entry,
-        )
-        mcp_json = json.loads((target / ".mcp.json").read_text(encoding="utf-8"))
-        self.assertEqual(entry, mcp_json["mcpServers"]["llm-wiki"])
+        self.assertEqual(["llm-wiki"], [key for key in claude["mcpServers"] if key.startswith("llm-wiki")])
+        entry = claude["mcpServers"]["llm-wiki"]
+        self.assertEqual({"command": python, "args": ["-I", str(router)]}, entry)
+        self.assertFalse((target / ".mcp.json").exists())
         manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(2, manifest["schema_version"])
         self.assertEqual(2, manifest["contract_version"])
@@ -6790,13 +6828,14 @@ class _UserHomeTestCase(unittest.TestCase):
             {
                 relative(skill): {"kind": "file", "location": relative(skill), "sha256": sha256_file(skill), "shared": True},
                 relative(recall): {"kind": "file", "location": relative(recall), "sha256": sha256_file(recall), "shared": True},
+                relative(router): {"kind": "file", "location": relative(router), "sha256": sha256_file(router), "shared": True},
                 relative(vault_map_path): {"kind": "config", "location": relative(vault_map_path), "shared": True},
                 relative(claude_json): {
                     "kind": "json-entry",
-                    "key_path": f"mcpServers.llm-wiki-{name}",
+                    "key_path": "mcpServers.llm-wiki",
                     "location": relative(claude_json),
                     "sha256": normalized_json_sha256(entry),
-                    "shared": False,
+                    "shared": True,
                 },
             },
             records,
@@ -6826,14 +6865,14 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual({key: value for key, value in before.items() if key != "mcpServers"},
                          {key: value for key, value in claude.items() if key != "mcpServers"})
         self.assertEqual(before["mcpServers"]["other"], claude["mcpServers"]["other"])
-        self.assertEqual(["other", "llm-wiki-a"], list(claude["mcpServers"]))
+        self.assertEqual(["other", "llm-wiki"], list(claude["mcpServers"]))
         self.assertEqual([], [path.name for path in self.work.iterdir() if path.name != "vault-a"])
         self.assertEqual([], sorted(str(path) for path in self.home.rglob("*vault-builder-backup*")))
         next_lines = result.stdout.split("Next:\n", 1)[1].splitlines()
         commands = [line.strip() for line in next_lines if "tools/wiki/cli.py" in line]
         self.assertTrue(commands, result.stdout)
         for command in commands:
-            self.assertTrue(command.startswith(shlex.quote(sys.executable) + " "), command)
+            self.assertTrue(command.startswith(shlex.quote(self._chosen_python()) + " "), command)
         # The installed vault is self-consistent: lint and the recall script both run.
         lint = subprocess.run(
             [sys.executable, "tools/wiki/cli.py", "lint"], cwd=target, text=True, capture_output=True, check=False
@@ -6882,7 +6921,7 @@ class InstallTest(_UserHomeTestCase):
         vault_map = json.loads((self.config / "vault-builder" / "vault-map.json").read_text(encoding="utf-8"))
         self.assertEqual(["a", "b"], list(vault_map["vaults"]))
         claude = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
-        self.assertEqual(["llm-wiki-a", "llm-wiki-b"], list(claude["mcpServers"]))
+        self.assertEqual(["llm-wiki"], list(claude["mcpServers"]))
         self._assert_installed(second, "b", self.config, self.home / ".claude.json")
 
     def test_install_uses_claude_config_dir_when_set(self):
@@ -6910,8 +6949,8 @@ class InstallTest(_UserHomeTestCase):
     def test_install_default_name_is_target_basename_or_requires_name(self):
         target = self.work / "my-notes"
         self.assertEqual(0, self._install(str(target)).returncode)
-        claude = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
-        self.assertIn("llm-wiki-my-notes", claude["mcpServers"])
+        vault_map = json.loads((self.config / "vault-builder" / "vault-map.json").read_text(encoding="utf-8"))
+        self.assertIn("my-notes", vault_map["vaults"])
 
         odd = self.work / "my notes"
         before = self._user_snapshot()
@@ -7017,7 +7056,8 @@ class InstallTest(_UserHomeTestCase):
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("Dry run", result.stdout)
-        self.assertIn("llm-wiki-a", result.stdout)
+        self.assertIn("mcpServers.llm-wiki ", result.stdout)
+        self.assertNotIn(".mcp.json", result.stdout)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7032,7 +7072,6 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
         shutil.rmtree(self.config)
         (self.home / ".claude.json").unlink()
-        (target / ".mcp.json").unlink()
         vault_files = {
             path: digest
             for path, digest in _tree_snapshot(target).items()
@@ -7074,7 +7113,7 @@ class InstallTest(_UserHomeTestCase):
         result = self._install(str(target), "--name", "b")
 
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("mcpServers.llm-wiki-a", result.stderr)
+        self.assertIn("vault a", result.stderr)
         self.assertIn("uninstall", result.stderr)
         self.assertIn("--name a", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
@@ -7105,7 +7144,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertTrue(claude_json.exists())
 
     def test_install_failure_outside_vault_restores_user_files_and_removes_target(self):
-        for failing in ("SKILL.md", "recall.sh", "vault-map.json", ".claude.json", "manifest.json"):
+        for failing in ("SKILL.md", "recall.sh", "llm_wiki_router.py", "vault-map.json", ".claude.json", "manifest.json"):
             with self.subTest(failing=failing):
                 # Existing shared files of another vault, so restore must bring back prior bytes.
                 home = self.tmp / f"home-{failing}"
@@ -7114,12 +7153,17 @@ class InstallTest(_UserHomeTestCase):
                 self.home = home
                 self.config = home / ".claude"
                 self.assertEqual(0, installing.install(self.work / f"first-{failing}", name="first", out=io.StringIO()))
-                # Every outside file now needs a write: create the skill, replace recall.sh, update both JSON files.
+                # Every outside file now needs a write: create the skill and the router, replace recall.sh,
+                # add a vault to the vault map, and replace the server entry's interpreter.
                 (self.config / "skills" / "project-memory" / "SKILL.md").unlink()
+                (self.config / "vault-builder" / "llm_wiki_router.py").unlink()
                 (self.config / "skills" / "project-memory" / "scripts" / "recall.sh").write_text(
                     RECALL_ASSET.read_text(encoding="utf-8").replace(RECALL_PYTHON_PLACEHOLDER, "/old/python3.11"),
                     encoding="utf-8",
                 )
+                claude = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
+                claude["mcpServers"]["llm-wiki"]["command"] = "/old/python3.11"
+                (home / ".claude.json").write_text(json.dumps(claude), encoding="utf-8")
                 target = self.work / f"vault-{failing}"
                 before = _tree_snapshot(home)
 
@@ -7159,7 +7203,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(2, len(commands), result.stdout)
         for command in commands:
             self.assertFalse(command.startswith("python3 "), command)
-            self.assertTrue(command.startswith(shlex.quote(sys.executable) + " "), command)
+            self.assertTrue(command.startswith(shlex.quote(self._chosen_python()) + " "), command)
 
     def test_init_vault_with_old_python_only_writes_nothing(self):
         stub_bin = self.tmp / "bin"
@@ -7193,6 +7237,384 @@ class InstallTest(_UserHomeTestCase):
         self.assertIn("Python 3.10 or newer", result.stderr)
         self.assertFalse(target.exists())
         self.assertEqual(before, _tree_snapshot(self.home, self.work))
+
+
+def _make_fake_python(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+class ChooseInterpreterTests(unittest.TestCase):
+    """choose_interpreter keeps the real file and prefers a path without a patch version (spec 4.8, A-17)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.tmp = Path(self._tmpdir.name).resolve()
+        self.minor_name = f"python{sys.version_info[0]}.{sys.version_info[1]}"
+        self.real = _make_fake_python(self.tmp / "Cellar" / "3.12.7" / "bin" / self.minor_name)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+
+    def test_minor_version_symlink_on_path_is_chosen(self):
+        (self.bin / self.minor_name).symlink_to(self.real)
+
+        self.assertEqual(
+            (str(self.bin / self.minor_name), None),
+            installing.choose_interpreter(str(self.real), {"PATH": str(self.bin)}),
+        )
+
+    def test_python3_symlink_to_same_file_is_chosen_when_minor_name_is_missing(self):
+        (self.bin / "python3").symlink_to(self.real)
+
+        self.assertEqual(
+            (str(self.bin / "python3"), None),
+            installing.choose_interpreter(str(self.real), {"PATH": str(self.bin)}),
+        )
+
+    def test_without_symlink_returns_original_path_and_note(self):
+        path, note = installing.choose_interpreter(str(self.real), {"PATH": str(self.bin)})
+
+        self.assertEqual(str(self.real), path)
+        self.assertIsNotNone(note)
+        assert note is not None
+        self.assertIn("install", note)
+
+    def test_python3_pointing_to_another_file_is_not_chosen(self):
+        other = _make_fake_python(self.tmp / "other" / "python3")
+        (self.bin / "python3").symlink_to(other)
+
+        path, note = installing.choose_interpreter(str(self.real), {"PATH": str(self.bin)})
+
+        self.assertEqual(str(self.real), path)
+        self.assertIsNotNone(note)
+
+    def test_executable_without_patch_version_is_kept_without_note(self):
+        stable = _make_fake_python(self.tmp / "opt" / "bin" / self.minor_name)
+        (self.bin / "python3").symlink_to(stable)
+
+        self.assertEqual((str(stable), None), installing.choose_interpreter(str(stable), {"PATH": str(self.bin)}))
+
+    def test_patch_version_symlink_is_not_chosen(self):
+        patch_bin = self.tmp / "3.12.7-bin"
+        patch_bin.mkdir()
+        (patch_bin / self.minor_name).symlink_to(self.real)
+
+        path, note = installing.choose_interpreter(str(self.real), {"PATH": str(patch_bin)})
+
+        self.assertEqual(str(self.real), path)
+        self.assertIsNotNone(note)
+
+
+class InstallRouterTests(_UserHomeTestCase):
+    """install registers one user-scope llm-wiki entry and copies the router (spec 4.5, A-2, A-3, A-4)."""
+
+    @property
+    def router(self) -> Path:
+        return self.config / "vault-builder" / "llm_wiki_router.py"
+
+    def test_new_vault_registers_one_llm_wiki_entry_and_no_mcp_json(self):
+        target = self.work / "vault-a"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        claude = self._assert_installed(target, "a", self.config, self.home / ".claude.json")
+        entry = claude["mcpServers"]["llm-wiki"]
+        self.assertTrue(os.path.isabs(entry["command"]), entry)
+        recall_lines = (self.config / "skills" / "project-memory" / "scripts" / "recall.sh").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertIn(f"PYTHON={shlex.quote(entry['command'])}", recall_lines)
+        self.assertNotIn(".mcp.json", result.stdout)
+        self.assertIn(str(self.router), result.stdout)
+        self.assertIn("mcpServers.llm-wiki ", result.stdout)
+        self.assertIn("/mcp", result.stdout)
+        self.assertIn("doctor", result.stdout)
+
+    def test_second_vault_leaves_mcp_settings_bytes_unchanged(self):
+        self.assertEqual(0, self._install(str(self.work / "a")).returncode)
+        claude_json = self.home / ".claude.json"
+        before = claude_json.read_bytes()
+        router_before = _tree_snapshot(self.router)
+
+        result = self._install(str(self.work / "b"))
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(before, claude_json.read_bytes())
+        self.assertEqual(router_before, _tree_snapshot(self.router))
+        vault_map = json.loads((self.config / "vault-builder" / "vault-map.json").read_text(encoding="utf-8"))
+        self.assertEqual(2, vault_map["version"])
+        self.assertEqual(["a", "b"], sorted(vault_map["vaults"]))
+        self._assert_installed(self.work / "b", "b", self.config, claude_json)
+
+    def test_old_entry_mcp_json_and_foreign_llm_wiki_entry_are_refused_without_writes(self):
+        existing = self.work / "existing"
+        self.assertEqual(0, self._install(str(existing), "--name", "existing").returncode)
+        claude_json = self.home / ".claude.json"
+        saved = claude_json.read_bytes()
+
+        def old_entry() -> None:
+            claude = json.loads(saved)
+            claude["mcpServers"]["llm-wiki-x"] = {
+                "command": sys.executable,
+                "args": [str(self.work / "x" / "tools" / "wiki" / "mcp_server.py")],
+            }
+            claude_json.write_text(json.dumps(claude), encoding="utf-8")
+
+        def foreign_entry() -> None:
+            claude = json.loads(saved)
+            claude["mcpServers"]["llm-wiki"] = {"command": "node", "args": ["/opt/other/server.js"]}
+            claude_json.write_text(json.dumps(claude), encoding="utf-8")
+
+        def mcp_json() -> None:
+            (existing / ".mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+
+        cases = {
+            "old entry, new vault": (old_entry, self.work / "new-vault", "uninstall"),
+            "old entry, existing vault": (old_entry, existing, "uninstall"),
+            ".mcp.json in existing vault": (mcp_json, existing, "uninstall"),
+            "foreign llm-wiki entry": (foreign_entry, self.work / "new-vault", "mcpServers.llm-wiki"),
+        }
+        for label, (damage, target, expected) in cases.items():
+            with self.subTest(case=label):
+                damage()
+                try:
+                    before = _tree_snapshot(self.tmp)
+                    for arguments in (("--dry-run",), ()):
+                        result = self._install(str(target), "--name", target.name, *arguments)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(expected, result.stderr)
+                        self.assertEqual(before, _tree_snapshot(self.tmp))
+                finally:
+                    claude_json.write_bytes(saved)
+                    (existing / ".mcp.json").unlink(missing_ok=True)
+
+    def test_entry_with_other_interpreter_is_replaced_with_note(self):
+        first_python = self.tmp / "py-first" / "python3"
+        second_python = self.tmp / "py-second" / "python3"
+        for link in (first_python, second_python):
+            link.parent.mkdir()
+            link.symlink_to(sys.executable)
+        self.assertEqual(0, installing.install(self.work / "a", name="a", python=str(first_python), out=io.StringIO()))
+        out = io.StringIO()
+
+        self.assertEqual(0, installing.install(self.work / "b", name="b", python=str(second_python), out=out))
+
+        entry = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]["llm-wiki"]
+        self.assertEqual({"command": str(second_python), "args": ["-I", str(self.router)]}, entry)
+        notes = [line for line in out.getvalue().splitlines() if line.startswith("Note:")]
+        self.assertTrue(any(str(first_python) in line and str(second_python) in line for line in notes), notes)
+
+    def test_router_with_other_bytes_is_kept_and_listed(self):
+        self.router.parent.mkdir(parents=True)
+        self.router.write_text("# my own router\n", encoding="utf-8")
+        target = self.work / "vault-a"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("# my own router\n", self.router.read_text(encoding="utf-8"))
+        self.assertTrue(any(str(self.router) in line for line in result.stdout.splitlines() if line.startswith("Note:")))
+        manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
+        locations = [record["location"] for record in manifest["external_records"]]
+        self.assertNotIn(".claude/vault-builder/llm_wiki_router.py", locations)
+
+    def test_vault_map_version_1_is_read_and_written_as_version_2(self):
+        vault_map_path = self.config / "vault-builder" / "vault-map.json"
+        vault_map_path.parent.mkdir(parents=True)
+        team = self.work / "team"
+        team.mkdir()
+        projects = {"app": {"root": str(self.work / "app"), "vaults": ["team"]}}
+        vault_map_path.write_text(
+            json.dumps({"version": 1, "vaults": {"team": {"path": str(team), "role": "team"}}, "projects": projects}),
+            encoding="utf-8",
+        )
+        target = self.work / "vault-a"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        vault_map = json.loads(vault_map_path.read_text(encoding="utf-8"))
+        self.assertEqual(2, vault_map["version"])
+        self.assertEqual({"path": str(team), "role": "team"}, vault_map["vaults"]["team"])
+        self.assertEqual({"path": str(target), "role": "personal"}, vault_map["vaults"]["a"])
+        self.assertEqual(projects, vault_map["projects"])
+
+    def test_vault_map_version_1_is_rewritten_even_when_the_vault_is_already_listed(self):
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        vault_map_path = self.config / "vault-builder" / "vault-map.json"
+        vault_map = json.loads(vault_map_path.read_text(encoding="utf-8"))
+        vault_map["version"] = 1
+        vault_map_path.write_text(json.dumps(vault_map), encoding="utf-8")
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, json.loads(vault_map_path.read_text(encoding="utf-8"))["version"])
+
+    def test_vault_map_with_unknown_version_is_refused_without_writes(self):
+        vault_map_path = self.config / "vault-builder" / "vault-map.json"
+        vault_map_path.parent.mkdir(parents=True)
+        vault_map_path.write_text(json.dumps({"version": 3, "vaults": {}, "projects": {}}), encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(self.work / "vault-a"), "--name", "a")
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("vault-map.json", result.stderr)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_existing_vault_with_old_entry_record_is_refused_without_writes(self):
+        target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        manifest_path = target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for record in manifest["external_records"]:
+            if record["kind"] == "json-entry":
+                record["key_path"] = "mcpServers.llm-wiki-a"
+                record["shared"] = False
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("mcpServers.llm-wiki-a", result.stderr)
+        self.assertIn("uninstall", result.stderr)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+
+class InstallAfterUninstallTests(_UserHomeTestCase):
+    """install accepts a vault left by uninstall through audit and apply_plan (decisions 42, 44, A-24)."""
+
+    def _uninstalled_vault(self) -> Path:
+        """Install vault a, then remove it the way the last-vault uninstall does.
+
+        The vault side runs uninstall's own _uninstall_inside with the deletion rule of _plan_uninstall:
+        every managed file except .gitignore whose bytes still match the manifest. The outside side
+        removes the config folder and the MCP settings file, which held only install's files here.
+        """
+        from tools.vault_migration import uninstalling
+
+        target = self.work / "vault-a"
+        self.assertEqual(0, installing.install(target, name="a", out=io.StringIO()))
+        (target / "raw" / "sources" / "note.md").write_text("Raw note.\n", encoding="utf-8")
+        manifest = load_manifest(target)
+        assert manifest is not None
+        plan = uninstalling._UninstallPlan(target=target, schema_version=manifest.schema_version)
+        for relative, managed in sorted(manifest.managed_files.items()):
+            if relative not in uninstalling._KEEP_INSIDE and sha256_file(target / relative) == managed.sha256:
+                plan.delete_inside.append(relative)
+        uninstalling._uninstall_inside(plan)
+        shutil.rmtree(self.config)
+        (self.home / ".claude.json").unlink()
+        self.assertFalse((target / "AGENTS.md").exists())
+        self.assertFalse((target / "tools" / "wiki" / "cli.py").exists())
+        self.assertFalse((target / ".vault-builder").exists())
+        self.assertTrue((target / ".gitignore").is_file())
+        return target
+
+    def _knowledge(self, target: Path) -> dict[str, tuple[str, int]]:
+        return _tree_snapshot(*(target / name for name in ("raw", "wiki", "scratch")))
+
+    def test_install_restores_managed_files_and_manifest_then_outside_files(self):
+        target = self._uninstalled_vault()
+        knowledge = self._knowledge(target)
+        gates: list[Path] = []
+        out = io.StringIO()
+
+        with mock.patch.object(applying, "_run_release_gate", side_effect=gates.append):
+            self.assertEqual(0, installing.install(target, name="a", out=out))
+
+        self.assertEqual(2, len(gates))
+        manifest = load_manifest(target)
+        assert manifest is not None
+        self.assertIsNotNone(manifest.last_migration_id)
+        self.assertIn("AGENTS.md", manifest.managed_files)
+        for relative, managed in manifest.managed_files.items():
+            self.assertEqual(managed.sha256, sha256_file(target / relative), relative)
+            self.assertEqual((ROOT / relative).read_bytes(), (target / relative).read_bytes(), relative)
+        self._assert_installed(target, "a", self.config, self.home / ".claude.json")
+        self.assertEqual(knowledge, self._knowledge(target))
+        self.assertIn("create AGENTS.md", out.getvalue())
+        self.assertIn("create tools/wiki/cli.py", out.getvalue())
+
+    def test_unknown_managed_file_is_refused_and_dry_run_writes_nothing(self):
+        target = self._uninstalled_vault()
+        (target / "AGENTS.md").write_text("my own agent rules\n", encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+
+        for arguments in (("--dry-run",), ()):
+            with self.subTest(arguments=arguments):
+                result = self._install(str(target), "--name", "a", *arguments)
+
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn("AGENTS.md", result.stderr)
+                self.assertIn("audit", result.stderr)
+                self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_dry_run_prints_audit_plan_and_outside_plan_without_writes(self):
+        target = self._uninstalled_vault()
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(target), "--name", "a", "--dry-run")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("create docs/usage.md", result.stdout)
+        self.assertIn("mcpServers.llm-wiki ", result.stdout)
+        self.assertIn(str(self.config / "vault-builder" / "llm_wiki_router.py"), result.stdout)
+        self.assertNotIn(".mcp.json", result.stdout)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_apply_failure_restores_vault_and_writes_nothing_outside(self):
+        target = self._uninstalled_vault()
+        before = _tree_snapshot(self.tmp)
+        gate_failure = subprocess.CalledProcessError(1, ["bash", "scripts/release_gate.sh"], output="gate failed\n")
+
+        with mock.patch.object(applying, "_run_release_gate", side_effect=gate_failure):
+            with self.assertRaisesRegex(installing.InstallError, "nothing outside the vault"):
+                installing.install(target, name="a", out=io.StringIO())
+
+        self.assertEqual(before, _tree_snapshot(self.tmp))
+
+    def test_outside_failure_after_apply_keeps_restored_vault_and_rerun_finishes(self):
+        target = self._uninstalled_vault()
+        home_before = _tree_snapshot(self.home)
+
+        def fail(path: Path) -> None:
+            if path.name == ".claude.json":
+                raise OSError("injected failure: .claude.json")
+
+        with mock.patch.object(applying, "_run_release_gate"), mock.patch.object(
+            installing, "_before_write", side_effect=fail
+        ):
+            with self.assertRaisesRegex(installing.InstallError, "install again"):
+                installing.install(target, name="a", out=io.StringIO())
+
+        self.assertEqual(home_before, _tree_snapshot(self.home))
+        manifest = load_manifest(target)
+        assert manifest is not None
+        self.assertEqual((), manifest.external_records)
+        self.assertTrue((target / "docs" / "usage.md").is_file())
+
+        self.assertEqual(0, installing.install(target, name="a", out=io.StringIO()))
+        self._assert_installed(target, "a", self.config, self.home / ".claude.json")
+
+    def test_folder_without_vault_structure_is_still_refused(self):
+        busy = self.work / "busy"
+        busy.mkdir()
+        (busy / "notes.txt").write_text("keep\n", encoding="utf-8")
+        before = _tree_snapshot(self.tmp)
+
+        result = self._install(str(busy), "--name", "busy")
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("not empty", result.stderr)
+        self.assertEqual(before, _tree_snapshot(self.tmp))
 
 
 class UninstallDoctorTest(_UserHomeTestCase):

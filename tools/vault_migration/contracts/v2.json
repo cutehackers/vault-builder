@@ -120,7 +120,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "fc8a2d6034e947688983ec111af0036058931d275684e905da96f7c1efa13df9"
+      "sha256": "ad14f74bef04db91f6b30c55a52d218dedb07b1e52c813b2c70350945ec1bae0"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -144,13 +144,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "8a09cfee02ad3f006f1e00aaf21cf1499c9e59fa9b5990813aa877bac3d3d878"
+      "sha256": "7ab89074ae7cfda3709acd24d4ce73d8c3b5abd75023c1aee4e640e3d1252577"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "2b613b7d2d35cd2d680ddb067e2e5d75182c0714994f2a695da1bfc311447721"
+      "sha256": "b681153cb90bd6465b8ca665349eeec5e67309b8012a6e81917cb732f507e2d6"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -222,7 +222,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/memory_scan.py",
       "policy": "replace-if-unmodified",
-      "sha256": "e77b29b0ab9e4cf0d839ce46370dabc3aacd9a7a774050c4649a718775674ae9"
+      "sha256": "462efe05ccc610f841c04ee767c3979507cb60d248f44aa6677a83c02a36e951"
     },
     "tools/wiki/lib/merge.py": {
       "mode": "0644",
@@ -270,7 +270,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/vault_manifest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "3e4f6f2dc592247417fbea57bd2c7f885cebaaba4755ec29784d3127f2a93247"
+      "sha256": "18df9de2b3168cf60d2731e0fbb35ac35334ee2251800818c97dca04515f173f"
     },
     "tools/wiki/lib/wiki_update.py": {
       "mode": "0644",
