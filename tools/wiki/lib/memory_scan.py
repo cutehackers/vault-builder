@@ -218,7 +218,7 @@ def scan_memory(
         raise MemoryScanError(
             f"No vault map at {map_path}. Add this vault and its projects there first (see docs/usage.md)."
         )
-    vaults, projects = _load_vault_map(map_path)
+    vaults, projects = load_vault_map(map_path)
 
     this_vault = _resolve(vault_root)
     vault_name = next((name for name, entry in vaults.items() if _resolve(entry.path) == this_vault), None)
@@ -329,7 +329,7 @@ def render_memory_scan(scan: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _load_vault_map(map_path: Path) -> tuple[dict[str, LinkedVault], dict[str, dict[str, Any]]]:
+def load_vault_map(map_path: Path) -> tuple[dict[str, LinkedVault], dict[str, dict[str, Any]]]:
     try:
         data = json.loads(map_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:

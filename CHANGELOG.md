@@ -25,6 +25,48 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-30
+
+Claude Code 세션 원문을 vault의 `raw/sessions/`에 보관한다. 관리 파일 목록이 바뀌어 contract와 manifest schema를 3으로 올렸다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 2.0.0 | 3 | 3 | 2 |
+
+### Added
+
+- 세션 보관소 `raw/sessions/`: 계약에 적힌 별도 원본 종류다. 세션 수집 명령만 이곳에 새 파일을 추가하고, 기존 세션 파일은 아무도 고치거나 옮기거나 지우지 않는다. 파일마다 frontmatter의 `body_sha256`에 본문 해시를 적는다.
+- `sessions` 명령(`tools/wiki/cli.py`): `sessions capture`는 transcript를 읽어 사용자 발화, 에이전트 답변 본문, 서브에이전트 대화, 도구 이름을 세션 파일로 쓴다. thinking 블록과 도구 입력·출력은 남기지 않고, 정해진 형식의 비밀값은 `[REDACTED:<종류>]`로 가린다. 다시 수집하면 이전 수집 뒤의 턴만 새 구간 파일로 쓴다. `sessions status`는 세션 파일 수, 마지막 수집 시각, 검사 실패 수, 커밋되지 않은 세션 파일 수를 출력한다. `sessions git-check`는 커밋된 세션 파일이 지워지거나 바뀌었는지 Git 이력과 비교한다.
+- `session-capture` skill: 사람이 세션 보관을 요청할 때 수집 명령을 실행하고 결과를 보고하는 절차다.
+
+### Changed
+
+- lint가 세션 보관소를 검사한다. 새 오류 코드는 `session-file-invalid-path`, `session-file-invalid-frontmatter`, `session-file-hash-mismatch`, `session-part-duplicate`, `session-source-page-forbidden`, `claim-evidence-session-invalid`다.
+- wiki 주장은 source page 없이 세션 파일을 근거로 인용할 수 있다. `#sha256=`는 붙여도 되고 빼도 된다.
+- source registry는 세션 파일을 `unregistered`로 세지 않고 `session` 또는 `session-invalid`로 표시한다. `ingest-source`와 `bulk-ingest`는 세션 파일을 거부한다.
+- metrics와 health가 세션 파일 수, 마지막 수집 시각, 해시 불일치 수를 보고한다. `metrics --check`는 해시 불일치가 있을 때만 실패하고, 세션 수가 늘어나는 것으로는 실패하지 않는다.
+- release gate가 metrics 단계 뒤에 `sessions git-check`를 실행한다. Git이 없는 vault에서는 건너뛴다.
+- install은 manifest schema가 3이 아닌 기존 vault를 audit 안내와 함께 거부한다. doctor는 schema 3을 기준으로 검사한다.
+
+### Upgrade
+
+- 기존 vault(contract 2, manifest schema 2)는 2.0.0 builder checkout에서 audit을 실행하고, plan을 검토한 뒤 apply를 실행한다. 순서는 `docs/usage.md` 1.1절을 따른다. 새 관리 파일은 `create`, 1.0.0 내용 그대로인 관리 파일은 `replace`, 사람이 고친 관리 파일은 `review-required`로 나온다. apply는 manifest를 schema 3, contract 3, `builder_revision` 2.0.0으로 새로 쓰고 `external_records`는 그대로 옮긴다.
+
+  ```bash
+  python3 tools/vault_migration/cli.py audit --target /path/to/vault --plan-out /tmp/vault-migration-plan.json
+  ```
+
+  ```bash
+  python3 tools/vault_migration/cli.py apply --target /path/to/vault --plan /tmp/vault-migration-plan.json
+  ```
+
+- apply 뒤 doctor를 실행한다. doctor 첫 줄이 `vault-builder 2.0.0 (contract 3)`이고 `Problem:` 줄이 없으면 끝이다.
+- 1.0.0 builder는 schema 3 manifest를 읽지 못한다. 옮긴 vault에 1.0.0 checkout으로 audit, doctor, uninstall을 실행하면 "지원하지 않는 schema"로 실패한다. 옮긴 뒤에는 2.0.0 이상 checkout만 쓴다.
+- 수집 명령은 프로젝트에 연결된 role `project` vault에만 쓴다. `personal`, `team` vault에는 쓰지 않는다. 프로젝트에 project vault가 없거나 둘 이상이면 수집 명령은 아무것도 쓰지 않고 종료 코드 0과 stderr 한 줄로 이유를 알린다. 세션을 보관하려면 project vault를 만들고 `link`로 그 프로젝트에 연결한다.
+- 대상 project vault가 아직 contract 3 미만이거나 manifest가 없으면 수집 명령은 쓰지 않고 그 vault를 먼저 migration하라는 한 줄을 낸다. 위 audit과 apply로 그 vault를 옮긴다.
+- `raw/sessions/` 디렉터리는 migration이 만들지 않는다. 수집 명령이 처음 쓸 때 만든다.
+- 수집 명령은 세션 파일을 커밋하지 않는다. 커밋되지 않은 파일 수는 `sessions status`로 확인하고 사람이 커밋한다.
+
 ## [1.0.0] - 2026-10-29
 
 첫 릴리스다. 2026-06-01부터 main에 쌓인 변경을 이 버전 하나로 묶는다.

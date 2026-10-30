@@ -34,9 +34,10 @@ from .models import MigrationAction, MigrationPlan, VaultManifest
 from .planning import _target_root, audit_vault, target_fingerprint
 
 
-_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
-# Journals left by an interrupted contract-v1 migration stay recoverable.
-_JOURNAL_CONTRACT_VERSIONS = frozenset({1, MANIFEST_CONTRACT_VERSION})
+_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v3.json"
+# Journals left by an interrupted contract-v1 or contract-v2 migration stay recoverable.
+# Listed directly: following MANIFEST_CONTRACT_VERSION alone would drop contract 2.
+_JOURNAL_CONTRACT_VERSIONS = frozenset({1, 2, 3})
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _RELEASE_GATE_COMMAND = ("bash", "scripts/release_gate.sh")
 _GATE_OUTPUT_TAIL_LINES = 20

@@ -11,6 +11,7 @@ from .hash_source import compute_sha256
 from .links import find_wiki_links, resolve_wiki_link, wiki_link_stays_in_root
 from .review import validate_review_queue
 from .schema import Issue, validate_schema
+from .session_archive import SessionFileCheck, check_session_archive, check_session_file, session_archive_root
 
 
 ALLOWED_LOG_EVENTS = {
@@ -96,6 +97,21 @@ class RawEvidenceRef:
     sha256: str | None
 
 
+class SessionArchiveChecks:
+    """Archive check results by repo-relative path, computed once on first use."""
+
+    def __init__(self, repo_root: Path, checks: list[SessionFileCheck] | None = None) -> None:
+        self._repo_root = repo_root
+        self._checks = None if checks is None else {check.relative: check for check in checks}
+
+    def check(self, path: Path) -> SessionFileCheck:
+        if self._checks is None:
+            self._checks = {check.relative: check for check in check_session_archive(self._repo_root)}
+        relative = _repo_relative(self._repo_root, path)
+        found = self._checks.get(relative)
+        return found if found is not None else check_session_file(self._repo_root, path)
+
+
 def lint_repo(root: Path | str) -> LintResult:
     repo_root = Path(root)
     wiki_root = repo_root / "wiki"
@@ -114,14 +130,19 @@ def lint_repo(root: Path | str) -> LintResult:
                 )
             )
 
+    session_checks = check_session_archive(repo_root)
+    issues.extend(issue for check in session_checks for issue in check.issues)
+    session_lookup = SessionArchiveChecks(repo_root, session_checks)
+
     for page in pages:
         issues.extend(validate_schema(page))
         issues.extend(validate_page_links(page, wiki_root))
-        issues.extend(validate_provenance(page, repo_root))
+        issues.extend(validate_provenance(page, repo_root, session_lookup))
         issues.extend(validate_lifecycle(page, wiki_root))
         issues.extend(validate_project(page))
         issues.extend(validate_human_locks(page))
         issues.extend(validate_source_hash(page, repo_root))
+        issues.extend(validate_source_not_session(page, repo_root))
         if page.path.name == "log.md":
             issues.extend(validate_log(page))
 
@@ -311,7 +332,11 @@ def validate_log(page: Page) -> list[Issue]:
     return issues
 
 
-def validate_provenance(page: Page, repo_root: Path | None = None) -> list[Issue]:
+def validate_provenance(
+    page: Page,
+    repo_root: Path | None = None,
+    session_checks: SessionArchiveChecks | None = None,
+) -> list[Issue]:
     if not page.frontmatter:
         return []
 
@@ -344,7 +369,9 @@ def validate_provenance(page: Page, repo_root: Path | None = None) -> list[Issue
         )
 
     if provenance == "claim":
-        issues.extend(_validate_claim_level_provenance(page, repo_root, source_count))
+        if session_checks is None and repo_root is not None:
+            session_checks = SessionArchiveChecks(repo_root)
+        issues.extend(_validate_claim_level_provenance(page, repo_root, source_count, session_checks))
 
     return issues
 
@@ -544,6 +571,37 @@ def validate_source_hash(page: Page, repo_root: Path) -> list[Issue]:
     return []
 
 
+def validate_source_not_session(page: Page, repo_root: Path) -> list[Issue]:
+    if not page.frontmatter or page.frontmatter.get("type") != "source":
+        return []
+    canonical_source = page.frontmatter.get("canonical_source")
+    if not canonical_source or not _is_in_session_archive(repo_root, repo_root / str(canonical_source)):
+        return []
+    return [
+        Issue(
+            severity="error",
+            code="session-source-page-forbidden",
+            path=str(page.path),
+            message=f"Session files have no source pages; cite them directly instead: {canonical_source}.",
+        )
+    ]
+
+
+def _is_in_session_archive(repo_root: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(session_archive_root(repo_root).resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _repo_relative(repo_root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def find_human_locks(page: Page) -> HumanLockState:
     page_locked = "<!-- human-locked -->" in page.body
     ranges: list[HumanLockRange] = []
@@ -567,7 +625,12 @@ def _has_provenance_signal(body: str) -> bool:
     return any(signal in body for signal in signals)
 
 
-def _validate_claim_level_provenance(page: Page, repo_root: Path | None, source_count: object) -> list[Issue]:
+def _validate_claim_level_provenance(
+    page: Page,
+    repo_root: Path | None,
+    source_count: object,
+    session_checks: SessionArchiveChecks | None = None,
+) -> list[Issue]:
     rows = _extract_claim_evidence_rows(page.body)
     if not rows:
         return [
@@ -632,7 +695,9 @@ def _validate_claim_level_provenance(page: Page, repo_root: Path | None, source_
             continue
         evidence_refs.update(row_refs)
         issues.extend(
-            _validate_claim_evidence_sources(page, _evidence_before_replacement(evidence), repo_root, row.line)
+            _validate_claim_evidence_sources(
+                page, _evidence_before_replacement(evidence), repo_root, row.line, session_checks
+            )
         )
 
     expected_source_count = _coerce_source_count(source_count)
@@ -771,13 +836,14 @@ def _validate_claim_evidence_sources(
     evidence: str,
     repo_root: Path | None,
     line: int,
+    session_checks: SessionArchiveChecks | None = None,
 ) -> list[Issue]:
     if repo_root is None:
         return []
 
     issues: list[Issue] = []
     for raw_ref in _extract_raw_evidence_refs(evidence):
-        issues.extend(_validate_raw_claim_evidence(page, raw_ref, repo_root, line))
+        issues.extend(_validate_raw_claim_evidence(page, raw_ref, repo_root, line, session_checks))
     for target in find_wiki_links(evidence):
         if target.startswith("sources/"):
             source_page = resolve_wiki_link(target, repo_root / "wiki")
@@ -791,6 +857,7 @@ def _validate_raw_claim_evidence(
     raw_ref: RawEvidenceRef,
     repo_root: Path,
     line: int,
+    session_checks: SessionArchiveChecks | None = None,
 ) -> list[Issue]:
     raw_path = repo_root / raw_ref.path
     raw_root = (repo_root / "raw").resolve()
@@ -826,6 +893,20 @@ def _validate_raw_claim_evidence(
                 code="claim-evidence-source-hash-invalid",
                 path=str(page.path),
                 message=f"Claim raw evidence hash does not match: {raw_ref.path}.",
+                line=line,
+            )
+        ]
+
+    if _is_in_session_archive(repo_root, raw_path):
+        checks = session_checks if session_checks is not None else SessionArchiveChecks(repo_root)
+        if checks.check(raw_path).ok:
+            return []
+        return [
+            Issue(
+                severity="error",
+                code="claim-evidence-session-invalid",
+                path=str(page.path),
+                message=f"Claim evidence session file fails the session archive check: {raw_ref.path}.",
                 line=line,
             )
         ]

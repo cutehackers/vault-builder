@@ -12,6 +12,7 @@ from .links import find_wiki_links
 from .lint import claim_evidence_table, lint_repo
 from .paths import resolve_report_path
 from .review import list_review_items
+from .session_archive import session_archive_status
 from .source_registry import build_source_registry
 
 
@@ -44,6 +45,9 @@ class MaintenanceMetrics:
     deprecated_linked_targets: list[str]
     lint_errors: int
     last_health_report: str | None
+    session_files: int
+    session_last_collected_at: str | None
+    session_hash_mismatches: int
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,7 @@ def build_maintenance_metrics(
     orphan_pages = sum(1 for issue in lint_result.issues if issue.code == "orphan-page")
     pages_without_claim_level_provenance = sum(1 for page in pages if _is_substantive_without_claim_provenance(page))
     deprecated_linked_targets = _deprecated_linked_targets(root, pages)
+    sessions = session_archive_status(root)
 
     metrics = MaintenanceMetrics(
         pending_reviews=len(pending_reviews),
@@ -85,6 +90,9 @@ def build_maintenance_metrics(
         deprecated_linked_targets=deprecated_linked_targets,
         lint_errors=sum(1 for issue in lint_result.issues if issue.severity == "error"),
         last_health_report=_latest_health_report(root),
+        session_files=sessions.file_count,
+        session_last_collected_at=sessions.last_collected_at,
+        session_hash_mismatches=sessions.hash_mismatch_count,
     )
 
     if report_path is not None:
@@ -113,6 +121,9 @@ def render_maintenance_metrics_report(metrics: MaintenanceMetrics, report_date: 
         f"- Deprecated linked pages: {metrics.deprecated_linked_pages}",
         f"- Lint errors: {metrics.lint_errors}",
         f"- Last health report: `{metrics.last_health_report}`" if metrics.last_health_report else "- Last health report: none",
+        f"- Session files: {metrics.session_files}",
+        f"- Session last collected at: {metrics.session_last_collected_at or 'none'}",
+        f"- Session hash mismatches: {metrics.session_hash_mismatches}",
         "",
         "## Deprecated Linked Pages",
         "",

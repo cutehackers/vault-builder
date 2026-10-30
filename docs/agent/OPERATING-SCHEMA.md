@@ -49,7 +49,8 @@ The default topology is intentionally compact. The human should not need to deci
 ├── raw/
 │   ├── sources/
 │   ├── assets/
-│   └── imports/
+│   ├── imports/
+│   └── sessions/
 ├── wiki/
 │   ├── index.md
 │   ├── log.md
@@ -88,6 +89,7 @@ The human should not have to manually maintain backlinks, index entries, page pl
 | `raw/sources/` | Human | Immutable | Stable primary sources: notes, PDFs, articles, transcripts, exports, papers. |
 | `raw/assets/` | Human/Agent | Immutable after capture | Images, screenshots, diagrams, and attachments referenced by sources. |
 | `raw/imports/` | Human/Agent | Immutable after capture | Temporary landing zone for newly clipped or imported files before ingest. |
+| `raw/sessions/` | Session capture command | Add-only | Session archive: agent conversation transcripts, one file per capture run. Only `sessions capture` adds files. No source pages; integrity comes from each file's `body_sha256` (section 16.1). |
 | `wiki/` | Agent | Mutable | Compiled knowledge. The agent creates and updates pages here. |
 | `wiki/index.md` | Agent | Mutable | Content catalog. Read first before answering or updating. |
 | `wiki/log.md` | Agent | Append-only | Chronological operation history. |
@@ -141,6 +143,8 @@ When creating an optional folder, append a `schema-change` entry to `wiki/log.md
 ### 2.1 Raw Sources Are Immutable
 
 Never edit, rewrite, rename, or delete files under `raw/` unless explicitly instructed.
+
+One exception: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/` without a per-file human request. Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden. Session files have no source pages. Lint checks each session file's integrity with its body hash (`body_sha256`), and the release gate checks committed session files against Git history (section 16.1).
 
 If a raw source contains errors, record corrections in the wiki, not in the source.
 
@@ -1413,6 +1417,90 @@ During lint:
 - Flag changed raw sources.
 - Do not assume changed raw files are harmless.
 - Create a lint issue if source drift is detected.
+
+### 16.1 Session Archive (`raw/sessions/`)
+
+The session archive is a separate raw source kind. It holds agent conversation transcripts for search. It has no source pages, so its integrity checks differ from section 16.
+
+Writer rules:
+
+- Only `python3 tools/wiki/cli.py sessions capture` writes here. It adds one new file per run and creates missing parent directories. It never changes `wiki/`, index, log, or `scratch/`, and it runs no Git command.
+- It writes only to the role `project` vault linked to the session's project in the vault map. It never writes to `personal` or `team` vaults. If the project has no `project` vault, has more than one without `--vault`, or the target vault's manifest is missing or below contract 3, it writes nothing and explains why in one stderr line.
+- Capturing the same session again writes only turns after the previous part. Existing session files are never rewritten. The previous part's frontmatter is the only cursor; there is no state file.
+- Agents never edit, rename, move, or delete session files, and never run `ingest-source` or `bulk-ingest` on them. Both commands reject session paths.
+
+File path:
+
+```text
+raw/sessions/<agent>/<YYYY-MM-DD>-<session_id>-part<N>.md
+```
+
+- `<agent>` is `claude-code` for now.
+- The date is the UTC date of the part's first turn.
+- `N` starts at 1, with no leading zeros.
+- `session_id` matches `[A-Za-z0-9][A-Za-z0-9-]*`.
+
+Frontmatter fields, all required, in this order:
+
+| Field | Value |
+|---|---|
+| `schema` | `vault-session/v1` |
+| `agent` | `claude-code` |
+| `session_id` | Session id |
+| `project` | Vault-map project id. Empty string when `--vault` picked the vault and no project matched. |
+| `cwd` | Session working directory. A path under the user's home starts with `$HOME`. |
+| `part` | `N` |
+| `first_turn_uuid`, `first_turn_at` | uuid and UTC time of the part's first turn |
+| `last_turn_uuid`, `last_turn_at` | uuid and UTC time of the part's last turn. The next part starts after this turn. |
+| `turn_count` | Number of turns in the part |
+| `collected_at` | Capture time, `YYYY-MM-DDTHH:MM:SSZ` |
+| `trigger` | `PreCompact`, `SessionEnd`, or `manual` |
+| `redactions` | Number of secrets replaced |
+| `body_sha256` | Body hash |
+
+Body hash: the SHA-256 of the UTF-8 bytes of the body, where the body is everything after the first `\n---\n` (the same split as the wiki frontmatter parser). The file hash used in `#sha256=` evidence is a different value: the SHA-256 of the whole file.
+
+Body:
+
+- Each turn is a `## <UTC time> <role>` heading followed by its text. Role is `user`, `assistant`, or `subagent <agent id> user|assistant`.
+- Tool calls appear only as one `Tools: <name>, <name>` line at the end of the turn.
+- Kept: user text, assistant `text` blocks, tool names, and the same items from subagent (sidechain) conversations.
+- Dropped: `thinking` and `redacted_thinking` blocks, `tool_use` input, whole `tool_result` blocks, non-text blocks, entries that are not user or assistant, and user entries with `isMeta: true` (system-injected skill bodies and command notes). Slash-command wrapper entries stay.
+- Line endings become `\n`, trailing spaces and tabs are removed, and the file ends with one `\n`.
+- Known secret patterns (PEM private keys, `Authorization`/`Bearer` values, known token prefixes, values of secret-named keys, URL passwords) become `[REDACTED:<kind>]`. Patterns outside this list can remain.
+
+Archive check (`lint`, `health`; no Git needed, so it also runs in the release gate copy):
+
+| Code | Condition |
+|---|---|
+| `session-file-invalid-path` | A file in the archive does not match the path format, including non-`.md` files. Files starting with `.` are ignored. |
+| `session-file-invalid-frontmatter` | Frontmatter is missing, a required field is missing, `schema` is unknown, or the path's session id or part differs from the frontmatter. |
+| `session-file-hash-mismatch` | The recomputed body hash differs from `body_sha256`. |
+| `session-part-duplicate` | Two files have the same agent, session id, and part number. |
+| `session-source-page-forbidden` | A `wiki/sources/` page has a `canonical_source` inside `raw/sessions/`. |
+
+All codes are errors. `health` ends with `Sessions: <count> files, last collected <time|none>, hash mismatches <count>`.
+
+Registry, metrics, and maps:
+
+- `source-registry` reports session files with `source_kind: session` and `ingest_status: session`, or `session-invalid` when the archive check fails. They never count as `unregistered`.
+- `metrics` reports `session_files`, `session_last_collected_at`, and `session_hash_mismatches`. Only `session_hash_mismatches` fails `metrics --check` (default limit 0). The number of session files never fails the gate.
+- The Lifecycle Map lists `session-invalid` files under attention, not valid session files. The Source Map also leaves out valid session files, so a new capture does not make `maps build --check` fail.
+- `bulk-ingest --all-raw` skips session files. An explicit session path still fails.
+
+Claim evidence:
+
+- A claim may cite `raw/sessions/...` directly, with no source page.
+- `#sha256=<file hash>` is optional. When present, lint compares it with the file hash as for other raw evidence (`claim-evidence-source-hash-invalid` on mismatch).
+- A missing file is `claim-evidence-raw-missing`. A file that fails the archive check is `claim-evidence-session-invalid` (error).
+- Raw evidence outside `raw/sessions/` keeps the `claim-evidence-source-unregistered` rule.
+
+Git archive check (release gate):
+
+- `python3 tools/wiki/cli.py sessions git-check` prints `skipped` and exits 0 when the vault is not a Git work tree.
+- Otherwise it collects every path ever added under `raw/sessions/` in history reachable from the current branch, with the blob first added. It prints one line per path that is missing from the work tree or whose bytes differ from that first blob, and exits 1. Restoring the file makes it pass again.
+- `scripts/release_gate.sh` runs it from the vault root after the metrics step, because the gate copy has no `.git`.
+- Uncommitted session files get only the archive check. `python3 tools/wiki/cli.py sessions status` reports how many are uncommitted.
 
 ---
 

@@ -15,7 +15,7 @@ from .durability import fsync_directory as _fsync_directory
 from .models import VaultManifest
 
 
-_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
+_CATALOG_PATH = "tools/vault_migration/contracts/v3.json"
 _MANIFEST_DIRECTORY = ".vault-builder"
 _MANIFEST_FILENAME = "manifest.json"
 

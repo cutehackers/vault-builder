@@ -1,4 +1,4 @@
-"""Shared Vault manifest schema validation for schema versions 1 and 2."""
+"""Shared Vault manifest schema validation for schema versions 1, 2, and 3."""
 from __future__ import annotations
 
 import hashlib
@@ -18,10 +18,12 @@ _MANAGED_POLICIES = frozenset({"replace-if-unmodified"})
 MANAGED_EXACT_PATH_SCOPE = frozenset(
     {
         ".agents/skills/memory-cleanup/SKILL.md",
+        ".agents/skills/session-capture/SKILL.md",
         ".agents/skills/wiki-ingest/SKILL.md",
         ".agents/skills/wiki-query/SKILL.md",
         ".agents/skills/wiki-update/SKILL.md",
         ".claude/skills/memory-cleanup/SKILL.md",
+        ".claude/skills/session-capture/SKILL.md",
         ".claude/skills/wiki-ingest/SKILL.md",
         ".claude/skills/wiki-query/SKILL.md",
         ".claude/skills/wiki-update/SKILL.md",
@@ -60,6 +62,8 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         "tools/wiki/lib/review.py",
         "tools/wiki/lib/schema.py",
         "tools/wiki/lib/search.py",
+        "tools/wiki/lib/session_archive.py",
+        "tools/wiki/lib/session_capture.py",
         "tools/wiki/lib/source_registry.py",
         "tools/wiki/lib/vault_manifest.py",
         "tools/wiki/lib/wiki_update.py",
@@ -86,10 +90,10 @@ _OPTIONAL_MANIFEST_KEYS = frozenset({"last_migration_id"})
 _MANAGED_FILE_KEYS = frozenset({"mode", "path", "policy", "sha256"})
 
 # Written manifests always use the current schema; older schemas stay readable.
-MANIFEST_SCHEMA_VERSION = 2
-MANIFEST_CONTRACT_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
+MANIFEST_CONTRACT_VERSION = 3
 # Each readable schema version has exactly one contract version.
-_SUPPORTED_VERSIONS = {1: 1, 2: 2}
+_SUPPORTED_VERSIONS = {1: 1, 2: 2, 3: 3}
 EXTERNAL_RECORDS_KEY = "external_records"
 # Records of files and entries created outside the Vault, located relative to $HOME.
 EXTERNAL_RECORD_KEYS = {
@@ -136,9 +140,9 @@ def validate_v1_manifest(value: object) -> dict[str, object]:
 
 
 def validate_manifest(value: object) -> dict[str, object]:
-    """Return a normalized schema-1 or schema-2 manifest after complete validation.
+    """Return a normalized schema-1, schema-2, or schema-3 manifest after complete validation.
 
-    Schema 2 output always contains ``external_records``; schema 1 output never does.
+    Schema 2 and 3 output always contains ``external_records``; schema 1 output never does.
     """
     if not isinstance(value, dict):
         raise ValueError("Vault builder manifest must be a JSON object.")

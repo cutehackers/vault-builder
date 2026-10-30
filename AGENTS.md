@@ -32,7 +32,7 @@ raw source
 
 ## Non-Negotiable Rules
 
-1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks.
+1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks. One exception: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/`. Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden.
 2. Never present LLM draft text as durable knowledge before validation.
 3. Every substantive wiki claim needs provenance from a raw source, source page, prior wiki page, or explicit human instruction.
 4. Do not silently resolve contradictions. Record the tension and request human judgment when it affects an important decision.
@@ -44,16 +44,17 @@ raw source
 
 ## Directory Map
 
-| Path               | Meaning                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------- |
-| `raw/`             | Immutable source material.                                                                  |
-| `wiki/`            | Durable compiled knowledge.                                                                 |
-| `scratch/drafts/`  | LLM proposals before validation.                                                            |
-| `scratch/reports/` | Lint, ingest, audit, query, and repair reports.                                             |
-| `scratch/review/`  | Human-judgment queue.                                                                       |
-| `tools/wiki/`      | Deterministic quality tooling.                                                              |
-| `.agents/skills/`  | Agent workflow guides for `wiki-ingest`, `wiki-update`, `wiki-query`, and `memory-cleanup`. |
-| `docs/agent/`      | Detailed agent reference.                                                                   |
+| Path               | Meaning                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `raw/`             | Immutable source material.                                                                                     |
+| `raw/sessions/`    | Agent conversation transcripts. Session capture command only, add-only, no source pages.                       |
+| `wiki/`            | Durable compiled knowledge.                                                                                    |
+| `scratch/drafts/`  | LLM proposals before validation.                                                                               |
+| `scratch/reports/` | Lint, ingest, audit, query, and repair reports.                                                                |
+| `scratch/review/`  | Human-judgment queue.                                                                                          |
+| `tools/wiki/`      | Deterministic quality tooling.                                                                                 |
+| `.agents/skills/`  | Agent workflow guides for `wiki-ingest`, `wiki-update`, `wiki-query`, `memory-cleanup`, and `session-capture`. |
+| `docs/agent/`      | Detailed agent reference.                                                                                      |
 
 ## Required Commands
 
@@ -151,6 +152,8 @@ raw_sha256: "..."
 For ingest, update, or query tasks, follow the matching guide under `.agents/skills/`, read `wiki/index.md` plus relevant pages or sources, preserve locks and provenance, and use drafts with `publish-draft` for durable changes. Use workflow checkpoints and write reports when applicable.
 
 For Claude Code memory cleanup requests, follow `.agents/skills/memory-cleanup/SKILL.md`. Start with the read-only `python3 tools/wiki/cli.py memory-scan --json`, and never edit L1 memory files.
+
+For requests to archive the current or a past agent session, follow `.agents/skills/session-capture/SKILL.md`. Write session files only through `sessions capture`, and never edit, rename, or delete files under `raw/sessions/`.
 
 When a newer statement from the same authority replaces an older claim, mark the old claim `superseded` instead of `contested` (`docs/agent/OPERATING-SCHEMA.md` section 2.3.1).
 

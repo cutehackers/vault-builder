@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TextIO
 
 from tools.vault_migration.versioning import version_label
-from tools.wiki.lib.vault_manifest import normalized_json_sha256
+from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION, normalized_json_sha256
 
 from .applying import apply_plan
 from .catalogs import load_catalog, sha256_file
@@ -55,7 +55,7 @@ MCP_ENTRY_PREFIX = "llm-wiki-"
 RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
 _ASSET_ROOT = Path("tools/vault_migration/assets/project-memory")
 _ROUTER_ASSET = Path("tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py")
-_CATALOG_PATH = "tools/vault_migration/contracts/v2.json"
+_CATALOG_PATH = "tools/vault_migration/contracts/v3.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
 _REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
 _VAULT_MAP_VERSION = 2  # the version install writes
@@ -83,6 +83,7 @@ _COPY_FILES = (
     ".claude/skills/wiki-update/SKILL.md",
     ".claude/skills/wiki-query/SKILL.md",
     ".claude/skills/memory-cleanup/SKILL.md",
+    ".claude/skills/session-capture/SKILL.md",
     "scripts/release_gate.sh",
 )
 _COPY_TREES = (
@@ -107,6 +108,7 @@ _EMPTY_DIRECTORIES = (
     "raw/sources",
     "raw/assets",
     "raw/imports",
+    "raw/sessions",
     "scratch/drafts",
     "scratch/reports",
     "scratch/review",
@@ -116,6 +118,7 @@ _KEEP_FILES = (
     "raw/sources/.gitkeep",
     "raw/assets/.gitkeep",
     "raw/imports/.gitkeep",
+    "raw/sessions/.gitkeep",
     "scratch/reports/.gitkeep",
 )
 
@@ -446,7 +449,7 @@ def _target_state(target: Path, builder_root: Path) -> tuple[str, bool]:
     except ValueError as exc:
         raise InstallError(f"Target has an invalid Vault builder manifest: {target}. {exc}") from exc
     if manifest is not None:
-        if manifest.schema_version != 2:
+        if manifest.schema_version != MANIFEST_SCHEMA_VERSION:
             raise InstallError(
                 f"Target manifest is schema version {manifest.schema_version}. Run audit and apply first: "
                 f"tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json>"

@@ -226,6 +226,9 @@ run "$PYTHON_BIN tools/wiki/cli.py maps build --check --report" \
   "$PYTHON_BIN" tools/wiki/cli.py maps build --check --report
 run "$PYTHON_BIN tools/wiki/cli.py metrics --check --report" \
   "$PYTHON_BIN" tools/wiki/cli.py metrics --check --report
+# The gate copy has no .git, so the committed session file check runs in the vault root.
+run "$PYTHON_BIN tools/wiki/cli.py sessions git-check" \
+  run_from_root "$PYTHON_BIN" tools/wiki/cli.py sessions git-check
 
 if stenc_checks_enabled; then
   if [ ! -d "docs/stenc/content" ]; then

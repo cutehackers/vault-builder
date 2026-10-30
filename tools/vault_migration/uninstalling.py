@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TextIO
 
 from tools.vault_migration.versioning import read_version, version_label
-from tools.wiki.lib.vault_manifest import normalized_json_sha256
+from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION, normalized_json_sha256
 
 from .catalogs import _safe_relative_path, sha256_file
 from .durability import fsync_directory
@@ -535,9 +535,10 @@ def doctor(
             f"This vault was installed or migrated by builder revision {manifest.builder_revision}; "
             f"this checkout is {builder_version}. Run audit and apply to bring the vault up to date."
         )
-    elif manifest is not None and manifest.schema_version != 2:
+    elif manifest is not None and manifest.schema_version != MANIFEST_SCHEMA_VERSION:
         report.problems.append(
-            f"Manifest schema is {manifest.schema_version}, not 2. Run audit and apply, then install."
+            f"Manifest schema is {manifest.schema_version}, not {MANIFEST_SCHEMA_VERSION}. "
+            "Run audit and apply, then install."
         )
 
     skill, recall, router, vault_map_path = user.skill, user.recall, user.router, user.vault_map

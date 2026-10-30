@@ -118,10 +118,11 @@ LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 �
 | 새 원본을 wiki에 반영 | `wiki-ingest` | `raw/sources/example.md를 wiki에 반영해주세요.` |
 | 기존 wiki page를 수정 | `wiki-update` | `wiki/concepts/example.md를 최신 원본 기준으로 업데이트해주세요.` |
 | wiki 기준으로 질문 | `wiki-query` | `현재 wiki 기준으로 ingest와 lint의 관계를 설명해주세요.` |
+| 대화 세션 원문 보관 | `session-capture` | `이 세션을 vault에 보관해주세요.` (17.7절) |
 
 현재 저장소의 결정론적 도구는 `tools/wiki/cli.py` 아래에 있습니다. 위 skill/workflow는 사람이 기억하기 쉬운 권장 사용 방식이며, 내부에서는 기존 CLI를 조합합니다.
 
-현재 구현된 안정 명령은 `ingest-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
+현재 구현된 안정 명령은 `ingest-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `sessions capture/status/git-check`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
 
 ```text
 wiki-ingest
@@ -210,6 +211,7 @@ agent가 상세 규칙을 확인해야 할 때는 `docs/agent/OPERATING-SCHEMA.m
 | `raw/sources/` | 원본 자료를 넣는 곳입니다. agent가 임의로 수정하지 않습니다. |
 | `raw/assets/` | 이미지, 스크린샷, 첨부 파일을 둡니다. |
 | `raw/imports/` | 아직 정리되지 않은 가져오기 자료를 임시로 둡니다. |
+| `raw/sessions/` | 대화 세션 원문 보관소입니다. `sessions capture` 명령만 새 파일을 추가하고, 기존 파일은 누구도 고치거나 지우지 않습니다. source page는 만들지 않습니다(17.7절). |
 | `wiki/` | 검증된 durable knowledge가 저장되는 곳입니다. |
 | `wiki/sources/` | 원본 자료 하나당 source page가 생성됩니다. |
 | `wiki/concepts/` | 반복해서 쓰이는 개념, 원칙, 패턴입니다. |
@@ -470,6 +472,12 @@ python3 tools/wiki/cli.py validate-page wiki/overview.md
 | `source-count-evidence-mismatch` | `source_count`와 claim evidence의 고유 근거 수가 맞지 않습니다. | 중복을 정리하거나 `source_count`를 실제 근거 수에 맞춥니다. |
 | `claim-evidence-source-unregistered` | raw evidence가 등록된 source page나 inline SHA-256 없이 사용되었습니다. | 먼저 `ingest-source`로 source page를 만들거나 `raw/...#sha256=...` 형식으로 근거를 명시합니다. |
 | `claim-evidence-source-hash-invalid` | claim evidence가 연결한 source hash가 현재 raw와 맞지 않습니다. | source drift를 확인하고 관련 page를 재검토합니다. |
+| `session-file-invalid-path` | `raw/sessions/` 안 파일의 경로나 이름이 세션 파일 형식에 맞지 않습니다. `.md`가 아닌 파일도 포함합니다. 점으로 시작하는 파일은 검사하지 않습니다. | 수집 명령이 만든 파일이 아니면 사람이 판단해 보관소 밖으로 옮깁니다. agent는 옮기거나 지우지 않습니다. |
+| `session-file-invalid-frontmatter` | 세션 파일의 frontmatter가 없거나, 필수 필드가 없거나, `schema` 값을 모르거나, 경로의 session id·part 값이 frontmatter 값과 다릅니다. | Git 이력에서 처음 커밋한 내용으로 되돌립니다. |
+| `session-file-hash-mismatch` | 다시 계산한 본문 해시가 frontmatter의 `body_sha256` 값과 다릅니다. 누군가 세션 파일 본문을 고쳤습니다. | Git 이력에서 처음 커밋한 내용으로 되돌립니다. 세션 파일은 손으로 고치지 않습니다. |
+| `session-part-duplicate` | 같은 agent, 같은 session id에 같은 part 번호의 파일이 둘 있습니다. | 어느 파일이 수집 명령의 결과인지 사람이 판단합니다. |
+| `session-source-page-forbidden` | `wiki/sources/` source page의 `canonical_source` 값이 `raw/sessions/` 안을 가리킵니다. | 그 source page를 지웁니다. 세션 파일은 source page 없이 근거로 인용합니다. |
+| `claim-evidence-session-invalid` | claim evidence가 보관소 검사에 실패한 세션 파일을 가리킵니다. | 먼저 그 세션 파일의 lint 오류를 해결합니다. |
 | `source-drift` | 원본 파일의 현재 해시가 source page와 다릅니다. | 원본 변경이 의도된 것인지 확인하고 source page와 관련 wiki page를 재검토합니다. |
 | `invalid-log-heading` | log heading 형식이 맞지 않습니다. | `## [YYYY-MM-DD] event-type | Short Title` 형식으로 고칩니다. |
 | `unmatched-human-lock` | human lock 시작/끝 marker가 맞지 않습니다. | `<!-- human-locked:start -->`와 `<!-- human-locked:end -->` 쌍을 맞춥니다. |
@@ -912,6 +920,83 @@ manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(�
 
 문제가 없으면 exit 0, 있으면 exit 1입니다. 서버 항목의 interpreter 경로에 patch version이 들어 있고 고를 수 있는 다른 경로가 있으면 install을 다시 실행하라는 알림만 출력하고 exit 값에는 넣지 않습니다. doctor는 어떤 파일도 쓰지 않습니다.
 
+### 17.7 세션 원문 보관하기 (sessions)
+
+Claude Code는 대화 파일(transcript)을 기본 30일 뒤에 지웁니다. `sessions capture` 명령은 그 전에 대화 원문을 project vault의 `raw/sessions/` 폴더로 옮겨 둡니다. 보관한 원문은 검색 도구가 읽을 수 있고, wiki claim의 근거로 바로 인용할 수 있습니다.
+
+보관 규칙은 다음과 같습니다.
+
+- 세션 원문은 저장소에 연결된 역할 `project` vault에만 들어갑니다. 역할이 `personal`이나 `team`인 vault에는 어떤 경우에도 쓰지 않습니다.
+- 수집 명령은 새 파일만 추가합니다. 기존 세션 파일은 사람도 agent도 고치거나, 이름을 바꾸거나, 지우지 않습니다.
+- 세션 파일에는 source page를 만들지 않습니다. `ingest-source` 명령과 `bulk-ingest` 명령은 세션 파일 경로를 거부합니다. `bulk-ingest --all-raw`는 세션 파일을 건너뜁니다.
+- 보관하는 내용은 사용자 발화, agent 답변 본문, 서브에이전트 대화, 도구 이름입니다. thinking 블록과 도구 입력·출력은 남기지 않습니다. 알려진 형식의 비밀값은 `[REDACTED:<종류>]` 표시로 바꿉니다. 목록에 없는 형식의 비밀값은 남을 수 있습니다.
+- 수집 명령은 commit하지 않습니다. 세션 파일 commit은 사람이 합니다.
+
+#### project vault 연결하기
+
+수집 명령은 저장소에 역할 `project` vault가 정확히 하나 연결되어 있어야 파일을 씁니다. install은 새 vault를 역할 `personal` 값으로 등록하므로(17.2), project vault는 아래 순서로 따로 만들어 연결합니다.
+
+1. builder checkout에서 project vault를 만듭니다: `python3 tools/vault_migration/cli.py install /path/to/app-vault --name app`
+2. 연결 설정(17.1)에서 그 vault 항목의 `role` 값을 `project`로 바꿉니다.
+3. 저장소를 그 vault에 연결합니다: `python3 tools/vault_migration/cli.py link app --repo /path/to/my-app`
+4. `python3 tools/vault_migration/cli.py list --repo /path/to/my-app` 명령으로 연결을 확인합니다.
+
+수집 명령은 대상 vault의 manifest contract가 3 이상일 때만 씁니다. 지금 builder로 새로 install한 vault는 contract 3입니다. 이전 builder로 만든 vault라면 1.1절의 audit과 apply를 사람이 먼저 실행합니다. agent는 apply를 실행하지 않습니다.
+
+#### `sessions capture`
+
+`sessions capture [--transcript PATH] [--session-id ID] [--cwd PATH] [--trigger PreCompact|SessionEnd|manual] [--vault PATH] [--json]`
+
+입력은 두 형태입니다.
+
+- 훅 형태: `--transcript` 옵션이 없으면 stdin에서 Claude Code 훅 JSON 한 개를 읽습니다. 이 JSON의 `session_id`, `transcript_path`, `cwd`, `hook_event_name` 값을 씁니다. `hook_event_name` 값이 trigger가 됩니다. 훅은 이 명령을 인자 없이 호출하면 됩니다.
+- 수동 형태: `--transcript PATH` 옵션으로 transcript 파일을 지정합니다. session id는 `--session-id` 값이고, 없으면 파일 이름에서 확장자를 뺀 값입니다. 작업 폴더는 `--cwd` 값이고, 없으면 transcript 첫 항목의 `cwd` 값, 그것도 없으면 현재 폴더입니다. trigger 기본값은 `manual`입니다.
+
+```bash
+python3 tools/wiki/cli.py sessions capture \
+  --transcript "$HOME/.claude/projects/<key>/<session id>.jsonl" \
+  --cwd /path/to/my-app
+```
+
+이 명령은 어느 vault 폴더에서 실행해도 됩니다. 대상 vault는 작업 폴더의 저장소를 17.3의 project 찾기 순서로 찾은 뒤, 그 project에 연결된 역할 `project` vault로 정합니다. `--vault PATH` 옵션은 역할 `project` vault가 둘 이상일 때 그중 하나를 고르는 데만 씁니다.
+
+한 번 실행하면 대상 vault에 `raw/sessions/<agent>/<YYYY-MM-DD>-<session id>-part<N>.md` 파일 하나를 새로 만듭니다. 같은 세션을 다시 수집하면 이전 수집 뒤의 턴만 다음 part 번호 파일로 씁니다. 이전 part 파일은 바꾸지 않습니다. `wiki/`, index, log, `scratch/`는 바꾸지 않고, git 명령도 실행하지 않습니다.
+
+쓰지 않는 경우와 종료 코드는 다음과 같습니다. 훅 형태 입력은 어떤 실패에서도 exit 0으로 끝나고 이유를 stderr에 적습니다. 세션 종료나 compaction을 막지 않기 위해서입니다.
+
+| 상황 | 수동 형태 종료 코드 |
+|---|---|
+| 새 턴이 없음 | 0, `no new turns` 출력 |
+| 저장소에 역할 `project` vault가 없음 | 0, 이유와 이 절의 연결 방법 안내 |
+| 역할 `project` vault가 둘 이상이고 `--vault` 옵션이 없음 | 0, 후보 vault 이름 |
+| 대상 vault manifest가 없거나 contract가 3 미만 | 0, migration을 먼저 실행하라는 안내 |
+| `--vault` 경로가 그 project의 역할 `project` vault가 아님 | 1 |
+| transcript 파일이 없거나 읽을 수 없음, session id 형식 오류 | 1 |
+| 연결 설정이 없거나 손상됨, 저장소를 찾지 못함, 여러 project가 맞음 | 1 |
+| 이전 part 파일의 frontmatter에서 이어 쓸 위치를 읽을 수 없음 | 1 |
+| 같은 part 번호를 다른 수집이 먼저 만들었고 한 번 재시도도 실패함, 디스크 쓰기 실패 | 1 |
+
+#### `sessions status`
+
+`sessions status [--json]`
+
+세션 파일 수, 마지막 수집 시각(`collected_at`), 보관소 검사 실패 수, 아직 commit하지 않은 세션 파일 수를 출력합니다. 마지막 값은 vault가 git 작업 트리일 때 `git status --porcelain --untracked-files=all -- raw/sessions` 결과로 세고, git이 아니면 `unknown`을 출력합니다. 읽기 전용이고 항상 exit 0입니다.
+
+commit하기 전에 세션 파일이 지워지면 어떤 검사도 잡지 못합니다. 이 명령으로 commit하지 않은 파일 수를 확인하고 commit합니다.
+
+#### `sessions git-check`
+
+`sessions git-check`
+
+vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 끝납니다. git 작업 트리이면 현재 branch 이력에서 `raw/sessions/` 아래에 추가된 적 있는 경로와 처음 추가된 내용을 모읍니다. 그 경로가 작업 트리에 없거나 내용이 처음 추가된 내용과 다르면 경로마다 한 줄을 출력하고 exit 1로 끝납니다. 파일을 되살리면 다시 통과합니다. `scripts/release_gate.sh`는 metrics 단계 뒤에 vault 루트에서 이 명령을 실행합니다.
+
+#### 세션 파일 검사와 인용
+
+- `lint` 명령은 세션 파일마다 경로 형식, frontmatter 필수 필드, 본문 해시(`body_sha256`)를 검사합니다. 실패 코드는 10절 표의 `session-` 코드입니다. 파일 형식은 `docs/agent/OPERATING-SCHEMA.md` 16.1절에 있습니다.
+- `health` 출력 마지막 줄은 `Sessions: <수> files, last collected <시각|none>, hash mismatches <수>` 형식입니다. `metrics` report에도 세 값이 나오고, `metrics --check` 명령은 해시 불일치가 1 이상일 때만 실패합니다. 세션 파일 수가 늘어나는 것만으로는 실패하지 않습니다.
+- `source-registry` 보고서는 세션 파일을 `unregistered`가 아니라 `session`(검사 실패 시 `session-invalid`) 상태로 보여 줍니다. Source Map에는 `session-invalid` 파일만 나오므로, 새로 수집해도 `maps build --check`가 실패하지 않습니다.
+- wiki claim은 `raw/sessions/...` 경로를 source page 없이 근거로 인용할 수 있습니다. `#sha256=<파일 해시>`는 선택입니다. 붙이면 파일 해시를 비교하고, 안 붙이면 그 세션 파일이 보관소 검사를 통과했는지만 봅니다.
+
 ## 18. Git 사용하기
 
 LLM Wiki는 Git으로 durable state를 보존합니다.
@@ -971,6 +1056,9 @@ git commit -m "wiki: update example concept"
 | maintenance metrics report | `python3 tools/wiki/cli.py metrics --report` |
 | maintenance metrics gate | `python3 tools/wiki/cli.py metrics --check --report` |
 | MCP server 실행 | `python3 tools/wiki/mcp_server.py` |
+| 세션 원문 수집 (훅은 인자 없이 stdin JSON으로 호출) | `python3 tools/wiki/cli.py sessions capture --transcript /path/to/session.jsonl` |
+| 세션 보관소 상태 확인 (읽기 전용) | `python3 tools/wiki/cli.py sessions status` |
+| 커밋된 세션 파일 삭제·변경 검사 | `python3 tools/wiki/cli.py sessions git-check` |
 | L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
 | 저장소를 vault에 연결 (builder checkout) | `python3 tools/vault_migration/cli.py link personal --repo /path/to/my-app` |
 | 저장소 연결 해제 (builder checkout) | `python3 tools/vault_migration/cli.py unlink personal --repo /path/to/my-app` |

@@ -9,6 +9,7 @@ from .frontmatter import parse_page, render_page
 from .hash_source import compute_sha256, display_path
 from .lint import find_human_locks
 from .paths import resolve_report_path
+from .session_archive import session_archive_root
 from .wiki_update import append_log_entry, apply_index_entry, assert_can_append_log_entry, assert_can_apply_index_entry
 
 
@@ -37,6 +38,11 @@ def ingest_source(
         source_path.resolve().relative_to(raw_root)
     except ValueError:
         raise ValueError("Source path must be under raw/.") from None
+    if _is_session_archive_path(root, source_path):
+        raise ValueError(
+            f"Session files do not get source pages: {display_path(source_path, root)}. "
+            "Cite raw/sessions/ paths directly as claim evidence."
+        )
     if not source_path.exists() or not source_path.is_file():
         raise ValueError(f"Source file does not exist: {source_path}")
 
@@ -206,6 +212,14 @@ def _render_report(source_page: Path, canonical_source: str, source_hash: str, o
             "",
         ]
     )
+
+
+def _is_session_archive_path(root: Path, source_path: Path) -> bool:
+    try:
+        source_path.resolve().relative_to(session_archive_root(root).resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _title_from_path(path: Path) -> str:

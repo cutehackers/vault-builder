@@ -16,7 +16,7 @@ vault-builder 릴리스를 내는 순서다. 사람이든 agent든 이 순서를
 4. contract가 바뀌었으면 `tools/vault_migration/contracts/vN.json`을 새로 만들고 이전 contract 파일은 그대로 둔다. 바뀌지 않았으면 현재 카탈로그를 다시 만든다. `--revision`을 주지 않으면 `VERSION` 값이 들어간다.
 
    ```bash
-   python3.12 tools/vault_migration/cli.py catalog --contract-version 2 --output tools/vault_migration/contracts/v2.json
+   python3.12 tools/vault_migration/cli.py catalog --contract-version 3 --output tools/vault_migration/contracts/v3.json
    ```
 
 5. `CHANGELOG.md`에서 `## [Unreleased]` 아래 내용을 `## [X.Y.Z] - YYYY-MM-DD`로 옮기고, 호환표 한 줄과 `### Upgrade` 절을 쓴다. `## [Unreleased]` 제목은 비운 채 남긴다.
