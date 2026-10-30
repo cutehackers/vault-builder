@@ -38,9 +38,16 @@ from tools.wiki.lib.source_registry import (
     build_source_registry,
     bulk_ingest_sources,
     discover_raw_files,
+    is_session_path,
     render_source_registry_report,
 )
 from tools.wiki.lib.search import read_wiki_page, render_hits, search_wiki
+from tools.wiki.lib.session_archive import (
+    check_session_git_archive,
+    count_uncommitted_session_files,
+    session_archive_status,
+)
+from tools.wiki.lib.session_capture import TRIGGERS, run_capture_command
 from tools.wiki.lib.workflow import (
     ensure_draft_targets_workflow_target,
     prepare_query_capture_workflow,
@@ -179,7 +186,46 @@ def main(argv: list[str] | None = None) -> int:
     workflow_query.add_argument("--publish", action="store_true")
     workflow_query.add_argument("--report", nargs="?", const="__default__")
 
+    sessions_cmd = subcommands.add_parser("sessions")
+    sessions_subcommands = sessions_cmd.add_subparsers(dest="sessions_command", required=True)
+    sessions_capture = sessions_subcommands.add_parser(
+        "capture",
+        description=(
+            "Add the session's new turns to the linked role project vault as one new file under raw/sessions/. "
+            "Without --transcript, read one Claude Code hook JSON object from stdin; hook input always exits 0."
+        ),
+    )
+    sessions_capture.add_argument("--transcript", help="Transcript JSONL path (manual form).")
+    sessions_capture.add_argument("--session-id", help="Session id. Default: transcript file name without extension.")
+    sessions_capture.add_argument("--cwd", help="Session working folder. Default: cwd of the first transcript entry.")
+    # No argparse choices: a bad value must not exit 2 (spec decision M). read_capture_request checks it.
+    sessions_capture.add_argument("--trigger", metavar="{" + ",".join(TRIGGERS) + "}", help="Default: manual.")
+    sessions_capture.add_argument("--vault", help="Pick one of several role project vaults by path.")
+    sessions_capture.add_argument("--json", action="store_true")
+    sessions_status = sessions_subcommands.add_parser(
+        "status",
+        description=(
+            "Show session file count, last collected time, archive check failures and uncommitted session files. "
+            "Read-only. Always exits 0."
+        ),
+    )
+    sessions_status.add_argument("--json", action="store_true")
+    sessions_subcommands.add_parser(
+        "git-check",
+        description=(
+            "Fail when a session file committed under raw/sessions/ is missing or differs from the blob first added. "
+            "Prints skipped outside a Git work tree."
+        ),
+    )
+
     args = parser.parse_args(argv)
+
+    if args.command == "sessions":
+        if args.sessions_command == "status":
+            return _sessions_status(args.json)
+        if args.sessions_command == "git-check":
+            return _sessions_git_check()
+        return run_capture_command(vars(args), sys.stdin, sys.stdout, sys.stderr)
 
     if args.command == "search":
         try:
@@ -261,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(render_lint_report(result))
         print(f"Report written: {display_path(report_path, ROOT)}")
+        sessions = session_archive_status(ROOT)
+        print(
+            f"Sessions: {sessions.file_count} files, last collected {sessions.last_collected_at or 'none'}, "
+            f"hash mismatches {sessions.hash_mismatch_count}"
+        )
         return 0 if result.ok else 1
 
     if args.command == "metrics":
@@ -281,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Contested claim rows: {metrics.contested_claim_rows}")
         print(f"Stale sources: {metrics.stale_sources}")
         print(f"Orphan pages: {metrics.orphan_pages}")
+        print(f"Session files: {metrics.session_files}")
+        print(f"Session last collected at: {metrics.session_last_collected_at or 'none'}")
+        print(f"Session hash mismatches: {metrics.session_hash_mismatches}")
         if result.report_path is not None:
             print(f"Report written: {display_path(result.report_path, ROOT)}")
         if args.check:
@@ -391,7 +445,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bulk-ingest":
         source_paths = [Path(path) for path in args.paths]
         if args.all_raw:
-            source_paths.extend(discover_raw_files(ROOT))
+            # Session files never get source pages, so --all-raw leaves them out.
+            source_paths.extend(
+                path for path in discover_raw_files(ROOT) if not is_session_path(display_path(path, ROOT))
+            )
         if not source_paths and not args.all_raw:
             print("bulk-ingest requires at least one path or --all-raw.", file=sys.stderr)
             return 1
@@ -793,6 +850,7 @@ METRIC_CHECK_FIELDS = [
     "pages_without_claim_level_provenance",
     "deprecated_linked_pages",
     "unresolved_review_max_age_days",
+    "session_hash_mismatches",
 ]
 
 # Fields a policy may leave out without gating them. Every other field defaults to 0.
@@ -938,6 +996,42 @@ def _restore_snapshot(snapshot: dict[Path, str | None]) -> None:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+
+
+def _sessions_status(as_json: bool) -> int:
+    status = session_archive_status(ROOT)
+    uncommitted = count_uncommitted_session_files(ROOT)
+    if as_json:
+        payload = {
+            "session_files": status.file_count,
+            "last_collected_at": status.last_collected_at,
+            "archive_check_failures": status.failure_count,
+            "uncommitted_session_files": uncommitted,
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+    print(f"Session files: {status.file_count}")
+    print(f"Last collected: {status.last_collected_at or 'none'}")
+    print(f"Archive check failures: {status.failure_count}")
+    print(f"Uncommitted session files: {'unknown' if uncommitted is None else uncommitted}")
+    return 0
+
+
+def _sessions_git_check() -> int:
+    result = check_session_git_archive(ROOT)
+    if result is None:
+        print("Session git check skipped: the vault is not a Git work tree.")
+        return 0
+    for problem in result.problems:
+        if problem.reason == "missing":
+            print(f"{problem.relative}: committed session file is missing from the work tree")
+        else:
+            print(f"{problem.relative}: work tree bytes differ from the blob first committed")
+    if result.ok:
+        print(f"Session git check passed: {result.checked_count} committed session files unchanged.")
+        return 0
+    print(f"Session git check failed: {len(result.problems)} of {result.checked_count} committed session files.")
+    return 1
 
 
 def _print_result(result: LintResult) -> None:

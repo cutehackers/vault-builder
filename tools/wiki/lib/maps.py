@@ -486,6 +486,8 @@ def _render_source_map(root: Path, entries: list[SourceRegistryEntry]) -> str:
         "## Source Registry",
         "",
     ]
+    # Valid session files are listed by `sessions status`, not here, so each capture keeps maps current.
+    entries = [entry for entry in entries if entry.ingest_status != "session"]
     if not entries:
         lines.extend(["- No raw sources registered or discovered.", ""])
         return "\n".join(lines)
@@ -563,7 +565,7 @@ def _render_lifecycle_map(root: Path, pages: list[Page], entries: list[SourceReg
         or _quality_value(page, "review_required") is True
     ]
     attention_sources = [
-        entry for entry in entries if entry.ingest_status in {"drift", "missing-source", "unregistered"}
+        entry for entry in entries if entry.ingest_status in {"drift", "missing-source", "unregistered", "session-invalid"}
     ]
     lines = [
         "# Lifecycle Map",

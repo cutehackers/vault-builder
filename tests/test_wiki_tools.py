@@ -175,7 +175,7 @@ def _write_contract_manifest(root: Path, version: int = 1, schema_version: int =
         "generated_at": "2026-07-30T00:00:00Z",
         "managed_files": {},
     }
-    if schema_version == 2:
+    if schema_version >= 2:
         data["external_records"] = []
     manifest.write_text(json.dumps(data, sort_keys=True) + "\n")
 
@@ -674,7 +674,7 @@ class WikiAuthorityContractTest(unittest.TestCase):
             )
 
     def test_registration_extra_semantics_are_reported_by_validate_page(self):
-        for version in (1, 2):
+        for version in (1, 2, 3):
             with self.subTest(contract_version=version):
                 self._assert_validate_page_reports_extra_semantics(version)
 
@@ -2318,6 +2318,11 @@ class WikiToolCliTest(unittest.TestCase):
                 target / "tools" / "wiki" / "templates" / "draft-upsert-page.json",
                 target / "tools" / "wiki" / "templates" / "draft-batch-upsert-pages.json",
                 target / "tools" / "wiki" / "mcp_server.py",
+                target / "tools" / "wiki" / "lib" / "session_archive.py",
+                target / "tools" / "wiki" / "lib" / "session_capture.py",
+                target / ".agents" / "skills" / "session-capture" / "SKILL.md",
+                target / ".claude" / "skills" / "session-capture" / "SKILL.md",
+                target / "raw" / "sessions" / ".gitkeep",
             ]
 
             self.assertEqual(0, init_result.returncode, init_result.stdout + init_result.stderr)
@@ -2329,8 +2334,17 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
-            self.assertEqual(2, manifest["contract_version"])
+            self.assertEqual(3, manifest["schema_version"])
+            self.assertEqual(3, manifest["contract_version"])
             self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
+            for relative in (
+                "tools/wiki/lib/session_archive.py",
+                "tools/wiki/lib/session_capture.py",
+                ".agents/skills/session-capture/SKILL.md",
+                ".claude/skills/session-capture/SKILL.md",
+            ):
+                self.assertIn(relative, manifest["managed_files"])
+            self.assertNotIn("raw/sessions/.gitkeep", manifest["managed_files"])
             self.assertNotIn("wiki/overview.md", manifest["managed_files"])
             self.assertFalse((target / "tools" / "vault_migration").exists())
             self.assertFalse((target / "init-vault.sh").exists())
@@ -6364,6 +6378,60 @@ class SharedJsonEntryTests(unittest.TestCase):
 
         self.assertEqual(2, len(parsed["external_records"]))
 
+    def test_schema_3_manifest_is_accepted_with_contract_3(self):
+        from tools.wiki.lib.vault_manifest import parse_manifest_json
+
+        value = _shared_json_entry_manifest()
+        value["schema_version"] = 3
+        value["contract_version"] = 3
+
+        parsed = parse_manifest_json(json.dumps(value))
+
+        self.assertEqual((3, 3), (parsed["schema_version"], parsed["contract_version"]))
+        self.assertEqual(2, len(parsed["external_records"]))
+
+    def test_schema_and_contract_versions_must_pair(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        for schema, contract in ((2, 3), (3, 2), (1, 3), (3, 1)):
+            with self.subTest(schema=schema, contract=contract):
+                value = _shared_json_entry_manifest()
+                if schema == 1:
+                    value.pop("external_records")
+                value["schema_version"] = schema
+                value["contract_version"] = contract
+                with self.assertRaisesRegex(ValueError, "supported contract version"):
+                    validate_manifest(value)
+
+    def test_schema_3_manifest_requires_external_records(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        value = _shared_json_entry_manifest()
+        value["schema_version"] = 3
+        value["contract_version"] = 3
+        value.pop("external_records")
+
+        with self.assertRaisesRegex(ValueError, "external_records"):
+            validate_manifest(value)
+
+    def test_validate_page_accepts_contract_3_manifest(self):
+        from tools.wiki import cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            _write_contract_manifest(root, version=3, schema_version=3)
+            original_root = cli.ROOT
+            try:
+                cli.ROOT = root
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    result = cli.main(["validate-page", str(root / "wiki" / "index.md")])
+            finally:
+                cli.ROOT = original_root
+
+            self.assertEqual(0, result, output.getvalue())
+            self.assertNotIn("invalid-vault-builder-manifest", output.getvalue())
+
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
@@ -6741,3 +6809,1766 @@ class UsageDocTests(unittest.TestCase):
         section = self._section("## 19. 전체 명령 요약")
         for command in ("cli.py link ", "cli.py unlink ", "cli.py list"):
             self.assertIn(command, section)
+
+
+def _session_frontmatter(session_id: str = "abc-123", part: int = 1, **overrides: object) -> dict:
+    frontmatter: dict = {
+        "schema": "vault-session/v1",
+        "agent": "claude-code",
+        "session_id": session_id,
+        "project": "demo",
+        "cwd": "$HOME/repos/demo",
+        "part": part,
+        "first_turn_uuid": "u-1",
+        "first_turn_at": "2026-10-30T01:00:00Z",
+        "last_turn_uuid": "u-2",
+        "last_turn_at": "2026-10-30T01:05:00Z",
+        "turn_count": 2,
+        "collected_at": "2026-10-30T02:00:00Z",
+        "trigger": "manual",
+        "redactions": 0,
+        "body_sha256": "",
+    }
+    frontmatter.update(overrides)
+    return frontmatter
+
+
+def _write_session_file(
+    root: Path,
+    relative: str = "raw/sessions/claude-code/2026-10-30-abc-123-part1.md",
+    frontmatter: dict | None = None,
+    body: str = "## 2026-10-30T01:00:00Z user\n\n안녕하세요\n",
+) -> Path:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = dict(frontmatter if frontmatter is not None else _session_frontmatter())
+    values["body_sha256"] = ""
+    rendered = render_page(values, body)
+    body_part = rendered.encode("utf-8").split(b"\n---\n", 1)[1]
+    if frontmatter is None or not frontmatter.get("body_sha256"):
+        values["body_sha256"] = hashlib.sha256(body_part).hexdigest()
+    else:
+        values["body_sha256"] = frontmatter["body_sha256"]
+    path.write_bytes(render_page(values, body).encode("utf-8"))
+    return path
+
+
+class SessionArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _minimal_vault(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _codes(self) -> list[str]:
+        from tools.wiki.lib.session_archive import validate_session_archive
+
+        return [issue.code for issue in validate_session_archive(self.root)]
+
+    def test_valid_session_file_passes(self):
+        from tools.wiki.lib.session_archive import check_session_file
+
+        path = _write_session_file(self.root)
+
+        check = check_session_file(self.root, path)
+
+        self.assertTrue(check.ok, check.issues)
+        self.assertEqual("abc-123", check.session_path.session_id)
+        self.assertEqual(1, check.session_path.part)
+        self.assertEqual([], self._codes())
+
+    def test_body_hash_is_sha256_of_utf8_bytes_after_first_closing_marker(self):
+        from tools.wiki.lib.session_archive import (
+            read_session_text,
+            session_body_sha256,
+            split_session_text,
+        )
+
+        body = "## 2026-10-30T01:00:00Z user\n\n한글 본문\n---\nmore\n"
+        path = _write_session_file(self.root, body=body)
+        raw = path.read_bytes()
+        expected = hashlib.sha256(raw.split(b"\n---\n", 1)[1]).hexdigest()
+
+        _, parsed_body = split_session_text(read_session_text(path))
+
+        self.assertEqual(expected, session_body_sha256(parsed_body))
+        self.assertIn("more", parsed_body)
+
+    def test_reads_utf8_bytes_regardless_of_default_encoding(self):
+        from tools.wiki.lib.session_archive import check_session_file
+
+        path = _write_session_file(self.root)
+        original = Path.read_text
+
+        def ascii_read_text(self, *args, **kwargs):
+            kwargs.setdefault("encoding", "ascii")
+            return original(self, *args, **kwargs)
+
+        with unittest.mock.patch.object(Path, "read_text", ascii_read_text):
+            check = check_session_file(self.root, path)
+
+        self.assertTrue(check.ok, check.issues)
+
+    def test_path_regex_accepts_and_rejects(self):
+        from tools.wiki.lib.session_archive import parse_session_path
+
+        self.assertIsNotNone(parse_session_path("raw/sessions/claude-code/2026-10-30-a-part-1-part12.md"))
+        self.assertEqual("a-part-1", parse_session_path("raw/sessions/claude-code/2026-10-30-a-part-1-part12.md").session_id)
+        for relative in (
+            "raw/sessions/claude-code/2026-10-30-abc-part0.md",
+            "raw/sessions/claude-code/2026-10-30-abc-part01.md",
+            "raw/sessions/claude-code/2026-13-30-abc-part1.md",
+            "raw/sessions/claude-code/2026-10-30--abc-part1.md",
+            "raw/sessions/claude-code/2026-10-30-ab_c-part1.md",
+            "raw/sessions/codex/2026-10-30-abc-part1.md",
+            "raw/sessions/2026-10-30-abc-part1.md",
+            "raw/sessions/claude-code/2026-10-30-abc-part1.txt",
+            "raw/sessions/claude-code/nested/2026-10-30-abc-part1.md",
+        ):
+            self.assertIsNone(parse_session_path(relative), relative)
+
+    def test_invalid_path(self):
+        from tools.wiki.lib.session_archive import list_session_files
+
+        archive = self.root / "raw" / "sessions" / "claude-code"
+        archive.mkdir(parents=True)
+        (archive / "notes.txt").write_text("x\n")
+        (archive / "2026-10-30-abc-part01.md").write_text("x\n")
+        (self.root / "raw" / "sessions" / ".gitkeep").write_text("")
+        (archive / ".tmp-abc").write_text("partial")
+
+        self.assertEqual(2, len(list_session_files(self.root)))
+        self.assertEqual(["session-file-invalid-path"] * 2, self._codes())
+
+    def test_invalid_frontmatter_cases(self):
+        cases = {
+            "missing frontmatter": None,
+            "missing field": _session_frontmatter(),
+            "unknown schema": _session_frontmatter(schema="vault-session/v9"),
+            "session id differs": _session_frontmatter(session_id="other"),
+            "part differs": _session_frontmatter(part=2),
+        }
+        for name, frontmatter in cases.items():
+            with self.subTest(name):
+                shutil.rmtree(self.root / "raw" / "sessions", ignore_errors=True)
+                if frontmatter is None:
+                    path = self.root / "raw/sessions/claude-code/2026-10-30-abc-123-part1.md"
+                    path.parent.mkdir(parents=True)
+                    path.write_text("## no frontmatter\n")
+                else:
+                    if name == "missing field":
+                        frontmatter = dict(frontmatter)
+                        del frontmatter["trigger"]
+                    _write_session_file(self.root, frontmatter=frontmatter)
+                self.assertEqual(["session-file-invalid-frontmatter"], self._codes())
+
+    def test_hash_mismatch_after_one_character_change(self):
+        path = _write_session_file(self.root)
+        path.write_bytes(path.read_bytes().replace("안녕하세요".encode("utf-8"), "안녕하세오".encode("utf-8")))
+
+        self.assertEqual(["session-file-hash-mismatch"], self._codes())
+
+    def test_part_duplicate(self):
+        _write_session_file(self.root)
+        _write_session_file(self.root, relative="raw/sessions/claude-code/2026-10-31-abc-123-part1.md")
+        _write_session_file(
+            self.root,
+            relative="raw/sessions/claude-code/2026-10-31-abc-123-part2.md",
+            frontmatter=_session_frontmatter(part=2),
+        )
+
+        self.assertEqual(["session-part-duplicate"] * 2, self._codes())
+
+    def test_status_with_no_session_files(self):
+        from tools.wiki.lib.session_archive import session_archive_status
+
+        status = session_archive_status(self.root)
+
+        self.assertEqual(0, status.file_count)
+        self.assertIsNone(status.last_collected_at)
+        self.assertEqual(0, status.failure_count)
+        self.assertEqual(0, status.hash_mismatch_count)
+
+    def test_status_counts_files_last_collected_and_failures(self):
+        from tools.wiki.lib.session_archive import session_archive_status
+
+        _write_session_file(self.root)
+        changed = _write_session_file(
+            self.root,
+            relative="raw/sessions/claude-code/2026-10-30-abc-123-part2.md",
+            frontmatter=_session_frontmatter(part=2, collected_at="2026-10-30T03:00:00Z"),
+        )
+        changed.write_bytes(changed.read_bytes() + b"tampered\n")
+
+        status = session_archive_status(self.root)
+
+        self.assertEqual(2, status.file_count)
+        self.assertEqual("2026-10-30T03:00:00Z", status.last_collected_at)
+        self.assertEqual(1, status.failure_count)
+        self.assertEqual(1, status.hash_mismatch_count)
+
+    def test_module_uses_standard_library_only(self):
+        import ast
+
+        source = Path(__file__).resolve().parents[1] / "tools" / "wiki" / "lib" / "session_archive.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertIn(alias.name.split(".")[0], sys.stdlib_module_names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                self.assertIn(node.module.split(".")[0], sys.stdlib_module_names | {"__future__"})
+
+
+# Synthetic transcript fixtures for SessionTranscriptTests. No real conversation text is copied.
+# The structure follows real Claude Code transcripts inspected read-only on 2026-10-30
+# (entries written by Claude Code 2.1.309; installed CLI 2.1.312):
+# - One JSON object per line. Turn candidates have "type" "user" or "assistant" plus "uuid",
+#   "parentUuid", "timestamp" (UTC ISO 8601 with milliseconds and "Z"), "isSidechain", "sessionId",
+#   "cwd", "version" and "message" {"role", "content"}.
+# - user "message.content" is a string or a list of "text", "tool_result" or "image" blocks.
+#   Tool results also carry a top-level "toolUseResult" key. Some user entries carry "isMeta": true.
+# - Each assistant line holds the blocks of one API content block group: "thinking"
+#   {"thinking", "signature"}, "redacted_thinking", "text" {"text"} or "tool_use" {"id", "name", "input", "caller"}.
+# - Other entry types sit in the same file and are not turns: "attachment", "system", "queue-operation",
+#   "api-request", "api-request-blob" (whose "message" repeats text blocks), "file-history-snapshot",
+#   "last-prompt", "custom-title", "agent-name", "mode", "pr-link", "cost-state" and similar.
+# - Subagent conversations were found only in "<session_id>/subagents/agent-<agentId>.jsonl" next to
+#   the main transcript (537 files). Their user/assistant entries have "isSidechain": true and "agentId"
+#   equal to the file name without "agent-". No main transcript held an "isSidechain": true entry, and no
+#   uuid appeared in both places. The fixture still puts one sidechain entry in the main file and repeats
+#   one uuid, because spec 4.3 reads both places and writes a uuid once.
+# - Hook input (Claude Code hooks reference): every event sends "session_id", "transcript_path", "cwd" and
+#   "hook_event_name". PreCompact adds "trigger" (manual|auto) and "custom_instructions"; SessionEnd adds "reason".
+_TX_SESSION_ID = "11111111-2222-3333-4444-555555555555"
+
+
+def _tx_entry(kind: str, uuid: str, at: str, content: object, **extra: object) -> dict:
+    entry: dict = {
+        "parentUuid": None,
+        "isSidechain": False,
+        "userType": "external",
+        "cwd": "/work/demo",
+        "sessionId": _TX_SESSION_ID,
+        "version": "2.1.309",
+        "gitBranch": "main",
+        "type": kind,
+        "message": {"role": kind, "content": content},
+        "uuid": uuid,
+        "timestamp": at,
+    }
+    entry.update(extra)
+    return entry
+
+
+def _tx_main_lines() -> list[str]:
+    entries: list[object] = [
+        {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-30T01:00:00.000Z",
+         "sessionId": _TX_SESSION_ID, "content": "QUEUE_TEXT_MARKER"},
+        _tx_entry("user", "u-1", "2026-10-30T01:00:01.000Z", "Please add the parser.  \r\nSecond line\t\r\n"),
+        _tx_entry("assistant", "a-1", "2026-10-30T01:00:02.000Z",
+                  [{"type": "thinking", "thinking": "THINKING_TEXT_MARKER", "signature": "sig"}]),
+        _tx_entry("assistant", "a-2", "2026-10-30T01:00:03.000Z",
+                  [{"type": "text", "text": "I will read the file."}]),
+        _tx_entry("assistant", "a-3", "2026-10-30T01:00:04.000Z",
+                  [{"type": "tool_use", "id": "toolu_1", "name": "Read",
+                    "input": {"file_path": "TOOL_INPUT_MARKER"}, "caller": {"type": "direct"}}]),
+        _tx_entry("user", "u-2", "2026-10-30T01:00:05.000Z",
+                  [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "TOOL_OUTPUT_MARKER"}],
+                  toolUseResult={"stdout": "TOOL_OUTPUT_MARKER"}, sourceToolAssistantUUID="a-3"),
+        _tx_entry("assistant", "a-4", "2026-10-30T01:00:06.000Z",
+                  [{"type": "redacted_thinking", "data": "REDACTED_THINKING_MARKER"},
+                   {"type": "tool_use", "id": "toolu_2", "name": "Agent",
+                    "input": {"prompt": "AGENT_INPUT_MARKER"}, "caller": {"type": "direct"}}]),
+        {"type": "attachment", "uuid": "att-1", "timestamp": "2026-10-30T01:00:06.500Z", "isSidechain": False,
+         "attachment": {"type": "text", "content": "ATTACHMENT_TEXT_MARKER"}},
+        {"type": "system", "uuid": "sys-1", "timestamp": "2026-10-30T01:00:06.600Z", "isSidechain": False,
+         "subtype": "info", "content": "SYSTEM_TEXT_MARKER"},
+        {"type": "api-request-blob", "hash": "h", "sessionId": _TX_SESSION_ID,
+         "message": {"role": "user", "content": [{"type": "text", "text": "BLOB_TEXT_MARKER"}]}},
+        "this line is not json {",
+        _tx_entry("user", "s-1", "2026-10-30T01:00:07.000Z", "Subagent prompt text.",
+                  isSidechain=True, agentId="abc123"),
+        _tx_entry("user", "side-main", "2026-10-30T01:00:07.500Z", "Sidechain entry in the main file.",
+                  isSidechain=True, agentId="abc123"),
+        _tx_entry("assistant", "a-5", "2026-10-30T01:00:20.000Z",
+                  [{"type": "text", "text": "Done."}]),
+        _tx_entry("user", "u-3", "2026-10-30T01:00:21.000Z",
+                  [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "IMAGE_MARKER"}},
+                   {"type": "text", "text": "Look at this screenshot."}]),
+        _tx_entry("user", "u-4", "2026-10-30T01:00:22.000Z", "   \n\t"),
+    ]
+    return [entry if isinstance(entry, str) else json.dumps(entry) for entry in entries]
+
+
+def _tx_subagent_lines() -> list[str]:
+    side = {"isSidechain": True, "agentId": "abc123"}
+    entries = [
+        _tx_entry("user", "s-1", "2026-10-30T01:00:07.000Z", "Subagent prompt text.", **side),
+        _tx_entry("assistant", "s-2", "2026-10-30T01:00:08.000Z",
+                  [{"type": "thinking", "thinking": "SUB_THINKING_MARKER", "signature": "sig"}], **side),
+        _tx_entry("assistant", "s-3", "2026-10-30T01:00:09.000Z",
+                  [{"type": "tool_use", "id": "toolu_3", "name": "Grep",
+                    "input": {"pattern": "SUB_TOOL_INPUT_MARKER"}, "caller": {"type": "direct"}}], **side),
+        _tx_entry("user", "s-4", "2026-10-30T01:00:10.000Z",
+                  [{"type": "tool_result", "tool_use_id": "toolu_3", "content": "SUB_TOOL_OUTPUT_MARKER"}], **side),
+        _tx_entry("assistant", "s-5", "2026-10-30T01:00:11.000Z",
+                  [{"type": "text", "text": "Subagent answer text."}], **side),
+    ]
+    return [json.dumps(entry) for entry in entries]
+
+
+class SessionTranscriptTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.transcript = self.dir / f"{_TX_SESSION_ID}.jsonl"
+        self.transcript.write_text("\n".join(_tx_main_lines()) + "\n", encoding="utf-8")
+        subagents = self.dir / _TX_SESSION_ID / "subagents"
+        subagents.mkdir(parents=True)
+        (subagents / "agent-abc123.jsonl").write_text("\n".join(_tx_subagent_lines()) + "\n", encoding="utf-8")
+        (subagents / "agent-abc123.meta.json").write_text('{"agentType": "general-purpose"}', encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _turns(self, warnings: list[str] | None = None):
+        from tools.wiki.lib.session_capture import read_turns
+
+        return read_turns(self.transcript, _TX_SESSION_ID, warnings=warnings)
+
+    def test_keeps_conversation_text_tool_names_and_subagent_turns(self):
+        turns = self._turns()
+        everything = "\n".join(turn.text + "\n" + ", ".join(turn.tools) for turn in turns)
+
+        for kept in ("Please add the parser.", "I will read the file.", "Done.", "Look at this screenshot.",
+                     "Subagent prompt text.", "Subagent answer text.", "Sidechain entry in the main file."):
+            self.assertIn(kept, everything)
+        for tool in ("Read", "Agent", "Grep"):
+            self.assertIn(tool, everything)
+        for dropped in ("THINKING", "TOOL_INPUT", "TOOL_OUTPUT", "AGENT_INPUT", "ATTACHMENT", "SYSTEM_TEXT",
+                        "BLOB_TEXT", "QUEUE_TEXT", "IMAGE_MARKER", "REDACTED_THINKING"):
+            self.assertNotIn(dropped, everything)
+
+    def test_turns_are_sorted_by_time_with_roles_and_agent_ids(self):
+        turns = self._turns()
+
+        self.assertEqual(
+            [
+                ("u-1", "user", None),
+                ("a-2", "assistant", None),
+                ("a-3", "assistant", None),
+                ("a-4", "assistant", None),
+                ("s-1", "user", "abc123"),
+                ("side-main", "user", "abc123"),
+                ("s-3", "assistant", "abc123"),
+                ("s-5", "assistant", "abc123"),
+                ("a-5", "assistant", None),
+                ("u-3", "user", None),
+            ],
+            [(turn.uuid, turn.role, turn.agent_id) for turn in turns],
+        )
+        self.assertEqual(("Read",), turns[2].tools)
+        self.assertEqual("", turns[2].text)
+        self.assertEqual("2026-10-30T01:00:01.000Z", turns[0].at_text)
+
+    def test_same_uuid_in_main_and_subagent_file_is_kept_once(self):
+        uuids = [turn.uuid for turn in self._turns()]
+
+        self.assertEqual(1, uuids.count("s-1"))
+        self.assertEqual(len(uuids), len(set(uuids)))
+
+    def test_equal_timestamps_keep_file_order(self):
+        lines = [
+            json.dumps(_tx_entry("user", "x-2", "2026-10-30T01:00:00.000Z", "second in file")),
+            json.dumps(_tx_entry("user", "x-1", "2026-10-30T01:00:00.000Z", "first? no, also same time")),
+        ]
+        self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        shutil.rmtree(self.dir / _TX_SESSION_ID)
+
+        self.assertEqual(["x-2", "x-1"], [turn.uuid for turn in self._turns()])
+
+    def test_text_line_endings_and_trailing_spaces_are_cleaned(self):
+        first = self._turns()[0]
+
+        self.assertEqual("Please add the parser.\nSecond line", first.text)
+
+    def test_invalid_json_lines_are_skipped_and_counted(self):
+        warnings: list[str] = []
+
+        turns = self._turns(warnings)
+
+        self.assertTrue(turns)
+        self.assertEqual(1, len(warnings))
+        self.assertIn("1", warnings[0])
+        self.assertIn(self.transcript.name, warnings[0])
+
+    def test_reads_without_subagent_directory(self):
+        shutil.rmtree(self.dir / _TX_SESSION_ID)
+
+        uuids = [turn.uuid for turn in self._turns()]
+
+        self.assertNotIn("s-5", uuids)
+        self.assertIn("side-main", uuids)
+
+    def test_meta_user_entries_are_dropped_and_slash_command_entries_kept(self):
+        lines = [
+            json.dumps(_tx_entry("user", "m-1", "2026-10-30T01:00:00.000Z", "META_SKILL_BODY_MARKER", isMeta=True)),
+            json.dumps(_tx_entry("user", "m-2", "2026-10-30T01:00:01.000Z",
+                                 [{"type": "text", "text": "META_CAVEAT_MARKER"}], isMeta=True)),
+            json.dumps(_tx_entry("user", "c-1", "2026-10-30T01:00:02.000Z",
+                                 "<command-name>/bake</command-name>\n<command-args>3</command-args>")),
+            json.dumps(_tx_entry("user", "u-9", "2026-10-30T01:00:03.000Z", "Plain question.", isMeta=False)),
+        ]
+        self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        shutil.rmtree(self.dir / _TX_SESSION_ID)
+
+        turns = self._turns()
+
+        self.assertEqual(["c-1", "u-9"], [turn.uuid for turn in turns])
+        self.assertIn("<command-name>/bake</command-name>", turns[0].text)
+
+    def test_missing_transcript_raises_os_error(self):
+        from tools.wiki.lib.session_capture import read_turns
+
+        with self.assertRaises(OSError):
+            read_turns(self.dir / "missing.jsonl", "missing")
+
+    def test_new_turns_without_cursor_returns_all(self):
+        from tools.wiki.lib.session_capture import new_turns
+
+        turns = self._turns()
+
+        self.assertEqual(turns, new_turns(turns, None))
+
+    def test_new_turns_after_known_uuid(self):
+        from tools.wiki.lib.session_capture import PartCursor, new_turns
+
+        turns = self._turns()
+        cursor = PartCursor(last_turn_uuid="s-5", last_turn_at="2026-10-30T01:00:11.000Z")
+
+        self.assertEqual(["a-5", "u-3"], [turn.uuid for turn in new_turns(turns, cursor)])
+        last = PartCursor(last_turn_uuid="u-3", last_turn_at="2026-10-30T01:00:21.000Z")
+        self.assertEqual([], new_turns(turns, last))
+
+    def test_new_turns_with_unknown_uuid_uses_time_and_warns(self):
+        from tools.wiki.lib.session_capture import PartCursor, new_turns
+
+        turns = self._turns()
+        warnings: list[str] = []
+        cursor = PartCursor(last_turn_uuid="gone", last_turn_at="2026-10-30T01:00:09.000Z")
+
+        result = new_turns(turns, cursor, warnings=warnings)
+
+        self.assertEqual(["s-5", "a-5", "u-3"], [turn.uuid for turn in result])
+        self.assertEqual(1, len(warnings))
+        self.assertIn("gone", warnings[0])
+
+    def test_new_turns_accepts_second_precision_cursor(self):
+        from tools.wiki.lib.session_capture import PartCursor, new_turns
+
+        turns = self._turns()
+        cursor = PartCursor(last_turn_uuid="gone", last_turn_at="2026-10-30T01:00:20Z")
+
+        self.assertEqual(["u-3"], [turn.uuid for turn in new_turns(turns, cursor)])
+
+    def test_new_turns_rejects_unreadable_cursor_time(self):
+        from tools.wiki.lib.session_capture import PartCursor, new_turns
+
+        with self.assertRaises(ValueError):
+            new_turns(self._turns(), PartCursor(last_turn_uuid="gone", last_turn_at="yesterday"))
+
+    def test_redact_hides_each_secret_kind_and_counts(self):
+        from tools.wiki.lib.session_capture import redact
+
+        pem_body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+        cases = {
+            "pem": f"key:\n-----BEGIN RSA PRIVATE" + f" KEY-----\n{pem_body}\nabc\n-----END RSA PRIVATE" + " KEY-----\nafter",
+            "authorization": "curl -H 'Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==' https://x",
+            "bearer": "use Bearer abcDEF123456ghi789 for the call",
+            "anthropic": "key sk-" + "ant-api03-AbCdEf0123456789xyz here",
+            "openai": "key sk-" + "proj-AbCdEf0123456789xyzXYZ here",
+            "github": "gh" + "p_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 and github" + "_pat_11ABCDEFG0123456789_abcdefghij",
+            "slack": "xo" + "xb-1234567890-abcdefghij",
+            "aws": "AK" + "IAABCDEFGHIJKLMNOP",
+            "google": "AIza" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r",
+            "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
+            "key-value": "password=hunter2xyz, API-KEY: plainvalue99, \"client_secret\": \"s3cr3t value\"",
+            "url": "postgres://admin:pa55word@db.example.com:5432/app",
+        }
+        secrets = {
+            "pem": [pem_body],
+            "authorization": ["dXNlcjpwYXNzd29yZDEyMw=="],
+            "bearer": ["abcDEF123456ghi789"],
+            "anthropic": ["AbCdEf0123456789xyz"],
+            "openai": ["AbCdEf0123456789xyzXYZ"],
+            "github": ["AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", "11ABCDEFG0123456789_abcdefghij"],
+            "slack": ["1234567890-abcdefghij"],
+            "aws": ["ABCDEFGHIJKLMNOP"],
+            "google": ["A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r"],
+            "jwt": ["eyJzdWIiOiIxIn0"],
+            "key-value": ["hunter2xyz", "plainvalue99", "s3cr3t value"],
+            "url": ["pa55word"],
+        }
+        counts = {"github": 2, "key-value": 3}
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                result, count = redact(text)
+                for secret in secrets[name]:
+                    self.assertNotIn(secret, result)
+                self.assertIn("[REDACTED:", result)
+                self.assertEqual(counts.get(name, 1), count)
+                self.assertEqual(count, result.count("[REDACTED:"))
+
+        pem_result, _ = redact(cases["pem"])
+        self.assertTrue(pem_result.startswith("key:\n[REDACTED:"))
+        self.assertTrue(pem_result.endswith("]\nafter"))
+        url_result, _ = redact(cases["url"])
+        self.assertIn("postgres://admin:[REDACTED:", url_result)
+        self.assertIn("@db.example.com", url_result)
+
+    def test_redact_counts_each_secret_once_when_patterns_overlap(self):
+        from tools.wiki.lib.session_capture import redact
+
+        result, count = redact("api_key=sk-" + "ant-api03-AbCdEf0123456789xyz and Authorization: Bearer abc123def456ghi")
+
+        self.assertEqual(2, count)
+        self.assertEqual(2, result.count("[REDACTED:"))
+        self.assertEqual((result, 0), redact(result))
+
+    def test_redact_counts_quoted_known_token_once(self):
+        from tools.wiki.lib.session_capture import redact
+
+        github = "gh" + "p_" + "A1b2C3d4" * 5
+        anthropic = "sk-" + "ant-" + "api03-AbCdEf0123456789xyz"
+        cases = (
+            (f'export GITHUB_TOKEN="{github}"', "github-token"),
+            (f'"token": "{anthropic}"', "anthropic-key"),
+            (f"password='{github}'", "github-token"),
+        )
+        for text, kind in cases:
+            with self.subTest(text=text):
+                result, count = redact(text)
+
+                self.assertEqual(1, count)
+                self.assertEqual(1, result.count("[REDACTED:"))
+                self.assertIn(f"[REDACTED:{kind}]", result)
+                self.assertEqual((result, 0), redact(result))
+
+    def test_redact_leaves_plain_text(self):
+        from tools.wiki.lib.session_capture import redact
+
+        text = "The token count is high. max_tokens=4096 and ask-me later. https://example.com/a:b@c"
+
+        self.assertEqual((text, 0), redact(text))
+
+    def test_module_uses_standard_library_only(self):
+        import ast
+
+        source = Path(__file__).resolve().parents[1] / "tools" / "wiki" / "lib" / "session_capture.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertIn(alias.name.split(".")[0], sys.stdlib_module_names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                self.assertIn(node.module.split(".")[0], sys.stdlib_module_names | {"__future__"})
+
+
+_CAPTURE_MORE_LINES = (
+    json.dumps(_tx_entry("user", "u-5", "2026-10-30T01:01:00.000Z", "Next question, api_key=abcdef123456.")),
+    json.dumps(_tx_entry("assistant", "a-6", "2026-10-30T01:01:05.000Z", [{"type": "text", "text": "Next answer."}])),
+)
+
+
+class SessionCaptureTests(unittest.TestCase):
+    """sessions capture (spec 4.2-4.4, 6, A-2-A-4, A-7-A-10, A-14, A-20, A-21, A-23, A-24, A-27)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.base = Path(tmpdir.name).resolve()
+        self.home = self.base / "home"
+        self.config = self.base / "config"
+        self.config.mkdir(parents=True)
+        self.repo = _git_repo(self.home / "repos" / "demo")
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env.update({"HOME": str(self.home), "CLAUDE_CONFIG_DIR": str(self.config)})
+        env_patch = unittest.mock.patch.dict(os.environ, env, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+        self.vaults: dict[str, tuple[Path, str]] = {}
+        for name, role in (("app", "project"), ("app2", "project"), ("personal", "personal"), ("team", "team")):
+            path = self.base / "vaults" / name
+            (path / "raw" / "sources").mkdir(parents=True)
+            (path / "wiki").mkdir()
+            (path / "wiki" / "index.md").write_text("# Index\n", encoding="utf-8")
+            self._write_manifest(path, 3)
+            self.vaults[name] = (path, role)
+        self.app = self.vaults["app"][0]
+
+        self.transcript_dir = self.home / ".claude-projects" / "demo"
+        self.transcript_dir.mkdir(parents=True)
+        self.transcript = self.transcript_dir / f"{_TX_SESSION_ID}.jsonl"
+        self.transcript.write_text("\n".join(_tx_main_lines()) + "\n", encoding="utf-8")
+        subagents = self.transcript_dir / _TX_SESSION_ID / "subagents"
+        subagents.mkdir(parents=True)
+        (subagents / "agent-abc123.jsonl").write_text("\n".join(_tx_subagent_lines()) + "\n", encoding="utf-8")
+        self._write_map()
+
+    # Fixture helpers
+
+    def _write_manifest(self, vault: Path, contract: int | None) -> None:
+        manifest = vault / ".vault-builder" / "manifest.json"
+        if contract is None:
+            manifest.unlink(missing_ok=True)
+            return
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"schema_version": contract, "contract_version": contract, "builder_revision": "x"}),
+            encoding="utf-8",
+        )
+
+    def _write_map(self, version: object = 2, project_vaults: tuple[str, ...] = ("app",), raw: str | None = None) -> Path:
+        path = self.config / "vault-builder" / "vault-map.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if raw is not None:
+            path.write_text(raw, encoding="utf-8")
+            return path
+        project: dict = {"root": str(self.repo), "vaults": list(project_vaults)}
+        if version == 2:
+            project["remote"] = "git@github.com:Owner/demo.git"
+        data = {
+            "version": version,
+            "vaults": {name: {"path": str(vault), "role": role} for name, (vault, role) in self.vaults.items()},
+            "projects": {"demo": project},
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def _hook_json(self, **overrides: object) -> str:
+        data: dict = {
+            "session_id": _TX_SESSION_ID,
+            "transcript_path": str(self.transcript),
+            "cwd": str(self.repo),
+            "hook_event_name": "PreCompact",
+            "trigger": "auto",
+            "custom_instructions": "",
+        }
+        data.update(overrides)
+        return json.dumps({key: value for key, value in data.items() if value is not None})
+
+    def _capture(self, *args: str, stdin: str = "") -> tuple[int, str, str]:
+        from tools.wiki import cli
+
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(sys, "stdin", io.StringIO(stdin)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(["sessions", "capture", *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def _hook(self, stdin: str | None = None, *args: str) -> tuple[int, str, str]:
+        return self._capture(*args, stdin=self._hook_json() if stdin is None else stdin)
+
+    def _manual(self, *args: str) -> tuple[int, str, str]:
+        return self._capture("--transcript", str(self.transcript), "--cwd", str(self.repo), *args)
+
+    def _session_files(self, vault: Path | None = None) -> list[Path]:
+        archive = (vault or self.app) / "raw" / "sessions"
+        return sorted(path for path in archive.rglob("*") if path.is_file()) if archive.is_dir() else []
+
+    def _all_session_files(self) -> list[Path]:
+        return [path for vault, _ in self.vaults.values() for path in self._session_files(vault)]
+
+    def _frontmatter(self, path: Path) -> dict:
+        from tools.wiki.lib.frontmatter import _parse_frontmatter
+        from tools.wiki.lib.session_archive import split_session_text
+
+        raw, _ = split_session_text(path.read_bytes().decode("utf-8"))
+        return _parse_frontmatter(raw)[0]
+
+    def _append_turns(self, *lines: str) -> None:
+        with self.transcript.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+    # A-2, A-7
+
+    def test_hook_input_writes_part1_with_hook_trigger(self):
+        from tools.wiki.lib.session_archive import (
+            SESSION_FRONTMATTER_FIELDS,
+            check_session_file,
+            session_body_sha256,
+            split_session_text,
+        )
+
+        code, out, err = self._hook()
+
+        self.assertEqual(0, code, err)
+        files = self._session_files()
+        self.assertEqual(
+            [self.app / "raw" / "sessions" / "claude-code" / f"2026-10-30-{_TX_SESSION_ID}-part1.md"], files
+        )
+        self.assertIn("part1", out)
+        text = files[0].read_bytes().decode("utf-8")
+        raw, body = split_session_text(text)
+        self.assertEqual(
+            list(SESSION_FRONTMATTER_FIELDS),
+            [line.split(":", 1)[0] for line in raw.splitlines()],
+        )
+        frontmatter = self._frontmatter(files[0])
+        self.assertEqual("vault-session/v1", frontmatter["schema"])
+        self.assertEqual("claude-code", frontmatter["agent"])
+        self.assertEqual(_TX_SESSION_ID, frontmatter["session_id"])
+        self.assertEqual("demo", frontmatter["project"])
+        self.assertEqual("$HOME/repos/demo", frontmatter["cwd"])
+        self.assertEqual(1, frontmatter["part"])
+        self.assertEqual("PreCompact", frontmatter["trigger"])
+        self.assertEqual("u-1", frontmatter["first_turn_uuid"])
+        self.assertEqual("2026-10-30T01:00:01.000Z", frontmatter["first_turn_at"])
+        self.assertEqual("u-3", frontmatter["last_turn_uuid"])
+        self.assertEqual("2026-10-30T01:00:21.000Z", frontmatter["last_turn_at"])
+        self.assertEqual(10, frontmatter["turn_count"])
+        self.assertEqual(0, frontmatter["redactions"])
+        self.assertRegex(frontmatter["collected_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertEqual(session_body_sha256(body), frontmatter["body_sha256"])
+        self.assertTrue(check_session_file(self.app, files[0]).ok)
+        self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
+        for line in text.split("\n"):
+            self.assertEqual(line, line.rstrip(" \t"))
+        self.assertNotIn(str(self.home), text)
+        self.assertIn("## 2026-10-30T01:00:01.000Z user\n\nPlease add the parser.\nSecond line", body)
+        self.assertIn("## 2026-10-30T01:00:11.000Z subagent abc123 assistant\n\nSubagent answer text.", body)
+        self.assertIn("## 2026-10-30T01:00:04.000Z assistant\n\nTools: Read", body)
+        for dropped in ("THINKING", "TOOL_INPUT", "TOOL_OUTPUT", "AGENT_INPUT", "IMAGE_MARKER"):
+            self.assertNotIn(dropped, text)
+
+    def test_hook_session_end_trigger(self):
+        code, _, err = self._hook(self._hook_json(hook_event_name="SessionEnd", reason="exit"))
+
+        self.assertEqual(0, code, err)
+        self.assertEqual("SessionEnd", self._frontmatter(self._session_files()[0])["trigger"])
+
+    # A-3
+
+    def test_manual_input_writes_manual_trigger(self):
+        code, out, err = self._manual()
+
+        self.assertEqual(0, code, err)
+        files = self._session_files()
+        self.assertEqual(1, len(files))
+        self.assertEqual("manual", self._frontmatter(files[0])["trigger"])
+
+    def test_manual_cwd_falls_back_to_first_transcript_entry_and_session_id_to_file_stem(self):
+        lines = _tx_main_lines()
+        lines.insert(0, json.dumps({"type": "queue-operation", "timestamp": "2026-10-30T00:59:00.000Z"}))
+        lines[2] = json.dumps({**json.loads(lines[2]), "cwd": str(self.repo)})
+        transcript = self.transcript_dir / "other-session.jsonl"
+        transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        code, _, err = self._capture("--transcript", str(transcript))
+
+        self.assertEqual(0, code, err)
+        files = self._session_files()
+        self.assertEqual(["2026-10-30-other-session-part1.md"], [path.name for path in files])
+        self.assertEqual("$HOME/repos/demo", self._frontmatter(files[0])["cwd"])
+
+    def test_vault_option_picks_one_of_two_project_vaults(self):
+        self._write_map(project_vaults=("app", "app2", "personal"))
+        app2 = self.vaults["app2"][0]
+
+        code, _, err = self._manual("--vault", str(app2))
+
+        self.assertEqual(0, code, err)
+        self.assertEqual([], self._session_files(self.app))
+        self.assertEqual(1, len(self._session_files(app2)))
+
+    # A-4
+
+    def test_second_capture_writes_part2_after_previous_last_turn(self):
+        self.assertEqual(0, self._hook()[0])
+        part1 = self._session_files()[0]
+        part1_bytes = part1.read_bytes()
+        self._append_turns(*_CAPTURE_MORE_LINES)
+
+        code, _, err = self._hook(self._hook_json(hook_event_name="SessionEnd"))
+
+        self.assertEqual(0, code, err)
+        files = self._session_files()
+        self.assertEqual([f"2026-10-30-{_TX_SESSION_ID}-part1.md", f"2026-10-30-{_TX_SESSION_ID}-part2.md"],
+                         [path.name for path in files])
+        self.assertEqual(part1_bytes, part1.read_bytes())
+        part2 = self._frontmatter(files[1])
+        self.assertEqual(2, part2["part"])
+        self.assertEqual("u-5", part2["first_turn_uuid"])
+        self.assertEqual("a-6", part2["last_turn_uuid"])
+        self.assertEqual(2, part2["turn_count"])
+        self.assertEqual(1, part2["redactions"])
+        self.assertNotIn("abcdef123456", files[1].read_text(encoding="utf-8"))
+
+        code, out, err = self._hook()
+
+        self.assertEqual(0, code, err)
+        self.assertIn("no new turns", out)
+        self.assertEqual(2, len(self._session_files()))
+
+    def test_no_new_turns_manual_exit_zero(self):
+        self.assertEqual(0, self._manual()[0])
+
+        code, out, _ = self._manual()
+
+        self.assertEqual(0, code)
+        self.assertIn("no new turns", out)
+        self.assertEqual(1, len(self._session_files()))
+
+    def test_missing_cursor_uuid_uses_millisecond_time_and_does_not_rewrite_last_turn(self):
+        lines = [
+            json.dumps(_tx_entry("user", "u-1", "2026-10-30T01:00:21.100Z", "first")),
+            json.dumps(_tx_entry("assistant", "a-1", "2026-10-30T01:00:21.400Z", [{"type": "text", "text": "kept"}])),
+        ]
+        self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(0, self._manual()[0])
+        self.assertEqual("2026-10-30T01:00:21.400Z", self._frontmatter(self._session_files()[0])["last_turn_at"])
+        lines[1] = json.dumps(_tx_entry("assistant", "a-1-renamed", "2026-10-30T01:00:21.400Z",
+                                        [{"type": "text", "text": "kept"}]))
+        lines.append(json.dumps(_tx_entry("user", "u-2", "2026-10-30T01:00:21.700Z", "later in the same second")))
+        self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        code, _, err = self._manual()
+
+        self.assertEqual(0, code, err)
+        self.assertIn("a-1", err)
+        part2 = self._frontmatter(self._session_files()[1])
+        self.assertEqual(1, part2["turn_count"])
+        self.assertEqual("u-2", part2["first_turn_uuid"])
+
+    def test_previous_part_hash_mismatch_warns_and_continues(self):
+        self.assertEqual(0, self._hook()[0])
+        part1 = self._session_files()[0]
+        part1.write_bytes(part1.read_bytes() + b"edited\n")
+        tampered = part1.read_bytes()
+        self._append_turns(*_CAPTURE_MORE_LINES)
+
+        code, _, err = self._manual()
+
+        self.assertEqual(0, code)
+        self.assertIn("body_sha256", err)
+        self.assertEqual(tampered, part1.read_bytes())
+        self.assertEqual("u-5", self._frontmatter(self._session_files()[1])["first_turn_uuid"])
+
+    def test_unreadable_previous_cursor_stops(self):
+        self.assertEqual(0, self._hook()[0])
+        part1 = self._session_files()[0]
+        part1.write_bytes(part1.read_bytes().replace(b"last_turn_uuid: u-3\n", b""))
+        self._append_turns(*_CAPTURE_MORE_LINES)
+
+        for name, run, expected in (("hook", self._hook, 0), ("manual", self._manual, 1)):
+            with self.subTest(name):
+                code, _, err = run()
+                self.assertEqual(expected, code)
+                self.assertIn(part1.name, err)
+                self.assertEqual(1, len(self._session_files()))
+
+    # A-9, A-23, A-24: section 6 table
+
+    def _assert_not_written(self, name: str, hook_stdin: str | None, manual_args: tuple[str, ...] | None,
+                            manual_code: int | None, expect: str | None = None) -> None:
+        if hook_stdin is not None:
+            with self.subTest(name, form="hook"):
+                code, _, err = self._capture(stdin=hook_stdin)
+                self.assertEqual(0, code, err)
+                self.assertTrue(err.strip(), "hook stderr needs a reason")
+                if expect:
+                    self.assertIn(expect, err)
+                self.assertEqual([], self._all_session_files())
+        if manual_args is not None:
+            with self.subTest(name, form="manual"):
+                code, _, err = self._capture(*manual_args)
+                self.assertEqual(manual_code, code, err)
+                self.assertTrue(err.strip())
+                if expect:
+                    self.assertIn(expect, err)
+                self.assertEqual([], self._all_session_files())
+
+    def _manual_args(self, *extra: str) -> tuple[str, ...]:
+        return ("--transcript", str(self.transcript), "--cwd", str(self.repo), *extra)
+
+    def test_bad_hook_input(self):
+        for name, stdin in (
+            ("empty stdin", ""),
+            ("not json", "{not json"),
+            ("json array", "[]"),
+            ("no transcript_path", self._hook_json(transcript_path=None)),
+            ("unknown trigger", self._hook_json(hook_event_name="Stop")),
+        ):
+            self._assert_not_written(name, stdin, None, None)
+
+    def test_missing_transcript(self):
+        missing = self.transcript_dir / "missing.jsonl"
+        self._assert_not_written(
+            "missing transcript",
+            self._hook_json(transcript_path=str(missing)),
+            ("--transcript", str(missing), "--cwd", str(self.repo)),
+            1,
+        )
+
+    def test_invalid_session_id(self):
+        self._assert_not_written(
+            "bad session id",
+            self._hook_json(session_id="../evil"),
+            self._manual_args("--session-id", "bad_id"),
+            1,
+        )
+
+    def test_vault_map_problems(self):
+        map_path = self.config / "vault-builder" / "vault-map.json"
+        for name, raw in (("missing", None), ("malformed", "{oops"), ("unsupported version", json.dumps({"version": 9}))):
+            if raw is None:
+                map_path.unlink(missing_ok=True)
+            else:
+                self._write_map(raw=raw)
+            self._assert_not_written(f"vault map {name}", self._hook_json(), self._manual_args(), 1)
+
+    def test_cwd_outside_git_or_unlinked_or_ambiguous(self):
+        plain = self.base / "plain"
+        plain.mkdir()
+        self._assert_not_written(
+            "outside git", self._hook_json(cwd=str(plain)), ("--transcript", str(self.transcript), "--cwd", str(plain)), 1
+        )
+        other = _git_repo(self.base / "other")
+        self._assert_not_written(
+            "unlinked repo", self._hook_json(cwd=str(other)), ("--transcript", str(self.transcript), "--cwd", str(other)), 1
+        )
+        map_path = self.config / "vault-builder" / "vault-map.json"
+        data = json.loads(map_path.read_text(encoding="utf-8"))
+        data["projects"]["demo-copy"] = dict(data["projects"]["demo"])
+        map_path.write_text(json.dumps(data), encoding="utf-8")
+        self._assert_not_written("several projects", self._hook_json(), self._manual_args(), 1, expect="demo-copy")
+
+    def test_no_project_vault_points_to_usage_section(self):
+        self._write_map(project_vaults=("personal", "team"))
+        self._assert_not_written("no project vault", self._hook_json(), self._manual_args(), 0, expect="17.7")
+        _, _, err = self._capture(*self._manual_args())
+        self.assertEqual(1, len(err.strip().splitlines()), err)
+        self.assertIn("link", err)
+
+    def test_two_project_vaults_without_vault_option(self):
+        self._write_map(project_vaults=("app", "app2"))
+        self._assert_not_written("two project vaults", self._hook_json(), self._manual_args(), 0, expect="app2")
+        _, _, err = self._capture(*self._manual_args())
+        self.assertIn("app", err)
+
+    def test_vault_option_outside_project_vaults(self):
+        personal = self.vaults["personal"][0]
+        team = self.vaults["team"][0]
+        unknown = self.base / "elsewhere"
+        unknown.mkdir()
+        self._write_map(project_vaults=("personal", "team"))
+        for path in (personal, team, unknown):
+            self._assert_not_written(f"--vault {path.name}", None, self._manual_args("--vault", str(path)), 1)
+        self._write_map(project_vaults=("app", "personal"))
+        self._assert_not_written("--vault personal next to project", None,
+                                 self._manual_args("--vault", str(personal)), 1)
+        code, _, err = self._capture("--vault", str(personal), stdin=self._hook_json())
+        self.assertEqual(0, code, err)
+        self.assertEqual([], self._all_session_files())
+
+    def test_target_vault_contract_below_three_or_no_manifest(self):
+        for name, contract in (("contract 2", 2), ("no manifest", None)):
+            self._write_manifest(self.app, contract)
+            self._assert_not_written(name, self._hook_json(), self._manual_args(), 0, expect="migration")
+
+    def test_target_vault_with_unreadable_manifest_asks_for_migration(self):
+        (self.app / ".vault-builder" / "manifest.json").write_text("{broken", encoding="utf-8")
+        self._assert_not_written("broken manifest", self._hook_json(), self._manual_args(), 0, expect="migration")
+
+    def test_disk_write_failure_leaves_no_temp_file(self):
+        with unittest.mock.patch("os.link", side_effect=PermissionError("denied")):
+            self._assert_not_written("link denied", self._hook_json(), self._manual_args(), 1)
+        archive = self.app / "raw" / "sessions"
+        leftovers = [path for path in archive.rglob("*") if path.is_file()] if archive.is_dir() else []
+        self.assertEqual([], leftovers)
+
+    def test_invalid_json_lines_are_reported_and_capture_continues(self):
+        code, _, err = self._manual()
+
+        self.assertEqual(0, code)
+        self.assertIn("Skipped 1 line", err)
+        self.assertEqual(1, len(self._session_files()))
+
+    # A-10
+
+    def test_write_new_file_never_overwrites_and_removes_temp(self):
+        from tools.wiki.lib.session_capture import write_new_file
+
+        target = self.base / "out" / "file.md"
+
+        self.assertTrue(write_new_file(target, "first\n"))
+        self.assertFalse(write_new_file(target, "second\n"))
+        self.assertEqual("first\n", target.read_text(encoding="utf-8"))
+        self.assertEqual(["file.md"], [path.name for path in target.parent.iterdir()])
+
+    def test_part_taken_by_other_capture_retries_once(self):
+        from tools.wiki.lib import session_capture
+
+        real = session_capture.find_previous_part
+        calls = []
+
+        def stale_then_real(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                # Another capture writes part1 right after this one read the archive.
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    with unittest.mock.patch.object(session_capture, "find_previous_part", real):
+                        self.assertEqual(0, self._manual()[0])
+                return None
+            return real(*args, **kwargs)
+
+        with unittest.mock.patch.object(session_capture, "find_previous_part", stale_then_real):
+            code, out, err = self._manual()
+
+        self.assertEqual(0, code, err)
+        self.assertIn("no new turns", out)
+        self.assertEqual(2, len(calls))
+        self.assertEqual(1, len(self._session_files()))
+
+    def test_part_taken_twice_gives_up(self):
+        from tools.wiki.lib import session_capture
+
+        with unittest.mock.patch.object(session_capture, "write_new_file", return_value=False):
+            self._assert_not_written("taken twice", self._hook_json(), self._manual_args(), 1)
+
+    def test_concurrent_captures_write_one_part_and_leave_no_temp_files(self):
+        cli_path = Path(__file__).resolve().parents[1] / "tools" / "wiki" / "cli.py"
+        processes = [
+            subprocess.Popen(
+                [sys.executable, str(cli_path), "sessions", "capture"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=dict(os.environ),
+            )
+            for _ in range(4)
+        ]
+        payload = self._hook_json()
+        for process in processes:
+            process.stdin.write(payload)
+            process.stdin.close()
+        results = [(process.wait(timeout=60), process.stdout.read(), process.stderr.read()) for process in processes]
+        for process in processes:
+            process.stdout.close()
+            process.stderr.close()
+
+        self.assertEqual([0] * 4, [code for code, _, _ in results], results)
+        archive = self.app / "raw" / "sessions"
+        everything = sorted(path.name for path in archive.rglob("*") if path.is_file())
+        self.assertEqual([f"2026-10-30-{_TX_SESSION_ID}-part1.md"], everything)
+
+    # A-8, A-27
+
+    def test_writes_only_under_raw_sessions_and_leaves_git_state(self):
+        _git(self.app, "init", "-q")
+        _git(self.app, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", "-A")
+        _git(self.app, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+        head = subprocess.run(["git", "-C", str(self.app), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+        index = (self.app / ".git" / "index").read_bytes()
+
+        def outside_state() -> dict:
+            return {
+                key: value[0]
+                for key, value in _tree_state(self.base).items()
+                if not key.startswith("vaults/app/raw/sessions/") and "/.git/" not in f"/{key}"
+            }
+
+        before = outside_state()
+
+        self.assertEqual(0, self._hook()[0])
+
+        self.assertEqual(before, outside_state())
+        self.assertEqual(1, len(self._session_files()))
+        after_head = subprocess.run(["git", "-C", str(self.app), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+        self.assertEqual(head, after_head)
+        self.assertEqual(index, (self.app / ".git" / "index").read_bytes())
+
+    # A-20
+
+    def test_reads_vault_map_version_one_and_two(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                shutil.rmtree(self.app / "raw" / "sessions", ignore_errors=True)
+                self._write_map(version=version)
+                code, _, err = self._hook()
+                self.assertEqual(0, code, err)
+                self.assertEqual(1, len(self._session_files()))
+
+    def test_json_output(self):
+        code, out, err = self._manual("--json")
+
+        self.assertEqual(0, code, err)
+        result = json.loads(out)
+        self.assertEqual("written", result["status"])
+        self.assertEqual("app", result["vault"])
+        self.assertEqual(f"raw/sessions/claude-code/2026-10-30-{_TX_SESSION_ID}-part1.md", result["path"])
+        self.assertEqual(10, result["turn_count"])
+
+    # A-14
+
+    def test_ten_megabyte_transcript_captures_within_five_seconds(self):
+        import time
+
+        lines = []
+        size = 0
+        index = 0
+        while size < 10 * 1024 * 1024:
+            kind = "user" if index % 2 == 0 else "assistant"
+            text = f"Turn {index} talks about the parser, token=abc{index} and plain prose. " * 20
+            content = text if kind == "user" else [{"type": "text", "text": text}]
+            line = json.dumps(_tx_entry(kind, f"t-{index}", f"2026-10-30T01:{index // 60000 % 60:02d}:"
+                                        f"{index // 1000 % 60:02d}.{index % 1000:03d}Z", content))
+            lines.append(line)
+            size += len(line) + 1
+            index += 1
+        self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        shutil.rmtree(self.transcript_dir / _TX_SESSION_ID)
+
+        started = time.perf_counter()
+        code, _, err = self._manual()
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(0, code, err)
+        self.assertLess(elapsed, 5.0)
+        self.assertEqual(index, self._frontmatter(self._session_files()[0])["turn_count"])
+
+    # A-21, A-27
+
+    def test_capture_module_writes_no_hook_settings_or_manifest(self):
+        source = (Path(__file__).resolve().parents[1] / "tools" / "wiki" / "lib" / "session_capture.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("settings.json", source)
+        self.assertNotIn("subprocess", source)
+        self.assertNotIn("validate_manifest", source)
+
+    def test_capture_help(self):
+        out = io.StringIO()
+        from tools.wiki import cli
+
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as raised:
+            cli.main(["sessions", "capture", "--help"])
+        self.assertEqual(0, raised.exception.code)
+        for option in ("--transcript", "--session-id", "--cwd", "--trigger", "--vault", "--json"):
+            self.assertIn(option, out.getvalue())
+
+
+_SESSION_REL = "raw/sessions/claude-code/2026-10-30-abc-123-part1.md"
+
+
+class SessionLintTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _minimal_vault(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _lint_codes(self) -> list[str]:
+        return [issue.code for issue in lint_repo(self.root).issues]
+
+    def _claim_page(self, evidence: str) -> Path:
+        page_path = self.root / "wiki" / "concepts" / "session-claim.md"
+        page_path.write_text(
+            _claim_page_text(
+                1,
+                "\n".join(
+                    [
+                        "| Claim | Status | Evidence |",
+                        "|---|---|---|",
+                        f"| Claim grounded in a session. | stated | `{evidence}` |",
+                    ]
+                ),
+            )
+        )
+        return page_path
+
+    def _claim_codes(self, evidence: str) -> list[str]:
+        self._claim_page(evidence)
+        return [
+            issue.code
+            for issue in lint_repo(self.root).issues
+            if issue.path.endswith("session-claim.md") and issue.code.startswith("claim-evidence")
+        ]
+
+    # A-11
+
+    def test_lint_reports_hash_mismatch_after_one_body_character_changes(self):
+        path = _write_session_file(self.root)
+        self.assertNotIn("session-file-hash-mismatch", self._lint_codes())
+
+        path.write_bytes(path.read_bytes().replace("안녕하세요".encode("utf-8"), "안녕하세오".encode("utf-8")))
+
+        result = lint_repo(self.root)
+        self.assertFalse(result.ok)
+        self.assertIn("session-file-hash-mismatch", [issue.code for issue in result.issues])
+
+    def test_lint_reports_invalid_path(self):
+        (self.root / "raw" / "sessions" / "claude-code").mkdir(parents=True)
+        (self.root / "raw" / "sessions" / "claude-code" / "notes.txt").write_text("x\n")
+        (self.root / "raw" / "sessions" / ".gitkeep").write_text("")
+
+        codes = self._lint_codes()
+
+        self.assertEqual(1, codes.count("session-file-invalid-path"))
+
+    def test_lint_reports_invalid_frontmatter(self):
+        _write_session_file(self.root, frontmatter=_session_frontmatter(schema="vault-session/v9"))
+
+        self.assertIn("session-file-invalid-frontmatter", self._lint_codes())
+
+    def test_lint_reports_part_duplicate(self):
+        _write_session_file(self.root)
+        _write_session_file(self.root, relative="raw/sessions/claude-code/2026-10-31-abc-123-part1.md")
+
+        self.assertEqual(2, self._lint_codes().count("session-part-duplicate"))
+
+    def test_lint_reports_source_page_pointing_at_session_archive(self):
+        path = _write_session_file(self.root)
+        source = _write_role_page(self.root, "wiki/sources/session-source.md", "source")
+        source.write_text(
+            source.read_text()
+            .replace("raw/sources/input.md", _SESSION_REL)
+            .replace("a" * 64, hashlib.sha256(path.read_bytes()).hexdigest())
+        )
+
+        issues = [issue for issue in lint_repo(self.root).issues if issue.code == "session-source-page-forbidden"]
+
+        self.assertEqual(1, len(issues))
+        self.assertEqual("error", issues[0].severity)
+        self.assertTrue(issues[0].path.endswith("session-source.md"))
+
+    def test_source_page_outside_session_archive_is_not_forbidden(self):
+        _write_role_page(self.root, "wiki/sources/plain-source.md", "source")
+
+        self.assertNotIn("session-source-page-forbidden", self._lint_codes())
+
+    def test_valid_archive_adds_no_session_issues(self):
+        _write_session_file(self.root)
+        _write_session_file(
+            self.root,
+            relative="raw/sessions/claude-code/2026-10-30-abc-123-part2.md",
+            frontmatter=_session_frontmatter(part=2),
+        )
+
+        self.assertEqual([], [code for code in self._lint_codes() if code.startswith("session-")])
+
+    # A-15
+
+    def test_claim_cites_session_file_with_matching_file_hash(self):
+        path = _write_session_file(self.root)
+        file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+        self.assertEqual([], self._claim_codes(f"{_SESSION_REL}#sha256={file_hash}"))
+
+    def test_claim_cites_session_file_without_file_hash(self):
+        _write_session_file(self.root)
+
+        self.assertEqual([], self._claim_codes(_SESSION_REL))
+
+    def test_claim_citing_invalid_session_file_fails(self):
+        path = _write_session_file(self.root)
+        path.write_bytes(path.read_bytes().replace("안녕하세요".encode("utf-8"), "바뀐 본문".encode("utf-8")))
+        file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+        self.assertEqual(["claim-evidence-session-invalid"], self._claim_codes(_SESSION_REL))
+        self.assertEqual(
+            ["claim-evidence-session-invalid"], self._claim_codes(f"{_SESSION_REL}#sha256={file_hash}")
+        )
+
+    def test_claim_citing_duplicate_part_session_file_fails(self):
+        _write_session_file(self.root)
+        _write_session_file(self.root, relative="raw/sessions/claude-code/2026-10-31-abc-123-part1.md")
+
+        self.assertEqual(["claim-evidence-session-invalid"], self._claim_codes(_SESSION_REL))
+
+    def test_claim_with_wrong_file_hash_keeps_hash_invalid_code(self):
+        _write_session_file(self.root)
+
+        self.assertEqual(
+            ["claim-evidence-source-hash-invalid"], self._claim_codes(f"{_SESSION_REL}#sha256={'0' * 64}")
+        )
+
+    def test_claim_citing_missing_session_file_keeps_raw_missing_code(self):
+        self.assertEqual(["claim-evidence-raw-missing"], self._claim_codes(_SESSION_REL))
+
+    def test_validate_provenance_alone_accepts_valid_session_citation(self):
+        _write_session_file(self.root)
+        page_path = self._claim_page(_SESSION_REL)
+
+        codes = [issue.code for issue in validate_provenance(parse_page(page_path), self.root)]
+
+        self.assertEqual([], [code for code in codes if code.startswith("claim-evidence")])
+
+    def test_raw_evidence_outside_archive_still_needs_registration(self):
+        (self.root / "raw" / "sources" / "plain.md").write_text("# Plain\n")
+
+        self.assertEqual(["claim-evidence-source-unregistered"], self._claim_codes("raw/sources/plain.md"))
+
+    # A-13 (health line)
+
+    def test_health_last_line_reports_sessions(self):
+        _write_session_file(self.root)
+        path = _write_session_file(
+            self.root,
+            relative="raw/sessions/claude-code/2026-10-30-abc-123-part2.md",
+            frontmatter=_session_frontmatter(part=2, collected_at="2026-10-30T03:00:00Z"),
+        )
+        path.write_bytes(path.read_bytes() + b"tampered\n")
+
+        _, output = _run_wiki_cli(self.root, "health")
+
+        self.assertEqual(
+            "Sessions: 2 files, last collected 2026-10-30T03:00:00Z, hash mismatches 1",
+            output.rstrip("\n").splitlines()[-1],
+        )
+
+    def test_health_last_line_with_empty_archive(self):
+        _, output = _run_wiki_cli(self.root, "health")
+
+        self.assertEqual(
+            "Sessions: 0 files, last collected none, hash mismatches 0",
+            output.rstrip("\n").splitlines()[-1],
+        )
+
+
+def _session_rel(index: int) -> str:
+    return f"raw/sessions/claude-code/2026-10-30-s{index:03d}-part1.md"
+
+
+def _write_numbered_session(root: Path, index: int) -> Path:
+    return _write_session_file(
+        root,
+        relative=_session_rel(index),
+        frontmatter=_session_frontmatter(session_id=f"s{index:03d}"),
+    )
+
+
+def _tamper_session(path: Path) -> None:
+    path.write_bytes(path.read_bytes() + b"tampered\n")
+
+
+class SessionRegistryTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _minimal_vault(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _entries(self) -> dict:
+        from tools.wiki.lib.source_registry import build_source_registry
+
+        return {entry.raw_path: entry for entry in build_source_registry(self.root)}
+
+    def _source_pages(self) -> list[str]:
+        return sorted(path.name for path in (self.root / "wiki" / "sources").glob("*.md"))
+
+    # A-12 (registry)
+
+    def test_registry_marks_valid_session_file_as_session(self):
+        _write_session_file(self.root)
+
+        entry = self._entries()[_SESSION_REL]
+
+        self.assertEqual("session", entry.source_kind)
+        self.assertEqual("session", entry.ingest_status)
+        self.assertIsNone(entry.source_page)
+
+    def test_registry_marks_failing_session_file_as_session_invalid(self):
+        _tamper_session(_write_session_file(self.root))
+        (self.root / "raw" / "sessions" / "claude-code" / "notes.txt").write_text("x\n")
+
+        entries = self._entries()
+
+        self.assertEqual("session-invalid", entries[_SESSION_REL].ingest_status)
+        self.assertEqual("session-invalid", entries["raw/sessions/claude-code/notes.txt"].ingest_status)
+        self.assertEqual("session", entries["raw/sessions/claude-code/notes.txt"].source_kind)
+
+    def test_registry_still_reports_plain_raw_file_without_source_page_as_unregistered(self):
+        _write_session_file(self.root)
+        (self.root / "raw" / "sources" / "plain.md").write_text("# Plain\n")
+
+        entries = self._entries()
+
+        self.assertEqual("unregistered", entries["raw/sources/plain.md"].ingest_status)
+        self.assertEqual("markdown", entries["raw/sources/plain.md"].source_kind)
+
+    def test_source_registry_report_shows_session_status(self):
+        _write_session_file(self.root)
+        report = self.root / "scratch" / "reports" / "registry.md"
+
+        code, output = _run_wiki_cli(self.root, "source-registry", "--report", str(report))
+
+        self.assertEqual(0, code, output)
+        self.assertIn("session: 1", output)
+        self.assertNotIn("unregistered", output)
+        text = report.read_text()
+        self.assertIn(f"| `{_SESSION_REL}` | session | session |", text)
+        self.assertIn("- Unregistered: 0", text)
+        self.assertIn("- Session: 1", text)
+        self.assertIn("- Session Invalid: 0", text)
+
+    # A-16
+
+    def test_ingest_source_rejects_session_file_without_writing_source_page(self):
+        path = _write_session_file(self.root)
+
+        with self.assertRaises(ValueError) as caught:
+            ingest_source(self.root, path)
+
+        self.assertIn("Session files do not get source pages", str(caught.exception))
+        self.assertEqual([], self._source_pages())
+
+    def test_ingest_source_cli_rejects_relative_session_path(self):
+        _write_session_file(self.root)
+
+        code, output = _run_wiki_cli(self.root, "ingest-source", _SESSION_REL)
+
+        self.assertEqual(1, code)
+        self.assertIn("Session files do not get source pages", output)
+        self.assertEqual([], self._source_pages())
+
+    def test_bulk_ingest_with_session_path_fails_without_writing_source_pages(self):
+        _write_session_file(self.root)
+        (self.root / "raw" / "sources" / "plain.md").write_text("# Plain\n")
+
+        code, output = _run_wiki_cli(self.root, "bulk-ingest", "raw/sources/plain.md", _SESSION_REL)
+
+        self.assertEqual(1, code, output)
+        self.assertIn("error: 1", output)
+        self.assertEqual([], self._source_pages())
+
+    def test_bulk_ingest_all_raw_skips_session_files(self):
+        _write_session_file(self.root)
+        (self.root / "raw" / "sources" / "plain.md").write_text("# Plain\n")
+
+        code, output = _run_wiki_cli(self.root, "bulk-ingest", "--all-raw")
+
+        self.assertEqual(0, code, output)
+        self.assertEqual(["plain.md"], self._source_pages())
+
+    # A-13 (metrics)
+
+    def test_metrics_report_session_fields(self):
+        from tools.wiki.lib.metrics import build_maintenance_metrics
+
+        _write_session_file(self.root)
+        _tamper_session(
+            _write_session_file(
+                self.root,
+                relative="raw/sessions/claude-code/2026-10-30-abc-123-part2.md",
+                frontmatter=_session_frontmatter(part=2, collected_at="2026-10-30T03:00:00Z"),
+            )
+        )
+        report = self.root / "scratch" / "reports" / "metrics.md"
+
+        metrics = build_maintenance_metrics(self.root, report_path=report).metrics
+
+        self.assertEqual(2, metrics.session_files)
+        self.assertEqual("2026-10-30T03:00:00Z", metrics.session_last_collected_at)
+        self.assertEqual(1, metrics.session_hash_mismatches)
+        self.assertEqual(0, metrics.unregistered_sources)
+        text = report.read_text()
+        self.assertIn("- Session files: 2", text)
+        self.assertIn("- Session last collected at: 2026-10-30T03:00:00Z", text)
+        self.assertIn("- Session hash mismatches: 1", text)
+
+    def test_metrics_report_empty_archive_as_zero_and_none(self):
+        from tools.wiki.lib.metrics import build_maintenance_metrics
+
+        report = self.root / "scratch" / "reports" / "metrics.md"
+
+        metrics = build_maintenance_metrics(self.root, report_path=report).metrics
+
+        self.assertEqual(0, metrics.session_files)
+        self.assertIsNone(metrics.session_last_collected_at)
+        self.assertEqual(0, metrics.session_hash_mismatches)
+        text = report.read_text()
+        self.assertIn("- Session files: 0", text)
+        self.assertIn("- Session last collected at: none", text)
+
+    def test_metrics_check_gates_only_session_hash_mismatches(self):
+        from tools.wiki import cli
+
+        self.assertIn("session_hash_mismatches", cli.METRIC_CHECK_FIELDS)
+        self.assertNotIn("session_files", cli.METRIC_CHECK_FIELDS)
+        self.assertNotIn("session_last_collected_at", cli.METRIC_CHECK_FIELDS)
+        shipped = json.loads(
+            (Path(__file__).resolve().parents[1] / "tools" / "wiki" / "metrics-policy.json").read_text()
+        )
+        self.assertNotIn("session_hash_mismatches", shipped["max"])
+
+    def test_metrics_check_fails_on_session_hash_mismatch(self):
+        policy = _shipped_policy_without_orphan_gate(self.root)
+        path = _write_session_file(self.root)
+
+        clean_code, clean_output = _run_wiki_cli(self.root, "metrics", "--check", "--policy", str(policy))
+        _tamper_session(path)
+        code, output = _run_wiki_cli(self.root, "metrics", "--check", "--policy", str(policy))
+
+        self.assertEqual(0, clean_code, clean_output)
+        self.assertIn("Session files: 1", clean_output)
+        self.assertEqual(1, code, output)
+        self.assertIn("Metrics gate: session_hash_mismatches=1 (max 0)", output)
+        self.assertIn("Session hash mismatches: 1", output)
+
+    # Lifecycle Map
+
+    def test_lifecycle_map_lists_session_invalid_but_not_session(self):
+        _write_numbered_session(self.root, 1)
+        _tamper_session(_write_numbered_session(self.root, 2))
+
+        build_navigation_maps(self.root)
+        lifecycle = (self.root / "wiki" / "maps" / "lifecycle-map.md").read_text()
+        attention = _section_text(lifecycle, "## Source Attention")
+
+        self.assertNotIn(_session_rel(1), attention)
+        self.assertIn(f"`{_session_rel(2)}` — session-invalid", attention)
+
+    def test_source_map_omits_valid_session_files(self):
+        _write_numbered_session(self.root, 1)
+        _tamper_session(_write_numbered_session(self.root, 2))
+
+        build_navigation_maps(self.root)
+        source_map = (self.root / "wiki" / "maps" / "source-map.md").read_text()
+
+        self.assertNotIn(_session_rel(1), source_map)
+        self.assertIn(_session_rel(2), source_map)
+
+    # A-12 (gate)
+
+    def test_hundred_session_files_do_not_fail_gate_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _project_fixture_vault(root)
+            self.assertEqual(0, _run_wiki_cli(root, "maps", "build")[0])
+            for index in range(100):
+                _write_numbered_session(root, index)
+            report = root / "scratch" / "reports" / "registry.md"
+
+            metrics_code, metrics_output = _run_wiki_cli(root, "metrics", "--check")
+            maps_code, maps_output = _run_wiki_cli(root, "maps", "build", "--check")
+            lint_code, lint_output = _run_wiki_cli(root, "lint")
+            health_code, health_output = _run_wiki_cli(root, "health")
+            _run_wiki_cli(root, "source-registry", "--report", str(report))
+            registry = report.read_text()
+            lifecycle = (root / "wiki" / "maps" / "lifecycle-map.md").read_text()
+
+        self.assertEqual(0, metrics_code, metrics_output)
+        self.assertEqual(0, maps_code, maps_output)
+        self.assertEqual(0, lint_code, lint_output)
+        self.assertEqual(0, health_code, health_output)
+        self.assertIn("Session files: 100", metrics_output)
+        self.assertIn("- Session: 100", registry)
+        for index in range(100):
+            self.assertIn(f"| `{_session_rel(index)}` | session | session |", registry)
+        self.assertNotIn("raw/sessions/", _section_text(lifecycle, "## Source Attention"))
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _init_git_vault(root: Path) -> None:
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "Session Test")
+    _git(root, "config", "user.email", "session-test@example.invalid")
+    _git(root, "config", "commit.gpgsign", "false")
+
+
+def _commit_all(root: Path, message: str = "commit") -> None:
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--allow-empty", "-m", message)
+
+
+class SessionGitCheckTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _minimal_vault(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _git_vault_with_committed_session(self) -> Path:
+        _init_git_vault(self.root)
+        path = _write_numbered_session(self.root, 0)
+        _commit_all(self.root, "add session")
+        return path
+
+    # A-13 (status)
+
+    def test_status_reports_unknown_uncommitted_count_outside_git(self):
+        _write_numbered_session(self.root, 0)
+
+        code, output = _run_wiki_cli(self.root, "sessions", "status")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("Session files: 1", output)
+        self.assertIn("Last collected: 2026-10-30T02:00:00Z", output)
+        self.assertIn("Archive check failures: 0", output)
+        self.assertIn("Uncommitted session files: unknown", output)
+
+    def test_status_counts_uncommitted_session_files_in_git(self):
+        _init_git_vault(self.root)
+        _commit_all(self.root, "vault")
+        _write_numbered_session(self.root, 0)
+        _write_numbered_session(self.root, 1)
+        _git(self.root, "add", _session_rel(0))
+        _git(self.root, "commit", "-q", "-m", "one session")
+
+        code, output = _run_wiki_cli(self.root, "sessions", "status")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("Session files: 2", output)
+        self.assertIn("Uncommitted session files: 1", output)
+
+    def test_status_reports_none_and_zero_for_empty_archive(self):
+        code, output = _run_wiki_cli(self.root, "sessions", "status")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("Session files: 0", output)
+        self.assertIn("Last collected: none", output)
+
+    def test_status_exits_zero_when_archive_check_fails(self):
+        _tamper_session(_write_numbered_session(self.root, 0))
+
+        code, output = _run_wiki_cli(self.root, "sessions", "status")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("Archive check failures: 1", output)
+
+    def test_status_json_lists_counts(self):
+        _init_git_vault(self.root)
+        _write_numbered_session(self.root, 0)
+
+        code, output = _run_wiki_cli(self.root, "sessions", "status", "--json")
+
+        self.assertEqual(0, code, output)
+        self.assertEqual(
+            {
+                "session_files": 1,
+                "last_collected_at": "2026-10-30T02:00:00Z",
+                "archive_check_failures": 0,
+                "uncommitted_session_files": 1,
+            },
+            json.loads(output),
+        )
+
+    # A-17
+
+    def test_git_check_skips_outside_git(self):
+        _write_numbered_session(self.root, 0)
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertEqual(0, code, output)
+        self.assertIn("skipped", output)
+        self.assertEqual(1, len(output.strip().splitlines()))
+
+    def test_git_check_passes_when_committed_files_are_unchanged(self):
+        self._git_vault_with_committed_session()
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertEqual(0, code, output)
+
+    def test_git_check_passes_on_git_vault_without_commits(self):
+        _init_git_vault(self.root)
+        _write_numbered_session(self.root, 0)
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertEqual(0, code, output)
+
+    def test_git_check_fails_on_deleted_file_and_passes_after_restore(self):
+        path = self._git_vault_with_committed_session()
+        original = path.read_bytes()
+        path.unlink()
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+        self.assertEqual(1, code, output)
+        self.assertIn(_session_rel(0), output)
+
+        path.write_bytes(original)
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+        self.assertEqual(0, code, output)
+
+    def test_git_check_fails_after_committed_delete_and_passes_after_restore_commit(self):
+        path = self._git_vault_with_committed_session()
+        original = path.read_bytes()
+        path.unlink()
+        _commit_all(self.root, "delete session")
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+        self.assertEqual(1, code, output)
+        self.assertIn(_session_rel(0), output)
+
+        path.write_bytes(original)
+        _commit_all(self.root, "restore session")
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+        self.assertEqual(0, code, output)
+
+    def test_git_check_fails_on_rename(self):
+        path = self._git_vault_with_committed_session()
+        renamed = self.root / "raw" / "sessions" / "claude-code" / "2026-10-30-s000-part2.md"
+        _git(self.root, "mv", _session_rel(0), renamed.relative_to(self.root).as_posix())
+        _commit_all(self.root, "rename session")
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertFalse(path.exists())
+        self.assertEqual(1, code, output)
+        self.assertIn(_session_rel(0), output)
+
+    def test_git_check_fails_on_edit_that_keeps_body_hash_valid(self):
+        from tools.wiki.lib.session_archive import validate_session_archive
+
+        self._git_vault_with_committed_session()
+        _write_session_file(
+            self.root,
+            relative=_session_rel(0),
+            frontmatter=_session_frontmatter(session_id="s000"),
+            body="## 2026-10-30T01:00:00Z user\n\nrewritten\n",
+        )
+        _commit_all(self.root, "rewrite session")
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertEqual([], validate_session_archive(self.root))
+        self.assertEqual(1, code, output)
+        self.assertIn(_session_rel(0), output)
+
+    def test_git_check_ignores_uncommitted_session_files(self):
+        self._git_vault_with_committed_session()
+        _tamper_session(_write_numbered_session(self.root, 1))
+
+        code, output = _run_wiki_cli(self.root, "sessions", "git-check")
+
+        self.assertEqual(0, code, output)
+
+    def test_release_gate_runs_git_check_from_root_after_metrics(self):
+        script = (Path(__file__).resolve().parents[1] / "scripts" / "release_gate.sh").read_text()
+        metrics = script.index("tools/wiki/cli.py metrics --check --report")
+        git_check = script.index('run_from_root "$PYTHON_BIN" tools/wiki/cli.py sessions git-check')
+
+        self.assertLess(metrics, git_check)

@@ -10,6 +10,7 @@ from .frontmatter import parse_page
 from .hash_source import compute_sha256, display_path
 from .ingest import ingest_source
 from .paths import resolve_report_path
+from .session_archive import SESSION_ARCHIVE_DIR, check_session_archive
 
 
 @dataclass(frozen=True)
@@ -47,11 +48,23 @@ class BulkIngestResult:
 def build_source_registry(root: Path, checked_at: date | None = None) -> list[SourceRegistryEntry]:
     current_date = (checked_at or date.today()).isoformat()
     source_pages = _source_pages_by_canonical(root)
+    session_ok = {check.relative: check.ok for check in check_session_archive(root)}
     entries: dict[str, SourceRegistryEntry] = {}
 
     for raw_path in discover_raw_files(root):
         raw_display = display_path(raw_path, root)
         raw_hash = compute_sha256(raw_path)
+        if is_session_path(raw_display):
+            # Session files have no source page; the archive check decides their status.
+            entries[raw_display] = SourceRegistryEntry(
+                raw_path=raw_display,
+                raw_sha256=raw_hash,
+                source_kind="session",
+                source_page=None,
+                ingest_status="session" if session_ok.get(raw_display, False) else "session-invalid",
+                last_checked=current_date,
+            )
+            continue
         source_page = source_pages.get(raw_display)
         source_page_path = source_page.path if source_page else None
         expected_hash = source_page.raw_sha256 if source_page else None
@@ -82,6 +95,10 @@ def build_source_registry(root: Path, checked_at: date | None = None) -> list[So
     return [entries[key] for key in sorted(entries)]
 
 
+def is_session_path(raw_display: str) -> bool:
+    return raw_display.startswith(f"{SESSION_ARCHIVE_DIR}/")
+
+
 def discover_raw_files(root: Path) -> list[Path]:
     raw_root = root / "raw"
     if not raw_root.exists():
@@ -106,6 +123,8 @@ def render_source_registry_report(entries: list[SourceRegistryEntry], report_dat
         f"- Unregistered: {counts.get('unregistered', 0)}",
         f"- Drift: {counts.get('drift', 0)}",
         f"- Missing Source: {counts.get('missing-source', 0)}",
+        f"- Session: {counts.get('session', 0)}",
+        f"- Session Invalid: {counts.get('session-invalid', 0)}",
         "",
         "## Entries",
         "",
