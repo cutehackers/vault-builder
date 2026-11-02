@@ -28,6 +28,7 @@ from tools.vault_migration.catalogs import build_catalog, write_catalog
 from tools.vault_migration.versioning import read_version
 from tools.vault_migration.installing import install
 from tools.vault_migration.linking import link, list_links, unlink
+from tools.vault_migration.map_settings import set_default_write, set_role
 from tools.vault_migration.uninstalling import doctor, uninstall
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.models import MigrationPlan
@@ -581,6 +582,14 @@ def _build_parser() -> argparse.ArgumentParser:
     unlink_parser.add_argument("--dry-run", action="store_true")
     list_parser = subcommands.add_parser("list")
     list_parser.add_argument("--repo")
+    default_write_parser = subcommands.add_parser("set-default-write")
+    default_write_parser.add_argument("--project", required=True)
+    default_write_choice = default_write_parser.add_mutually_exclusive_group(required=True)
+    default_write_choice.add_argument("--vault")
+    default_write_choice.add_argument("--clear", action="store_true")
+    role_parser = subcommands.add_parser("set-role")
+    role_parser.add_argument("--vault", required=True)
+    role_parser.add_argument("--role", required=True)
     return parser
 
 
@@ -745,6 +754,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "unlink":
                 return unlink(args.vault, repo=args.repo, dry_run=args.dry_run)
             return list_links(repo=args.repo)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"{args.command}: {exc}", file=sys.stderr)
+            return 1
+    if args.command in {"set-default-write", "set-role"}:
+        try:
+            if args.command == "set-default-write":
+                return set_default_write(args.project, vault=args.vault, clear=args.clear)
+            return set_role(args.vault, args.role)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"{args.command}: {exc}", file=sys.stderr)
             return 1

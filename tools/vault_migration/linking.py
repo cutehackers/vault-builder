@@ -151,6 +151,10 @@ def unlink(
             print(f"unlink: project {match.project_id} is not linked to vault {vault}. Nothing to do.")
             return 0
         entry["vaults"] = [name for name in entry["vaults"] if name != vault]
+        if entry.get("default_write_vault") == vault:
+            # The default write vault must be one of the project's vaults (docs/contracts/vault-map-v2.md).
+            del entry["default_write_vault"]
+            print(f"unlink: project {match.project_id} no longer has default write vault {vault}.")
         if entry["vaults"]:
             print(f"unlink: project {match.project_id} vaults: {', '.join(entry['vaults'])}")
         else:
