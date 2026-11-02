@@ -223,7 +223,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       <div class="step" data-step="2" data-zone="z3"><span class="n">2 · 정리할 때</span><h3>읽어 오기</h3><p>정리 skill이 새 메모를 읽음</p><span><span class="chip new">신규</span></span></div>
       <div class="step" data-step="3" data-zone="z3"><span class="n">3 · 정리할 때</span><h3>검증 후 반영</h3><p>ingest-source, publish-draft로 vault에 반영</p><span><span class="chip have">있음</span></span></div>
       <div class="step" data-step="4" data-zone="z3"><span class="n">4 · 정리할 때</span><h3>요약 생성</h3><p>프로젝트별 요약 페이지를 다시 만듦</p><span><span class="chip new">신규</span></span></div>
-      <div class="step" data-step="5" data-zone="z2"><span class="n">5 · 세션 시작</span><h3>요약 읽기</h3><p>SessionStart hook이 연결된 vault의 요약을 읽음</p><span><span class="chip new">신규</span></span></div>
+      <div class="step" data-step="5" data-zone="z2"><span class="n">5 · 세션 시작</span><h3>요약 읽기</h3><p>/project-memory skill, 또는 <code>install --with-hooks</code>로 넣은 SessionStart hook이 연결된 vault의 요약을 읽음</p><span><span class="chip have">있음 · hook은 선택</span></span></div>
       <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 요약이 세션 맥락으로 들어감</p><span><span class="chip have">있음</span></span></div>
     </div>
     <div class="legend">
@@ -295,13 +295,15 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       <div class="zone z2">
         <div class="zh"><h3>사용자 영역</h3><small>~/.claude</small></div>
         <div class="item" data-status="have"><div class="t">L1 자동 메모리 <span class="chip have">있음</span></div><div class="d">projects/&lt;저장소&gt;/memory/ · 세션 시작 때 MEMORY.md 자동 로드</div></div>
-        <div class="item" data-status="new"><div class="t">SessionStart hook <span class="chip new">신규</span></div><div class="d">vault-builder/hook.sh · settings.json에는 이 스크립트를 가리키는 항목 1개만</div></div>
+        <div class="item" data-status="have"><div class="t">Claude Code hook <span class="chip have">선택 · --with-hooks</span></div><div class="d">install에 <code>--with-hooks</code>를 줄 때만 설치. vault-builder/vault_hooks.py 실행기와 vault-hooks.json(vg 절대 경로) · settings.json의 SessionStart, PreCompact, SessionEnd에 실행기 항목을 하나씩 더함. 옵션이 없으면 settings.json을 읽지도 쓰지도 않음</div></div>
         <div class="item" data-status="new"><div class="t">연결 설정 <span class="chip new">신규</span></div><div class="d">vault-builder/vault-map.json · 저장소 → vault 목록</div></div>
       </div>
       <div class="zone z3">
         <div class="zh"><h3>vault 저장소</h3><small>개인 · 팀 · 프로젝트, L2 장기 메모리</small></div>
         <div class="item" data-status="new"><div class="t">정리 skill <span class="chip new">신규</span></div><div class="d">L1 메모를 읽어 메모마다 vault를 고르고 각 vault CLI를 부름</div></div>
         <div class="item" data-status="have"><div class="t">검증 파이프라인 <span class="chip have">있음</span></div><div class="d">cli.py ingest-source · publish-draft · maps build · query</div></div>
+        <div class="item" data-status="have"><div class="t">세션 원문 수집 <span class="chip have">있음</span></div><div class="d">cli.py sessions capture · raw/sessions/에 새 파일만 추가 · role project vault 하나에만 씀</div></div>
+        <div class="item" data-status="have"><div class="t">기억 제안 검토 <span class="chip have">있음</span></div><div class="d">scratch/review/의 memory-proposal 항목 · review propose로 들어오고, 사람이 승인하면 붙은 draft를 발행</div></div>
         <div class="item" data-status="new"><div class="t">project 필드와 요약 <span class="chip new">신규</span></div><div class="d">wiki 페이지 frontmatter의 project · wiki/maps/projects/&lt;p&gt;.md</div></div>
         <div class="item" data-status="have"><div class="t">MCP 서버 <span class="chip have">있음</span></div><div class="d">tools/wiki/mcp_server.py · 읽기 도구는 아직 없음</div></div>
         <div class="item" data-status="later"><div class="t">통합 검색 <span class="chip later">나중</span></div><div class="d">Vault Graph · 여러 vault를 한 번에 검색</div></div>
@@ -313,7 +315,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
     <div class="sec-head">
       <div class="eyebrow">동작 순서</div>
       <h2>누가 누구에게 무엇을 넘기는가</h2>
-      <p>세 가지 상황의 순서도입니다. 화살표 위 번호 순서로 읽고, 화살표에 마우스를 올리면 자세한 설명이 나옵니다.</p>
+      <p>다섯 가지 상황의 순서도입니다. 화살표 위 번호 순서로 읽고, 화살표에 마우스를 올리면 자세한 설명이 나옵니다.</p>
     </div>
     <div class="panel" style="display:grid;gap:14px">
       <div class="bar">
@@ -321,6 +323,8 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
           <button type="button" id="q-a" aria-pressed="true">A · 기록과 세션 시작</button>
           <button type="button" id="q-b" aria-pressed="false">B · 정리와 ingest</button>
           <button type="button" id="q-c" aria-pressed="false">C · 멀티 vault 검색</button>
+          <button type="button" id="q-d" aria-pressed="false">D · 세션 수집</button>
+          <button type="button" id="q-e" aria-pressed="false">E · 추론 기억 제안과 승인</button>
         </div>
         <div class="legend"><span><i style="border:1px dashed var(--accent);background:var(--accent-soft)"></i>신규 부품</span><span><i style="border:1px dashed var(--muted)"></i>나중</span><span><i style="background:var(--warn-ink)"></i>현재 막힌 곳</span></div>
       </div>
@@ -358,7 +362,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
           <thead><tr><th>대안</th><th>방법</th><th>판단</th></tr></thead>
           <tbody>
             <tr><td><code>대안1</code></td><td>자동 메모리. 기록 규칙이 필요하면 <code>~/.claude/CLAUDE.md</code> 한 곳에</td><td><span class="chip new">사용</span></td></tr>
-            <tr><td><code>대안2</code></td><td><code>~/.claude/settings.json</code>의 SessionStart hook이 요약을 출력</td><td><span class="chip new">사용</span></td></tr>
+            <tr><td><code>대안2</code></td><td><code>~/.claude/settings.json</code>의 SessionStart hook이 요약을 출력. <code>install --with-hooks</code>를 줄 때만 넣음</td><td><span class="chip new">선택</span></td></tr>
             <tr><td><code>대안3</code></td><td>저장소 폴더의 <code>CLAUDE.local.md</code>. git에는 안 올라가지만 폴더에 파일이 생김</td><td><span class="chip later">사용 안 함</span></td></tr>
           </tbody>
         </table></div>
@@ -398,7 +402,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         <div class="irow"><div class="istep"><span class="k">5</span><b>manifest 기록</b><span>vault 밖 변경까지 hash와 함께</span></div><div class="ifail ok">uninstall과 doctor가 이 기록을 씀</div></div>
         <span class="done">설치 완료</span>
       </div>
-      <p class="note">1~2단계는 현재 진행 중인 bake 작업의 "init Python 검사 순서" 수정과 같은 일입니다.</p>
+      <p class="note">1~2단계는 현재 진행 중인 bake 작업의 "init Python 검사 순서" 수정과 같은 일입니다. <code>--with-hooks</code>로 쓰는 실행기, vault-hooks.json, settings.json hook 항목은 4단계에서 쓰지만 manifest에는 기록하지 않습니다. uninstall은 실행기 경로로 항목을 찾아 지웁니다.</p>
     </div>
 
     <div class="panel" style="display:grid;gap:14px">
@@ -412,12 +416,12 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         </div>
         <div>
           <div class="eyebrow" style="margin-bottom:8px">사용자 영역 ~/.claude</div>
-          <div class="sgroup del"><h4>지움</h4><div class="pills"><span>vault-builder/hook.sh</span><span>vault-map.json</span></div></div>
-          <div class="sgroup part"><h4>항목만 지움</h4><div class="pills"><span>settings.json의 hook 1개</span><span>MCP 등록 1개</span></div></div>
+          <div class="sgroup del"><h4>지움</h4><div class="pills"><span>vault-builder/vault_hooks.py</span><span>vault-hooks.json</span><span>vault-map.json</span></div></div>
+          <div class="sgroup part"><h4>항목만 지움</h4><div class="pills"><span>settings.json에서 실행기 경로를 담은 hook 항목</span><span>MCP 등록 1개</span></div></div>
           <div class="sgroup keep"><h4>남김</h4><div class="pills"><span>settings.json 나머지</span><span>memory/</span></div></div>
         </div>
       </div>
-      <p class="note">hook과 연결 설정은 여러 vault가 함께 쓰므로, 마지막 vault를 지울 때만 제거합니다. 지식을 지우는 것은 별도의 명시 옵션으로만 가능합니다.</p>
+      <p class="note">hook과 연결 설정은 여러 vault가 함께 쓰므로, 마지막 vault를 지울 때만 제거합니다. settings.json이 JSON이 아니면 hook 항목을 지우지 않고 그 사실만 알립니다. 지식을 지우는 것은 별도의 명시 옵션으로만 가능합니다.</p>
     </div>
 
     <div class="two">
@@ -425,8 +429,8 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         <h3>설치·삭제 원칙</h3>
         <ul class="rules">
           <li><code>원칙1</code><span><b>원자적 설치.</b> 위 설치 흐름. 실패하면 이전 상태로 되돌림</span></li>
-          <li><code>원칙2</code><span><b>manifest가 vault 밖 변경까지 기록.</b> 파일과 hash를 함께</span></li>
-          <li><code>원칙3</code><span><b>vault 밖은 builder 소유 파일만.</b> settings.json에는 항목 1개</span></li>
+          <li><code>원칙2</code><span><b>manifest가 vault 밖 변경까지 기록.</b> 파일과 hash를 함께. 예외: <code>--with-hooks</code>로 쓴 settings.json hook 항목, vault_hooks.py, vault-hooks.json은 기록하지 않음. 마지막 vault를 uninstall할 때 실행기 경로로 찾아 지움</span></li>
+          <li><code>원칙3</code><span><b>vault 밖은 builder 소유 파일만.</b> settings.json에는 <code>--with-hooks</code>일 때만 이벤트마다 실행기 항목 1개. 다른 hook 항목은 그대로 둠</span></li>
           <li><code>원칙4</code><span><b>지식은 지우지 않음.</b> raw/, wiki/, scratch/, git 이력</span></li>
           <li><code>원칙5</code><span><b>사용자가 고친 관리 파일은 남김.</b> 목록만 출력</span></li>
           <li><code>원칙6</code><span><b>--dry-run으로 계획 먼저.</b> audit/apply와 같은 방식</span></li>
@@ -435,7 +439,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       </div>
       <div class="panel" style="display:grid;gap:12px;align-content:start">
         <h3>명령</h3>
-        <div class="cmds"><code>install &lt;경로&gt; [--name]</code><code>uninstall &lt;경로&gt; [--dry-run]</code><code>doctor &lt;경로&gt;</code><code>audit / apply</code></div>
+        <div class="cmds"><code>install &lt;경로&gt; [--name] [--with-hooks]</code><code>uninstall &lt;경로&gt; [--dry-run]</code><code>doctor &lt;경로&gt;</code><code>audit / apply</code></div>
         <p class="note">audit와 apply는 지금도 있습니다. install, uninstall, doctor는 새로 만듭니다.</p>
       </div>
     </div>
@@ -463,7 +467,8 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       </div>
       <div class="phase">
         <div class="ph"><h3>3단계 · 다음</h3><small>Vault Graph</small></div>
-        <div class="task"><b>읽기 전용 통합 검색</b><span>여러 vault를 한 번에, 출처 포함</span><span class="dep">별도 repo에서 구현 중, 이 vault와는 아직 연결하지 않음</span></div>
+        <div class="task"><b>읽기 전용 통합 검색</b><span>여러 vault를 한 번에, 출처 포함</span><span class="dep">별도 repo(vault-graph). vault-map.json은 읽기만 하고, vault 쓰기는 각 vault의 CLI로만 함</span></div>
+        <div class="task"><b>vault-graph 요청 계약1~7</b><span>publish-draft --json, 기억 필드와 retired, frontmatter만 바꾸는 patch-page, memory-proposal, vault-map 설정 명령, hook 실행기와 --with-hooks, vault 계약 4</span><span class="dep">eab420a~a9fddb4, 브랜치 feat/jh/vault-graph-requests, main 병합 전</span></div>
       </div>
     </div>
   </section>
@@ -536,12 +541,12 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         { f: 0, t: 1, l: '교정·결정을 말함', d: '평소 작업 중 교정이나 결정을 말합니다.' },
         { f: 1, t: 2, l: '메모 쓰기', d: '~/.claude/projects/<저장소>/memory/에 메모를 씁니다. 저장소 파일은 바뀌지 않습니다.' },
         { div: '다음 날 세션 시작' },
-        { f: 1, t: 3, l: 'SessionStart 이벤트', d: 'Claude Code가 세션을 시작하면서 hook을 실행합니다.' },
-        { f: 3, t: 4, l: '요약 파일 읽기', d: '연결 설정에서 찾은 vault마다 wiki/maps/projects/<p>.md를 읽습니다.' },
+        { f: 1, t: 3, l: 'SessionStart 이벤트', d: 'install --with-hooks로 넣은 항목이 있으면 Claude Code가 세션을 시작하면서 vault_hooks.py session-start를 실행합니다.' },
+        { f: 3, t: 4, l: '요약 파일 읽기', d: '실행기는 먼저 vg hook session-start를 실행하고, 종료 코드 0이면 그 출력을 그대로 씁니다(빈 출력도 정상). vg가 없거나 실패하면 recall.sh가 연결 vault마다 wiki/maps/projects/<p>.md를 읽습니다.' },
         { f: 3, t: 1, l: 'stdout = 맥락', d: 'hook의 출력이 세션 맥락으로 들어갑니다.' },
         { f: 2, t: 1, l: 'MEMORY.md 자동 로드', d: 'L1 메모리 색인은 Claude Code가 원래 자동으로 읽습니다.' }
       ],
-      notes: ['hook 동작: <code>git remote get-url origin</code>으로 저장소를 알아냅니다.', '<code>~/.claude/vault-builder/vault-map.json</code>에서 연결된 vault를 찾습니다.', '각 vault의 <code>wiki/maps/projects/&lt;p&gt;.md</code>를 출력합니다.']
+      notes: ['hook은 <code>install --with-hooks</code>를 줄 때만 생깁니다. 없으면 <code>/project-memory</code> skill이 같은 <code>recall.sh</code>를 부릅니다.', 'vg는 <code>VAULT_GRAPH_BIN</code>, install이 기록한 <code>~/.claude/vault-builder/vault-hooks.json</code>의 절대 경로, <code>PATH</code> 순서로 찾습니다.', '<code>recall.sh</code>는 <code>~/.claude/vault-builder/vault-map.json</code>에서 연결된 vault를 찾아 각 vault의 <code>wiki/maps/projects/&lt;p&gt;.md</code>를 출력합니다.', '실행기는 어떤 경우에도 종료 코드 0으로 끝납니다. hook이 세션을 막지 않게 하기 위해서입니다.']
     },
     b: {
       lanes: ['사용자', '정리 skill', 'memory/', 'vault CLI', 'wiki · git'], kinds: ['', 'new', '', '', ''],
@@ -572,6 +577,34 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         { f: 4, t: 1, l: '여러 vault 결과', d: '결과마다 출처 vault가 붙습니다.', k: 'later' }
       ],
       notes: ['지금은 vault마다 따로 묻고, 페이지를 직접 읽어야 합니다.', 'Vault Graph가 생기면 7~8단계 한 번으로 바뀝니다.']
+    },
+    d: {
+      lanes: ['Claude Code', 'vault_hooks.py', 'vg', 'project vault CLI', 'raw/sessions/'], kinds: ['', '', '', '', ''],
+      rows: [
+        { f: 0, t: 1, l: 'PreCompact · SessionEnd', d: '대화 압축 직전과 세션 종료 때 Claude Code가 vault_hooks.py capture를 실행하고 hook JSON(transcript_path, session_id, cwd, hook_event_name)을 표준 입력으로 넘깁니다. 두 항목의 시간 제한은 60초입니다.' },
+        { f: 1, t: 2, l: 'vg hook capture', d: '찾은 vg에 hook JSON을 그대로 넘깁니다. vg는 수집 시점만 정합니다.' },
+        { f: 2, t: 1, l: 'capture --direct', d: 'vg는 같은 실행기를 capture --direct로 불러 수집을 맡깁니다. vg가 종료 코드 0이면 실행기는 끝냅니다.' },
+        { f: 1, t: 3, l: 'sessions capture --json', d: 'hook cwd의 프로젝트에 연결된 role project vault 하나를 골라 그 vault의 tools/wiki/cli.py에 hook JSON을 넘깁니다. 그런 vault가 없거나 둘 이상이거나 계약 3 미만이면 아무것도 쓰지 않고 skipped를 냅니다.' },
+        { f: 3, t: 4, l: '새 파일 하나 추가', d: '지난 수집 뒤의 새 턴만 raw/sessions/ 아래 새 파일 하나로 씁니다. 기존 파일은 바꾸지 않습니다. 새 턴이 없으면 no-new-turns입니다.' },
+        { div: 'vg가 없거나 실패할 때' },
+        { f: 1, t: 3, l: '직접 수집', d: 'vg가 없거나, 0이 아닌 코드로 끝나거나, 시간이 넘으면 실행기가 capture --direct와 같은 일을 합니다. 새 턴만 덧붙이므로 vg 경로 뒤에 다시 해도 안전합니다.' }
+      ],
+      notes: ['이 흐름은 <code>install --with-hooks</code>로 hook 항목을 넣었을 때만 동작합니다.', 'vault를 고르는 규칙은 <code>sessions capture</code>의 <code>select_target_vault</code>와 같습니다.', '실행기는 어떤 경우에도 종료 코드 0으로 끝납니다.']
+    },
+    e: {
+      lanes: ['vault-graph', 'vault CLI', 'scratch/review/', '사용자', 'wiki · log.md'], kinds: ['', '', '', '', ''],
+      rows: [
+        { f: 0, t: 1, l: 'review propose --json', d: '에이전트가 추론한 기억(basis=inferred)은 바로 발행하지 않고 draft를 review propose로 보냅니다.' },
+        { f: 1, t: 2, l: '검토 항목 + draft 사본', d: 'draft를 dry-run으로 검사합니다. 저장소 전체 lint는 이때 하지 않습니다. 통과하면 <날짜>-memory-<draft sha256 앞 8자>.md(type memory-proposal, status pending)와 같은 이름의 .draft.json을 만들고, 대상 페이지의 sha256을 target_hash로 적습니다. 실패하면 파일을 하나도 만들지 않습니다.' },
+        { f: 1, t: 0, l: 'proposed, review_path', d: 'vault-review-result/v1 JSON 객체 하나를 돌려줍니다. 종료 코드 0은 proposed, 1은 rejected입니다. 승인 전에는 wiki가 바뀌지 않습니다.' },
+        { div: '승인할 때' },
+        { f: 3, t: 1, l: 'review resolve --status accepted', d: '사람이 항목을 읽고 승인합니다.' },
+        { f: 1, t: 4, l: 'target_hash 확인 → 발행', d: '대상 페이지의 현재 sha256이 target_hash와 같으면 붙은 draft를 publish-draft와 같은 검사로 발행하고 항목을 accepted로 바꿉니다. 해시가 다르거나 발행이 거부되면 항목은 pending으로 남고 종료 코드 1입니다.' },
+        { div: '거절할 때' },
+        { f: 3, t: 1, l: 'review resolve --status rejected', d: '다른 검토 유형과 같은 경로입니다. 항목 status만 rejected로 바꿉니다.' },
+        { f: 1, t: 4, l: 'log.md에 한 줄', d: '기억 페이지는 바뀌지 않습니다. wiki/log.md에 Review rejected 기록 한 줄만 더해지고, draft 사본은 감사 기록으로 남습니다.' }
+      ],
+      notes: ['사용자가 직접 말한 기억(basis=stated)은 이 대기열을 거치지 않고 <code>publish-draft --json</code>으로 바로 발행합니다.', '같은 날 같은 draft를 다시 제안하면 거부합니다.', 'lint는 <code>memory-proposal</code> 항목의 draft 파일이 <code>scratch/review/</code> 아래에 있는지 검사합니다.', '승인과 거절 모두 wiki lint가 깨져 있으면 멈춥니다.']
     }
   };
 
@@ -644,11 +677,12 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
     });
     document.getElementById('seqNotes').innerHTML = d.notes.map(function (t) { return '<li>' + t + '</li>'; }).join('');
   }
-  var keys = ['a', 'b', 'c'];
-  group(['q-a', 'q-b', 'q-c'], function (i) { draw(keys[i]); });
+  var keys = ['a', 'b', 'c', 'd', 'e'];
+  var seqIds = ['q-a', 'q-b', 'q-c', 'q-d', 'q-e'];
+  group(seqIds, function (i) { draw(keys[i]); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () {
-    var cur = document.querySelector('#q-a[aria-pressed="true"], #q-b[aria-pressed="true"], #q-c[aria-pressed="true"]');
-    draw(keys[['q-a', 'q-b', 'q-c'].indexOf(cur ? cur.id : 'q-a')]);
+    var cur = document.querySelector(seqIds.map(function (id) { return '#' + id + '[aria-pressed="true"]'; }).join(', '));
+    draw(keys[seqIds.indexOf(cur ? cur.id : 'q-a')]);
   });
 })();
 </script>
