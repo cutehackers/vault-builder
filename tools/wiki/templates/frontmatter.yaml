@@ -1,6 +1,6 @@
 title: "Human-readable title"
 type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview
-status: seed | active | stable | contested | deprecated
+status: seed | active | stable | contested | deprecated | retired
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 owner: agent | human

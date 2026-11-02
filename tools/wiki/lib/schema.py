@@ -46,7 +46,10 @@ ALLOWED_TYPES = {
     "overview",
 }
 
-ALLOWED_STATUS = {"seed", "active", "stable", "contested", "deprecated"}
+ALLOWED_STATUS = {"seed", "active", "stable", "contested", "deprecated", "retired"}
+# Pages with these statuses are not current. `deprecated` has a replacement in superseded_by.
+# `retired` has none and carries retired_reason and retired_at instead.
+NOT_CURRENT_STATUSES = frozenset({"deprecated", "retired"})
 ALLOWED_OWNER = {"agent", "human"}
 ALLOWED_CONFIDENCE = {"low", "medium", "high"}
 ALLOWED_PROVENANCE = {"none", "partial", "section", "claim"}

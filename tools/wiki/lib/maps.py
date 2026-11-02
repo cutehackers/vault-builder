@@ -11,6 +11,7 @@ from .inbox import InboxItem, load_inbox_items
 from .lint import find_human_locks, project_ids
 from .paths import resolve_report_path
 from .review import ReviewItem, list_review_items
+from .schema import NOT_CURRENT_STATUSES
 from .source_registry import SourceRegistryEntry, build_source_registry
 from .wiki_update import (
     append_log_entry,
@@ -272,7 +273,7 @@ def _project_summary_pages(
         frontmatter = page.frontmatter or {}
         page_ids = project_ids(frontmatter.get("project"))
         ids.update(page_ids)
-        is_decision = _page_type(page) == "decision" and str(frontmatter.get("status")) != "deprecated"
+        is_decision = _page_type(page) == "decision" and str(frontmatter.get("status")) not in NOT_CURRENT_STATUSES
         is_correction = bool(PROJECT_CORRECTION_TAGS & set(_as_string_list(frontmatter.get("tags", []))))
         for project_id in page_ids:
             if is_decision:
@@ -556,7 +557,7 @@ def _render_review_map(root: Path, review_items: list[ReviewItem]) -> str:
 
 
 def _render_lifecycle_map(root: Path, pages: list[Page], entries: list[SourceRegistryEntry]) -> str:
-    deprecated = [page for page in pages if str(page.frontmatter.get("status")) == "deprecated"]
+    deprecated = [page for page in pages if str(page.frontmatter.get("status")) in NOT_CURRENT_STATUSES]
     contested = [
         page
         for page in pages

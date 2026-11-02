@@ -12,6 +12,7 @@ from .links import find_wiki_links
 from .lint import claim_evidence_table, lint_repo
 from .paths import resolve_report_path
 from .review import list_review_items
+from .schema import NOT_CURRENT_STATUSES
 from .session_archive import session_archive_status
 from .source_registry import build_source_registry
 
@@ -169,7 +170,7 @@ def _deprecated_linked_targets(root: Path, pages: list[Page]) -> list[str]:
     deprecated_targets = {
         _wiki_target(root, page.path)
         for page in pages
-        if str((page.frontmatter or {}).get("status")) == "deprecated"
+        if str((page.frontmatter or {}).get("status")) in NOT_CURRENT_STATUSES
     }
     linked_targets = Counter[str]()
     for page in pages:

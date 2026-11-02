@@ -261,8 +261,8 @@ def _server_tools() -> list[dict[str, Any]]:
             "name": "wiki_search",
             "description": (
                 "Search durable wiki pages by keywords in title, summary, tags and body. "
-                "Returns paths, summaries and a matching line. Deprecated pages and superseded claims are left out "
-                "unless include_deprecated is true."
+                "Returns paths, summaries and a matching line. Deprecated and retired pages and superseded claims "
+                "are left out unless include_deprecated is true."
             ),
             "inputSchema": {
                 "type": "object",
