@@ -6,7 +6,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .draft_patch import materialize_patch
+# PatchTargetMissing and resolve_report_path are re-exported so publish.py needs only draft, lint and maps.
+from .draft_patch import PatchTargetMissing, materialize_patch
 from .frontmatter import Page, parse_page, render_page
 from .lint import (
     ALLOWED_LOG_EVENTS,
@@ -27,6 +28,10 @@ from .wiki_update import (
     assert_can_append_log_entry,
     assert_can_apply_index_entry,
 )
+
+
+class HumanLockError(ValueError):
+    """The draft would change a page or section a human locked."""
 
 
 @dataclass(frozen=True)
@@ -63,7 +68,7 @@ def apply_draft(root: Path, draft_path: Path, report_path: Path | None = None, d
     if target_path.exists():
         existing_page = parse_page(target_path)
         if find_human_locks(existing_page).page_locked:
-            raise ValueError(f"Target page is human-locked: {target_path}")
+            raise HumanLockError(f"Target page is human-locked: {target_path}")
         _validate_locked_sections_preserved(existing_page.body, page.body, target_path)
         claim_errors = _claims_preserved_errors(existing_page.body, page.body, draft.get("remove_claims"))
         if claim_errors:
@@ -330,7 +335,7 @@ def _validate_locked_sections_preserved(existing_body: str, proposed_body: str, 
         return
     proposed_sections = _locked_section_blocks(proposed_body)
     if existing_sections != proposed_sections:
-        raise ValueError(f"Draft modifies a human-locked section: {target_path}")
+        raise HumanLockError(f"Draft modifies a human-locked section: {target_path}")
 
 
 def _locked_section_blocks(body: str) -> list[str]:
