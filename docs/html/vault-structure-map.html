@@ -281,7 +281,7 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
         <tr><td>vault마다 하나</td><td>폴더와 git 저장소, <code>tools/wiki</code> 사본, <code>wiki/</code>, <code>raw/</code>, manifest</td><td>vault끼리 파일을 공유하지 않습니다.</td></tr>
         <tr><td>machine에 하나 <span class="st">구현됨</span></td><td>MCP 서버 (<code>llm-wiki</code>)</td><td>새 구조에서는 <code>~/.claude.json</code>에 항목이 하나만 있고, 라우터 하나가 모든 vault를 다룹니다. 지금 이 Mac에 설치된 옛 구조에서는 vault마다 <code>llm-wiki-&lt;이름&gt;</code> 항목이 하나씩 생깁니다.</td></tr>
         <tr><td>vault마다 하나</td><td>저장소별 요약 페이지 <code>wiki/maps/projects/&lt;id&gt;.md</code></td><td>같은 저장소라도 vault마다 요약이 따로 있습니다.</td></tr>
-        <tr><td>machine에 하나</td><td><code>vault-map.json</code></td><td>vault 목록과 저장소 연결을 한곳에 둡니다. 새 구조에서는 version 2이고 저장소마다 <code>remote</code>를 기록합니다. <span class="st">구현됨</span></td></tr>
+        <tr><td>machine에 하나</td><td><code>vault-map.json</code></td><td>vault 목록과 저장소 연결을 한곳에 둡니다. 새 구조에서는 version 2이고 저장소마다 <code>remote</code>를 기록합니다. <span class="st">구현됨</span> 계약5로 저장소마다 선택 필드 <code>default_write_vault</code>를 둘 수 있고, <code>set-role</code>과 <code>set-default-write</code>로 바꿉니다(아래 절).</td></tr>
         <tr><td>machine에 하나 <span class="st">구현됨</span></td><td>라우터 <code>~/.claude/vault-builder/llm_wiki_router.py</code></td><td>MCP 서버 프로그램입니다. 호출마다 대상 vault의 <code>cli.py</code>를 실행하고 상태를 두지 않습니다.</td></tr>
         <tr><td>machine에 하나</td><td><code>/project-memory</code> skill과 <code>recall.sh</code></td><td>연결된 vault를 모두 돌며 요약을 모아 출력합니다.</td></tr>
         <tr><td>저장소마다 하나</td><td>project id, <code>vault-map.json</code>의 <code>projects</code> 항목</td><td>이 저장소가 어느 vault를 쓰는지 적습니다. 옛 구조에서는 사람이 직접 추가하고, 새 구조에서는 <code>link</code> 명령으로 추가합니다. <span class="st">구현됨</span></td></tr>
@@ -305,6 +305,31 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
     <span class="cmt">… bake, vault-builder, 981park-flutter-app</span>
   }
 }</pre>
+</section>
+
+<section>
+  <h2>Vault 종류(role)와 기본 저장 Vault <span class="st">구현됨</span></h2>
+  <p class="lede">vault-graph 요청의 계약5입니다. 2026-11-02 브랜치 <code>feat/jh/vault-graph-requests</code>에 구현했고 아직 main에 병합하지 않았습니다. <code>version</code>은 2 그대로이고, 선택 필드 하나와 명령 두 개를 더했습니다. 필드 규칙 전체는 <code>docs/contracts/vault-map-v2.md</code>에 있습니다.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>필드</th><th>값</th><th>바꾸는 명령</th></tr></thead>
+      <tbody>
+        <tr><td><code>vaults.&lt;name&gt;.role</code></td><td>비어 있지 않은 문자열입니다. 문서에 적은 값은 <code>personal</code>, <code>project</code>, <code>team</code>이고, 그 밖의 값도 받습니다. install은 <code>personal</code>로 만듭니다. hook으로 하는 세션 수집은 프로젝트에 연결된 <code>project</code> Vault가 정확히 하나일 때만 그 Vault에 씁니다.</td><td><code>set-role --vault &lt;name&gt; --role &lt;role&gt;</code></td></tr>
+        <tr><td><code>projects.&lt;id&gt;.default_write_vault</code></td><td>선택 필드입니다. 그 프로젝트의 <code>vaults</code> 목록 안에 있는 Vault 이름이어야 합니다. 없으면 기본 저장 Vault가 없고, 지금 동작과 같습니다.</td><td><code>set-default-write --project &lt;id&gt; --vault &lt;name&gt;</code>, 지울 때는 <code>--clear</code>. <code>unlink</code>로 그 Vault를 프로젝트에서 빼면 함께 지워집니다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+<pre>"vaults": {
+  "personal": { "path": "$HOME/vault", "role": "personal" },
+  "work":     { "path": "$HOME/work-vault", <span class="add">"role": "project"</span> }   <span class="cmt">← set-role --vault work --role project</span>
+},
+"projects": {
+  "sgp-981-app": { ..., "vaults": ["personal", "work"], <span class="add">"default_write_vault": "work"</span> }
+}                <span class="cmt">↑ set-default-write --project sgp-981-app --vault work</span></pre>
+  <ul class="gaps">
+    <li><span class="code">명령</span><div><h3>두 명령은 한 필드만 바꿉니다</h3><p><code>python3 tools/vault_migration/cli.py set-role ...</code>처럼 실행합니다. 다른 필드는 그대로 두고, 같은 폴더의 임시 파일에 쓴 뒤 이름을 바꿔 교체합니다. 내용이 같으면 파일을 다시 쓰지 않습니다. 모르는 Vault나 프로젝트, 프로젝트에 연결되지 않은 Vault는 거부하고 종료 코드 1로 끝납니다.</p></div></li>
+    <li><span class="code">읽는 쪽</span><div><h3>llm-wiki 라우터는 무시하고, vault-graph는 읽기만 합니다</h3><p>라우터는 <code>default_write_vault</code>를 보지 않으므로 MCP 쓰기 도구는 여전히 <code>vault</code> 인자를 받습니다. vault-graph는 이 필드를 기억 저장 Vault를 고를 때 읽고, 파일은 쓰지 않습니다.</p></div></li>
+  </ul>
 </section>
 
 <section>

@@ -139,7 +139,7 @@ td.new { color: var(--accent); }
 <header class="head">
   <span class="eyebrow">vault · vault-builder · vault-graph</span>
   <h1>Vault 개선 로드맵</h1>
-  <p class="lede">OpenWiki 조사로 만든 개선 계획(B1~B6)과 앞서 검토한 개선안(A1~A5)을 합쳐 제안 13개로 정리했습니다. 결정 4개는 2026-10-28에 모두 정했습니다. 그 뒤 vault 연결 규칙을 다시 검토해서 효율안1~3과 MCP 설치 점검 결과 발견1~6을 제안11~13에 반영했습니다. 제안11~13은 2026-10-29에 구현을 마치고 main에 병합했습니다(<code>a843778</code>). 테스트 582개와 release gate를 통과했고, 리뷰 판정은 Ready to merge(수용 근거 28/28)입니다. 이 Mac에도 새로 설치했고, 수동 점검 세 가지(서버 하나만 연결, doctor 통과, uninstall 뒤 남는 것 없음과 재설치 왕복)를 모두 통과했습니다. 코드 참조는 2026-10-28 기준 현재 checkout에서 확인했습니다.</p>
+  <p class="lede">OpenWiki 조사로 만든 개선 계획(B1~B6)과 앞서 검토한 개선안(A1~A5)을 합쳐 제안 13개로 정리했습니다. 결정 4개는 2026-10-28에 모두 정했습니다. 그 뒤 vault 연결 규칙을 다시 검토해서 효율안1~3과 MCP 설치 점검 결과 발견1~6을 제안11~13에 반영했습니다. 제안11~13은 2026-10-29에 구현을 마치고 main에 병합했습니다(<code>a843778</code>). 테스트 582개와 release gate를 통과했고, 리뷰 판정은 Ready to merge(수용 근거 28/28)입니다. 이 Mac에도 새로 설치했고, 수동 점검 세 가지(서버 하나만 연결, doctor 통과, uninstall 뒤 남는 것 없음과 재설치 왕복)를 모두 통과했습니다. 2026-11-02에는 vault-graph가 요청한 계약1~7을 브랜치 <code>feat/jh/vault-graph-requests</code>에 구현했습니다(제안14). 이 브랜치는 아직 main에 병합하지 않았고 이 Mac에도 설치하지 않았습니다. 코드 참조는 2026-10-28 기준 현재 checkout에서 확인했습니다.</p>
   <div class="meta">
     <span><span class="tag a">A1~A5</span> 앞 검토의 개선1~5</span>
     <span><span class="tag b">B1~B6</span> OpenWiki 계획의 개선1~6</span>
@@ -177,6 +177,7 @@ td.new { color: var(--accent); }
     <span><i style="background:none;border:2px solid var(--ok)"></i>후속 작업</span>
     <span><span class="st done">✓ 구현 완료</span> main 병합, 이 Mac 설치·점검 완료</span>
     <span><span class="st part">일부 완료</span> 일부 항목만 구현</span>
+    <span><span class="st done">구현됨 · 브랜치</span> 브랜치에 구현, main 병합 전</span>
   </div>
   <div class="road-scroll">
     <div class="road" id="road">
@@ -191,6 +192,7 @@ td.new { color: var(--accent); }
         <button class="card is-done" data-id="11" data-kind="core" data-deps=""><span class="t">제안11. MCP 서버 하나와 깔끔한 설치·제거</span><span class="row"><span class="tag a">A3</span><span class="tag">효율안1</span><span class="size">큼</span><span class="st done">✓ 구현 완료</span></span></button>
         <button class="card is-done" data-id="12" data-kind="fix" data-deps=""><span class="t">제안12. 저장소 연결 명령</span><span class="row"><span class="tag">효율안2</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
         <button class="card is-done" data-id="13" data-kind="fix" data-deps=""><span class="t">제안13. 저장소를 경로와 remote로 찾기</span><span class="row"><span class="tag">효율안3</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
+        <button class="card is-done" data-id="14" data-kind="core" data-deps="12 13"><span class="t">제안14. vault-graph 요청 계약1~7</span><span class="row"><span class="tag">요청3~6</span><span class="size">큼</span><span class="st done">구현됨 · 브랜치</span></span></button>
       </div>
       <div class="cell">
         <button class="card" data-id="3" data-kind="core" data-deps=""><span class="t">제안3. 줄 범위 claim 근거</span><span class="row"><span class="tag b">B2</span><span class="size">큼</span></span></button>
@@ -275,6 +277,27 @@ td.new { color: var(--accent); }
       <header><span class="code">제안13</span><h3>저장소를 경로, remote, 이름 순서로 찾는다</h3><span class="st done">✓ 구현 완료</span></header>
       <p>지금은 폴더 이름만으로 저장소를 찾습니다(<code>project_id = root.name</code>). 그래서 이름이 같은 다른 저장소의 기억이 섞이고, 폴더 이름을 바꾸면 연결이 끊깁니다. 연결을 찾는 순서를 <code>root</code> 경로, git remote URL, 폴더 이름으로 바꿉니다.</p>
       <div class="foot"><span>출처: 효율안3</span><span>선행: 제안12(link가 remote를 기록)</span><span>구현 완료, main 병합(<code>a843778</code>), 이 Mac 설치와 수동 점검 M1~M3 통과(2026-10-29). 테스트 582개 통과, 리뷰 Ready to merge.</span></div>
+    </article>
+
+    <article class="prop is-done" id="p14">
+      <header><span class="code">제안14</span><h3>vault-graph가 요청한 계약1~7을 구현한다</h3><span class="st done">구현됨 · 브랜치</span></header>
+      <p>vault-graph는 Vault 파일을 직접 쓰지 않고 Vault 도구만 부릅니다. 그래서 vault-graph가 부를 명령의 입력과 출력을 vault-builder 쪽 계약으로 고정했습니다. 요청 원문과 상태는 <code>docs/superpowers/specs/2026-10-29-vault-graph-requests-ko.md</code>에 있습니다.</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>계약</th><th>요청</th><th>구현한 것</th><th>상태</th></tr></thead>
+          <tbody>
+            <tr><td>계약1</td><td>요청4</td><td><code>publish-draft --json</code>이 <code>vault-publish-result/v1</code> JSON 객체 하나를 냅니다. <code>status</code>는 <code>published</code> 또는 <code>rejected</code>이고, 거부 이유 <code>reason</code>은 <code>lint-dirty-before</code>, <code>draft-invalid</code>, <code>human-locked</code>, <code>page-missing</code>, <code>lint-failed-after</code>, <code>io-error</code> 중 하나입니다. 종료 코드는 0(published)과 1(rejected)입니다. 발행 로직은 <code>tools/wiki/lib/publish.py</code>로 옮겼습니다.</td><td>구현됨 <code>eab420a</code></td></tr>
+            <tr><td>계약2</td><td>요청6</td><td>선택 frontmatter <code>memory_schema</code>(<code>vault-memory/v1</code>), <code>pin</code>(불리언), <code>memory_kind</code>(<code>rule</code>, <code>correction</code>, <code>decision</code>, <code>preference</code>)와 status <code>retired</code>를 더했습니다. <code>retired</code>는 대체 없이 폐기한 페이지이고 <code>retired_reason</code>과 <code>retired_at</code>이 있어야 합니다. 대체가 있는 폐기는 지금처럼 <code>deprecated</code>와 <code>superseded_by</code>입니다. 검색, 지도, 지표, 병합 후보는 <code>retired</code>를 <code>deprecated</code>와 같이 현재가 아닌 페이지로 다룹니다.</td><td>구현됨 <code>c24d4a5</code></td></tr>
+            <tr><td>계약3</td><td>새 요청</td><td><code>patch-page</code> draft가 <code>edits</code> 없이 <code>frontmatter</code>만 바꿀 수 있습니다. 폐기가 이 형식을 씁니다. 둘 다 비어 있으면 지금처럼 거부합니다.</td><td>구현됨 <code>e1c992d</code></td></tr>
+            <tr><td>계약4</td><td>요청7 일부</td><td>검토 유형 <code>memory-proposal</code>과 <code>review propose</code> 명령입니다. 추론한 기억은 <code>scratch/review/</code>에 pending 항목과 draft 사본으로 들어갑니다. 사람이 <code>review resolve --status accepted</code>로 승인하면 대상 페이지 해시를 다시 확인한 뒤 발행합니다. 거절하면 기억 페이지는 바뀌지 않고 <code>wiki/log.md</code>에 한 줄만 남습니다.</td><td>구현됨 <code>0c014bd</code></td></tr>
+            <tr><td>계약5</td><td>요청5</td><td>외부 계약 문서 <code>docs/contracts/vault-map-v2.md</code>를 썼습니다. version 2 안에서 선택 필드 <code>default_write_vault</code>를 더했고, <code>set-role</code>, <code>set-default-write</code> 명령이 생겼습니다.</td><td>구현됨 <code>eddddb9</code></td></tr>
+            <tr><td>계약6</td><td>요청3</td><td>hook 실행기 <code>vault_hooks.py</code>(<code>session-start</code>, <code>capture</code>, <code>capture --direct</code>)와 <code>install --with-hooks</code>입니다. 옵션을 줄 때만 <code>settings.json</code>의 SessionStart, PreCompact, SessionEnd에 실행기 항목을 하나씩 더합니다.</td><td>구현됨 <code>2232c7f</code>, <code>a9fddb4</code></td></tr>
+            <tr><td>계약7</td><td>계약1~4 전달</td><td>Vault 계약 버전을 4로 올렸습니다. 기존 Vault는 audit 뒤 apply로 계약1~4의 도구 변경을 받습니다.</td><td>구현됨 <code>dc2d293</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>결정2는 그대로 유지합니다. 계약5로 필드와 명령이 늘었지만 <code>vault-map.json</code>을 바꾸는 것은 vault-builder 명령(install, uninstall, link, unlink, set-role, set-default-write)뿐이고, vault-graph는 이 파일을 읽기만 합니다.</p>
+      <div class="foot"><span>출처: vault-graph spec 2026-11-02 vault-long-term-memory</span><span>선행: 제안12, 제안13(vault-map version 2와 프로젝트 찾기)</span><span>브랜치 <code>feat/jh/vault-graph-requests</code>, release gate 통과. main 병합과 이 Mac 설치는 아직입니다.</span></div>
     </article>
 
     <article class="prop" id="p2">
@@ -413,7 +436,7 @@ td.new { color: var(--accent); }
   <h2>결정이 필요한 항목</h2>
   <ul class="dlist">
     <li><span class="code">결정1</span><div><h3>코드 repo를 claim 근거로 직접 가리킬 것인가</h3><p>등록된 repo를 읽기 전용 외부 권위로 인정할지, 아니면 repo 사본을 <code>raw/</code>에 주기적으로 저장할지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 직접 가리키기.</b> 사본을 저장하면 저장 직후부터 낡기 때문에 약점1이 그대로 남습니다. 제안4는 <code>repo://</code> 증거를 받는 범위로 진행합니다.</p></div></li>
-    <li><span class="code">결정2</span><div><h3>vault 연결 설정은 어느 쪽을 기준으로 할 것인가</h3><p>builder의 <code>vault-map.json</code>과 vault-graph의 <code>VaultCatalog</code> 중 하나를 기준으로 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): <code>vault-map.json</code>을 기준으로 하고 workspace를 여기에 더합니다.</b> AGENTS.md 규칙9에 따라 계약은 vault-builder가 관리하고, install과 uninstall이 이미 이 파일을 manifest에 기록합니다. vault-graph는 이 파일을 읽기만 합니다.</p></div></li>
+    <li><span class="code">결정2</span><div><h3>vault 연결 설정은 어느 쪽을 기준으로 할 것인가</h3><p>builder의 <code>vault-map.json</code>과 vault-graph의 <code>VaultCatalog</code> 중 하나를 기준으로 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): <code>vault-map.json</code>을 기준으로 하고 workspace를 여기에 더합니다.</b> AGENTS.md 규칙9에 따라 계약은 vault-builder가 관리하고, install과 uninstall이 이미 이 파일을 manifest에 기록합니다. vault-graph는 이 파일을 읽기만 합니다.</p><p class="rec"><b>유지(2026-11-02).</b> 제안14(계약5)에서 <code>default_write_vault</code>와 <code>role</code> 설정 명령을 더했지만 이 결정은 바꾸지 않았습니다. 파일은 vault-builder 명령만 쓰고, vault-graph는 읽기만 합니다.</p></div></li>
     <li><span class="code">결정3</span><div><h3>공통 규칙을 어느 요약까지 보여줄 것인가</h3><p>personal 역할 vault의 공통 규칙만 보여줄지, team vault의 공통 규칙도 보여줄지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 요약에 넣지 않습니다.</b> OpenWiki도 모든 repo에 적용되는 공통 규칙 개념이 없고, 위키 내용을 미리 주입하지 않고 필요할 때 검색합니다. 공통 규칙은 <code>project</code> 없이 personal vault에 두고 검색으로 찾습니다. 검색하지 않으면 규칙을 놓칠 수 있다는 점은 감수합니다.</p></div></li>
     <li><span class="code">결정4</span><div><h3>MCP 읽기 진입점과 중복 등록을 어떻게 정리할 것인가</h3><p>vault-graph를 읽기 진입점으로 삼을지, 그리고 user scope 항목이 있을 때 <code>.mcp.json</code>을 만들지 않도록 결정7을 바꿀지 정해야 합니다.</p><p class="rec"><b>결정됨(2026-10-28): 중복 등록을 지금 고치고, user scope 등록을 남깁니다.</b> 원인은 같은 서버를 두 곳에서 따로 등록하기 때문입니다. vault의 <code>.mcp.json</code>은 결정7에 따라 vault 안 세션용 <code>llm-wiki</code>를 등록하고, <code>~/.claude.json</code>은 결정20에 따라 모든 세션용 <code>llm-wiki-personal</code>을 등록합니다. 이후 검토에서 방향을 넓혔습니다. 서버를 하나로 만들어 user scope에 한 번만 등록하고, <code>.mcp.json</code>은 만들지 않습니다(제안11, 효율안1).</p></div></li>
   </ul>
@@ -441,6 +464,7 @@ td.new { color: var(--accent); }
         <tr><td><span class="tag">효율안2</span></td><td>link, unlink, list 명령</td><td>제안12</td></tr>
         <tr><td><span class="tag">효율안3</span></td><td>경로, remote, 이름 순서로 찾기</td><td>제안13</td></tr>
         <tr><td><span class="tag">발견1~6</span></td><td>MCP 설치 점검 결과</td><td>제안11</td></tr>
+        <tr><td><span class="tag">요청3~7</span></td><td>vault-graph가 요청한 hook, publish JSON, vault-map 계약, 기억 필드, 검토 대기열</td><td>제안14</td></tr>
       </tbody>
     </table>
   </div>
