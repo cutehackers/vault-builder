@@ -94,6 +94,16 @@ class FindProjectReadVaultMapTests(unittest.TestCase):
                 self.write(data)
                 self.assertEqual(router.read_vault_map(self.path), data)
 
+    def test_find_project_accepts_default_write_vault_and_any_role(self) -> None:
+        # Contract 5: the optional default_write_vault field and roles outside personal, project, and team do
+        # not change the format check. The router ignores the field, and vault-graph checks its value.
+        for value in ("a", "not-linked", 1, None):
+            with self.subTest(value=value):
+                data = vault_map({"r": {"root": "/x/r", "vaults": ["a"], "default_write_vault": value}})
+                data["vaults"]["a"]["role"] = "archive"
+                self.write(data)
+                self.assertEqual(router.read_vault_map(self.path), data)
+
     def test_find_project_rejects_other_versions_as_damaged(self) -> None:
         for version in (0, 3, "2", True, None):
             with self.subTest(version=version):
@@ -828,6 +838,34 @@ class RouterSearchTests(RouterCase):
         text = self.assertRefused("wiki_search", {"query": "wiki"})
         self.assertIn("p, q, t", text)
         self.assertIn("link", text)
+
+
+class RouterDefaultWriteFieldTests(RouterCase):
+    """The link config has projects.r.default_write_vault (contract 5). The router ignores it (A-15, A-22)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.map["projects"]["r"]["default_write_vault"] = "p"
+        self.map["vaults"]["q"]["role"] = "project"
+        write_map(self.map)
+
+    def test_router_default_write_field_keeps_project_lookup(self) -> None:
+        match = router.find_project(self.repo, router.read_vault_map(map_path()))
+        self.assertIsInstance(match, router.ProjectMatch)
+        self.assertEqual("r", match.project_id)
+
+    def test_router_default_write_field_keeps_read_scope(self) -> None:
+        result, stderr, _ = self.call("wiki_read_page", {"path": "wiki/overview.md"})
+        self.assertFalse(result["isError"], self.text(result))
+        self.assertIn("vault=p exit=0", stderr)
+        self.assertRefused("wiki_read_page", {"vault": "q", "path": "wiki/overview.md"})
+
+    def test_router_default_write_field_does_not_pick_a_write_vault(self) -> None:
+        text = self.assertRefused("wiki_publish_draft", {"path": "scratch/drafts/valid.json"})
+        self.assertIn("vault", text)
+        result, _, _ = self.call("wiki_publish_draft", {"vault": "q", "path": "scratch/drafts/valid.json"})
+        self.assertFalse(result["isError"], self.text(result))
+        self.assertTrue((self.vaults["q"] / "wiki" / "concepts" / "router-test.md").is_file())
 
 
 class RouterStatelessTests(RouterCase):
