@@ -31,6 +31,7 @@ from tools.wiki.lib.maps import build_navigation_maps
 from tools.wiki.lib.memory_scan import MemoryScanError, render_memory_scan, scan_memory
 from tools.wiki.lib.merge import scan_merge_candidates
 from tools.wiki.lib.metrics import build_maintenance_metrics
+from tools.wiki.lib.publish import STDOUT, publish_draft
 from tools.wiki.lib.paths import resolve_report_path
 from tools.wiki.lib.review import create_review_item, list_review_items, render_review_list, resolve_review_item
 from tools.wiki.lib.schema import Issue, validate_schema
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     publish_draft_cmd = subcommands.add_parser("publish-draft")
     publish_draft_cmd.add_argument("path")
     publish_draft_cmd.add_argument("--report", nargs="?", const="__default__")
+    publish_draft_cmd.add_argument("--json", action="store_true")
 
     publish_batch_cmd = subcommands.add_parser("publish-batch")
     publish_batch_cmd.add_argument("path")
@@ -396,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             report_path = Path(_default_publish_report_path(draft_path))
         elif args.report:
             report_path = Path(args.report)
-        return _publish_draft(draft_path, report_path)
+        return _publish_draft(draft_path, report_path, as_json=args.json)
 
     if args.command == "publish-batch":
         draft_path = Path(args.path)
@@ -702,47 +704,15 @@ def _publish_report_path(raw_report: str | None, draft_path: Path) -> Path | Non
     return None
 
 
-def _publish_draft(draft_path: Path, report_path: Path | None) -> int:
-    snapshot = None
-    try:
-        pre_lint_result = lint_repo(ROOT)
-        if not pre_lint_result.ok:
-            _print_result(pre_lint_result)
-            lint_report_path = _write_lint_report(pre_lint_result)
-            print(f"Report written: {display_path(lint_report_path, ROOT)}")
-            print("Publish aborted: wiki lint must be clean before applying a draft.")
-            return 1
-        dry_run_result = apply_draft(ROOT, draft_path, dry_run=True)
-        print(f"Validated draft: {display_path(dry_run_result.target_path, ROOT)}")
-        snapshot = _snapshot_publish_paths(dry_run_result.target_path)
-        applied_result = apply_draft(ROOT, draft_path, dry_run=False)
-        print(f"Applied draft: {display_path(applied_result.target_path, ROOT)}")
-    except (OSError, ValueError) as exc:
-        if snapshot is not None:
-            _restore_snapshot(snapshot)
-        print(str(exc), file=sys.stderr)
-        return 1
-
-    lint_result = lint_repo(ROOT)
-    _print_result(lint_result)
-    lint_report_path = _write_lint_report(lint_result)
-    print(f"Report written: {display_path(lint_report_path, ROOT)}")
-    if not lint_result.ok:
-        _restore_snapshot(snapshot)
-        print("Rolled back draft: lint failed after applying.")
-        return 1
-    if report_path is not None:
-        try:
-            report_path = resolve_report_path(ROOT, report_path)
-        except ValueError as exc:
-            _restore_snapshot(snapshot)
-            print(str(exc), file=sys.stderr)
-            return 1
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(_render_publish_report(draft_path, applied_result.target_path))
-        print(f"Report written: {display_path(report_path, ROOT)}")
-    _rebuild_maps_after_publish()
-    return 0
+def _publish_draft(draft_path: Path, report_path: Path | None, as_json: bool = False) -> int:
+    """Print a publish result as text, or with `as_json` as one JSON object on stdout and text on stderr."""
+    result = publish_draft(ROOT, draft_path, report_path)
+    for line in result.lines:
+        stream = sys.stdout if line.stream == STDOUT and not as_json else sys.stderr
+        print(line.text, file=stream)
+    if as_json:
+        print(json.dumps(result.to_json(), ensure_ascii=False))
+    return result.exit_code
 
 
 def _publish_batch(draft_path: Path, report_path: Path | None, dry_run: bool = False) -> int:
@@ -923,22 +893,6 @@ def _metrics_check_findings(metrics: object, policy_path: Path | None = None) ->
     return failures, warnings
 
 
-def _render_publish_report(draft_path: Path, target_path: Path) -> str:
-    return "\n".join(
-        [
-            f"# Publish Draft Report - {date.today().isoformat()}",
-            "",
-            "## Summary",
-            "",
-            f"- Published draft: `{display_path(draft_path, ROOT)}`",
-            f"- Target page: `{display_path(target_path, ROOT)}`",
-            "- Dry-run validation completed before applying.",
-            "- Lint report written after applying.",
-            "",
-        ]
-    )
-
-
 def _render_publish_batch_report(draft_path: Path, target_paths: list[Path]) -> str:
     lines = [
         f"# Publish Batch Report - {date.today().isoformat()}",
@@ -963,15 +917,6 @@ def _write_lint_report(result: LintResult) -> Path:
     lint_report_path.parent.mkdir(parents=True, exist_ok=True)
     lint_report_path.write_text(render_lint_report(result))
     return lint_report_path
-
-
-def _snapshot_publish_paths(target_path: Path) -> dict[Path, str | None]:
-    paths = {
-        target_path,
-        ROOT / "wiki" / "index.md",
-        ROOT / "wiki" / "log.md",
-    }
-    return {path: path.read_text() if path.exists() else None for path in paths}
 
 
 def _snapshot_publish_paths_for_targets(target_paths: list[Path]) -> dict[Path, str | None]:
