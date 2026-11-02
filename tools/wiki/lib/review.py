@@ -12,7 +12,8 @@ from .schema import Issue
 from .wiki_update import append_log_entry
 
 
-ALLOWED_REVIEW_TYPES = {"contradiction", "merge", "contested-claim", "human-lock"}
+MEMORY_PROPOSAL_TYPE = "memory-proposal"
+ALLOWED_REVIEW_TYPES = {"contradiction", "merge", "contested-claim", "human-lock", MEMORY_PROPOSAL_TYPE}
 ALLOWED_REVIEW_STATUSES = {"pending", "accepted", "rejected", "resolved"}
 FINAL_REVIEW_STATUSES = {"accepted", "rejected", "resolved"}
 
@@ -35,18 +36,25 @@ def create_review_item(
     context: str = "",
     related_pages: list[str] | None = None,
     evidence: list[str] | None = None,
+    review_id: str | None = None,
+    extra_frontmatter: dict[str, object] | None = None,
 ) -> ReviewItem:
+    """Write one pending review item.
+
+    `review_id` replaces the summary slug and must not name an existing item.
+    `extra_frontmatter` adds type-specific fields after the common ones.
+    """
     _validate_review_type(review_type)
-    if not summary.strip():
-        raise ValueError("Review summary must be non-empty.")
+    validate_review_refs(root, summary, related_pages or [], evidence or [])
 
     related_pages = related_pages or []
     evidence = evidence or []
-    _validate_related_pages(root, related_pages)
-    _validate_evidence_refs(root, evidence)
 
-    review_id = _unique_review_id(root, summary)
+    if review_id is None:
+        review_id = _unique_review_id(root, summary)
     review_path = root / "scratch" / "review" / f"{review_id}.md"
+    if review_path.exists():
+        raise ValueError(f"Review item already exists: {display_path(review_path, root)}")
     frontmatter = {
         "review_id": review_id,
         "type": review_type,
@@ -58,6 +66,7 @@ def create_review_item(
         "evidence": evidence,
         "resolution": "",
     }
+    frontmatter.update(extra_frontmatter or {})
     body = "\n".join(
         [
             f"# {summary}",
@@ -78,6 +87,31 @@ def create_review_item(
     review_path.parent.mkdir(parents=True, exist_ok=True)
     review_path.write_text(render_page(frontmatter, body))
     return _read_review_item(review_path)
+
+
+def validate_review_refs(root: Path, summary: str, related_pages: list[str], evidence: list[str]) -> None:
+    """Raise ValueError when a new review item would have an empty summary or a bad reference."""
+    if not summary.strip():
+        raise ValueError("Review summary must be non-empty.")
+    _validate_related_pages(root, related_pages)
+    _validate_evidence_refs(root, evidence)
+
+
+def read_review_item(root: Path, review_path: Path) -> ReviewItem:
+    """Read one review item; a relative `review_path` is taken from `root`."""
+    if not review_path.is_absolute():
+        review_path = root / review_path
+    return _read_review_item(review_path)
+
+
+def read_review_fields(root: Path, review_path: Path) -> dict[str, object]:
+    """Return the frontmatter of one review item, including type-specific fields."""
+    if not review_path.is_absolute():
+        review_path = root / review_path
+    page = parse_page(review_path)
+    if not page.frontmatter:
+        raise ValueError(f"Review item must have frontmatter: {review_path}")
+    return dict(page.frontmatter)
 
 
 def list_review_items(root: Path) -> list[ReviewItem]:
@@ -181,7 +215,45 @@ def validate_review_queue(root: Path) -> list[Issue]:
         else:
             for evidence_ref in _as_string_list(page.frontmatter.get("evidence", [])):
                 issues.extend(_validate_review_evidence_ref(root, path, evidence_ref))
+        if review_type == MEMORY_PROPOSAL_TYPE:
+            issues.extend(_validate_review_draft_ref(root, path, str(page.frontmatter.get("draft", "") or "")))
     return issues
+
+
+def _validate_review_draft_ref(root: Path, review_path: Path, draft_ref: str) -> list[Issue]:
+    """A memory-proposal item must point at its draft copy under scratch/review/."""
+    if not draft_ref.strip():
+        return [
+            Issue(
+                severity="error",
+                code="missing-review-draft",
+                path=str(review_path),
+                message="Memory proposal review item is missing draft.",
+            )
+        ]
+    review_root = (root / "scratch" / "review").resolve()
+    path = root / draft_ref
+    try:
+        path.resolve().relative_to(review_root)
+    except ValueError:
+        return [
+            Issue(
+                severity="error",
+                code="invalid-review-draft",
+                path=str(review_path),
+                message=f"Memory proposal draft must stay under scratch/review/: {draft_ref}.",
+            )
+        ]
+    if not path.is_file():
+        return [
+            Issue(
+                severity="error",
+                code="missing-review-draft",
+                path=str(review_path),
+                message=f"Memory proposal draft does not exist: {draft_ref}.",
+            )
+        ]
+    return []
 
 
 def _validate_review_related_page_ref(root: Path, review_path: Path, related_page: str) -> list[Issue]:
@@ -356,6 +428,8 @@ def _required_judgment_for(review_type: str) -> str:
         return "Decide the current claim status and what evidence should be treated as authoritative."
     if review_type == "human-lock":
         return "Decide whether the proposed change may modify human-locked content."
+    if review_type == MEMORY_PROPOSAL_TYPE:
+        return "Decide whether the attached draft should be published to the wiki as a durable memory."
     return "Human judgment required."
 
 
