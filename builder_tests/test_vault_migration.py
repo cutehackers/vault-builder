@@ -9163,7 +9163,12 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
             with self.subTest(relative=relative):
                 self.assertIsNone(pattern.search((ROOT / relative).read_text(encoding="utf-8")))
 
-    def test_install_writes_no_settings_json(self):
+    def test_only_hooks_module_names_settings_json(self):
+        """installing.py and uninstalling.py never touch settings.json directly.
+
+        Only hooks.py names the Claude Code settings file, and install reaches it only with --with-hooks
+        (builder_tests/test_hooks_install.py checks that install without --with-hooks never reads it).
+        """
         for relative in ("tools/vault_migration/installing.py", "tools/vault_migration/uninstalling.py"):
             with self.subTest(relative=relative):
                 self.assertNotIn("settings.json", (ROOT / relative).read_text(encoding="utf-8"))
