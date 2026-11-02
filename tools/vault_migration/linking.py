@@ -21,6 +21,7 @@ from tools.vault_migration.installing import _atomic_write, _json_bytes, resolve
 _ROUTER_PATH = Path(__file__).resolve().parent / "assets" / "llm-wiki-router" / "llm_wiki_router.py"
 _ROUTER_MODULE = "vault_builder_llm_wiki_router"
 _VAULT_MAP_VERSION = 2
+_PROJECT_ROLE = "project"  # session capture saves transcripts only into a vault with this role
 
 
 def _router() -> ModuleType:
@@ -124,6 +125,12 @@ def link(
             action = f"found by {match.stage}"
         print(f"link: project {project_id} ({action}) vaults: {', '.join(entry['vaults'])}")
         _write(path, data, dry_run, "link")
+        if not any(vaults[name].get("role") == _PROJECT_ROLE for name in entry["vaults"] if name in vaults):
+            print(
+                f"link: warning: project {project_id} has no vault with role {_PROJECT_ROLE}, so session transcripts "
+                f"will not be saved. Run set-role --vault <name> --role {_PROJECT_ROLE} on the vault meant for them.",
+                file=sys.stderr,
+            )
         return 0
     except _Refused as exc:
         print(f"link: {exc}", file=sys.stderr)

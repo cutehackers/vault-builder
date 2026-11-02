@@ -271,6 +271,93 @@ class InstallKeepsDefaultWriteTests(_MapCase):
         self.assertEqual("blue", plan.vault_map["vaults"]["a"]["color"])
 
 
+class InstallRoleTests(_MapCase):
+    """install --role sets the vault role. Without it a new vault is personal and an existing role is kept."""
+
+    def install(self, name: str, *, role: str | None = None, dry_run: bool = False) -> str:
+        out = io.StringIO()
+        code = installing.install(
+            self.tmp / f"vault-{name}",
+            name=name,
+            role=role,
+            dry_run=dry_run,
+            environ=self.env(),
+            python=sys.executable,
+            out=out,
+        )
+        self.assertEqual(0, code, out.getvalue())
+        return out.getvalue()
+
+    def test_new_vault_without_role_is_personal(self) -> None:
+        self.install("new")
+        self.assertEqual("personal", self.read_map()["vaults"]["new"]["role"])
+
+    def test_new_vault_gets_the_given_role(self) -> None:
+        result = self.cli("install", str(self.tmp / "vault-new"), "--name", "new", "--role", "project")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual({"path": str(self.tmp / "vault-new"), "role": "project"}, self.read_map()["vaults"]["new"])
+
+    def test_existing_vault_keeps_its_role_without_role_option(self) -> None:
+        self.install("new", role="project")
+        self.install("new")
+        self.assertEqual("project", self.read_map()["vaults"]["new"]["role"])
+
+    def test_existing_vault_role_changes_with_role_option_and_keeps_other_fields(self) -> None:
+        self.install("new", role="project")
+        data = self.read_map()
+        data["vaults"]["new"]["color"] = "green"
+        self.write_map(data)
+        self.install("new", role="team")
+        self.assertEqual(
+            {"path": str(self.tmp / "vault-new"), "role": "team", "color": "green"}, self.read_map()["vaults"]["new"]
+        )
+
+    def test_dry_run_shows_the_role_and_writes_nothing(self) -> None:
+        before = self.digest()
+        output = self.install("new", role="project", dry_run=True)
+        self.assertIn("Vault role: project", output)
+        self.assertEqual(before, self.digest())
+        self.install("new", role="project")
+        self.assertIn("Vault role: project", self.install("new", dry_run=True))
+        self.assertIn("Vault role: team", self.install("new", role="team", dry_run=True))
+        self.assertEqual("project", self.read_map()["vaults"]["new"]["role"])
+
+    def test_empty_role_is_refused(self) -> None:
+        before = self.digest()
+        result = self.cli("install", str(self.tmp / "vault-new"), "--name", "new", "--role", " ")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("role", result.stderr)
+        self.assertEqual(before, self.digest())
+        self.assertFalse((self.tmp / "vault-new").exists())
+
+
+class LinkProjectRoleWarningTests(_MapCase):
+    """link warns when the project has no role project vault, because session capture needs one."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = self.tmp / "w"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, env=self.env())
+
+    def test_link_without_project_vault_warns_and_exits_zero(self) -> None:
+        result = self.cli("link", "a", "--repo", str(self.repo))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        warnings = [line for line in result.stderr.splitlines() if "session transcripts" in line]
+        self.assertEqual(1, len(warnings), result.stderr)
+        self.assertIn("set-role", warnings[0])
+        self.assertEqual(["a"], self.read_map()["projects"]["w"]["vaults"])
+
+    def test_link_with_project_vault_does_not_warn(self) -> None:
+        data = self.read_map()
+        data["vaults"]["t"]["role"] = "project"
+        self.write_map(data)
+        self.assertEqual(0, self.cli("link", "a", "--repo", str(self.repo)).returncode)
+        result = self.cli("link", "t", "--repo", str(self.repo))
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("session transcripts", result.stdout + result.stderr)
+
+
 class MapSettingsImportTests(unittest.TestCase):
     def test_map_settings_does_not_import_hooks(self) -> None:
         tree = ast.parse(MAP_SETTINGS_SOURCE.read_text(encoding="utf-8"))

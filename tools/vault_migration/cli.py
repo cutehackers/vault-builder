@@ -567,6 +567,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also add the SessionStart, PreCompact and SessionEnd hook entries to Claude Code settings.json.",
     )
+    install.add_argument(
+        "--role",
+        help="Vault role in the link config, for example personal, project, or team. "
+        "A new vault defaults to personal. An existing vault keeps its role unless --role is given. "
+        "Session transcripts are saved only into a project vault.",
+    )
     install.add_argument("--dry-run", action="store_true")
     uninstall_parser = subcommands.add_parser("uninstall")
     uninstall_parser.add_argument("path")
@@ -727,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:
                 name=args.name,
                 with_stenc=args.with_stenc,
                 with_hooks=args.with_hooks,
+                role=args.role,
                 dry_run=args.dry_run,
             )
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
