@@ -5,6 +5,7 @@ target file as it is at apply time, so the body is never resent.
 """
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,99 @@ from pathlib import Path
 from tools.wiki.lib.draft import HumanLockError, apply_draft
 from tools.wiki.lib.draft_patch import materialize_patch
 from tools.wiki.lib.frontmatter import parse_page, render_page
-from tests.test_wiki_tools import _claim_page, _minimal_vault, _write_draft
+
+# The fixture helpers below are copies, not imports from tests/test_wiki_tools.py, so this
+# file still runs in a Vault whose test_wiki_tools.py was replaced.
+_VALID_PAGE = """---
+title: "Valid Page"
+type: concept
+status: active
+created: 2026-05-26
+updated: 2026-05-26
+owner: agent
+summary: "A valid page."
+source_count: 0
+tags: [quality]
+related:
+  - overview
+confidence: high
+quality:
+  provenance: section
+  links: unchecked
+  contradictions: none
+  review_required: false
+---
+
+# Valid Page
+
+Source: Human instruction in `AGENTS.md`.
+"""
+_CLAIM_PAGE_BODY = "\n".join(
+    [
+        "# Memory Decision",
+        "",
+        "## Context",
+        "",
+        "Initial context.",
+        "",
+        "## Claims",
+        "",
+        "| Claim | Status | Evidence |",
+        "|---|---|---|",
+        "| Use SQLite for local state. | stated | Human instruction |",
+        "| Keep one writer. | stated | Human instruction |",
+        "",
+        "## Notes",
+        "",
+        "First note.",
+        "",
+    ]
+)
+
+
+def _minimal_vault(root: Path) -> None:
+    for relative in ("raw/sources", "raw/imports", "wiki/sources", "wiki/concepts", "scratch/drafts", "scratch/reports"):
+        (root / relative).mkdir(parents=True)
+    (root / "wiki" / "index.md").write_text(
+        _VALID_PAGE.replace("type: concept", "type: index").replace("# Valid Page", "# Index\n\n## Sources\n\n## Concepts")
+    )
+    (root / "wiki" / "log.md").write_text(
+        _VALID_PAGE.replace("type: concept", "type: log").replace(
+            "# Valid Page", "# Log\n\n## [2026-05-26] repair | Initial\n\n- Initial log entry."
+        )
+    )
+
+
+def _claim_page(root: Path, relative: str = "wiki/decisions/memory-decision.md") -> Path:
+    frontmatter = {
+        "title": "Memory Decision",
+        "type": "decision",
+        "status": "active",
+        "created": "2026-05-30",
+        "updated": "2026-05-30",
+        "owner": "agent",
+        "summary": "Memory Decision summary.",
+        "source_count": 1,
+        "tags": ["test"],
+        "related": [],
+        "confidence": "high",
+        "quality": {
+            "provenance": "claim",
+            "links": "unchecked",
+            "contradictions": "none",
+            "review_required": False,
+        },
+    }
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_page(frontmatter, _CLAIM_PAGE_BODY))
+    return path
+
+
+def _write_draft(root: Path, draft: dict) -> Path:
+    path = root / "scratch" / "drafts" / "draft.json"
+    path.write_text(json.dumps(draft))
+    return path
 
 TARGET = "wiki/decisions/memory-decision.md"
 RETIRE = {"status": "retired", "retired_reason": "replaced by a newer rule", "retired_at": "2026-11-02"}

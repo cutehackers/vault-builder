@@ -2334,8 +2334,8 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
-            self.assertEqual(3, manifest["schema_version"])
-            self.assertEqual(3, manifest["contract_version"])
+            self.assertEqual(4, manifest["schema_version"])
+            self.assertEqual(4, manifest["contract_version"])
             self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
             for relative in (
                 "tools/wiki/lib/session_archive.py",

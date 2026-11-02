@@ -240,6 +240,32 @@ SESSION_MANAGED_FILES = (
     ".agents/skills/session-capture/SKILL.md",
     ".claude/skills/session-capture/SKILL.md",
 )
+# v3.json is frozen. A recorded hash, not a commit id, so a rebase or squash merge keeps the check valid.
+V3_CATALOG_SHA256 = "304c5fa794d365c54dc2f3334e8f67ac52d2f223a99367924af2ba309b804242"
+# A builder commit that installs contract-3 Vaults. A rebase or squash merge can remove it from
+# the history; the one test that needs it is skipped then.
+V3_INSTALL_COMMIT = "f562d77"
+
+
+def _commit_available(revision: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+# Managed files added by contract 4 (vault long-term memory spec, contract 7).
+CONTRACT4_MANAGED_FILES = (
+    "tools/wiki/lib/memory_fields.py",
+    "tools/wiki/lib/memory_proposal.py",
+    "tools/wiki/lib/publish.py",
+    "tests/test_draft_patch_frontmatter.py",
+    "tests/test_memory_fields.py",
+    "tests/test_memory_proposal.py",
+    "tests/test_publish_json.py",
+    "tests/test_wiki_lib_import_direction.py",
+)
 
 
 def _initialize_v1_vault(root: Path) -> Path:
@@ -458,7 +484,7 @@ class VaultManifestTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(3, manifest.contract_version)
+            self.assertEqual(4, manifest.contract_version)
             self.assertEqual("test-revision", manifest.builder_revision)
             self.assertNotIn("wiki/overview.md", manifest.managed_files)
             self.assertNotIn("tools/vault_migration/cli.py", manifest.managed_files)
@@ -670,6 +696,13 @@ def _valid_v3_manifest() -> dict[str, object]:
     return value
 
 
+def _valid_v4_manifest() -> dict[str, object]:
+    value = _valid_v2_manifest()
+    value["schema_version"] = 4
+    value["contract_version"] = 4
+    return value
+
+
 class VaultManifestV2SchemaTest(unittest.TestCase):
     def test_manifest_parser_reads_each_schema_contract_pair_and_rejects_mismatches(self):
         v1 = {
@@ -679,15 +712,15 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
             "generated_at": "2026-07-30T00:00:00Z",
             "managed_files": {},
         }
-        for value in (v1, _valid_v2_manifest(), _valid_v3_manifest()):
+        for value in (v1, _valid_v2_manifest(), _valid_v3_manifest(), _valid_v4_manifest()):
             with self.subTest(schema=value["schema_version"]):
                 parsed = parse_manifest_json(json.dumps(value))
                 self.assertEqual(value["schema_version"], parsed["schema_version"])
                 self.assertEqual(value["contract_version"], parsed["contract_version"])
                 manifest = VaultManifest.from_dict(value)
                 self.assertEqual(manifest, VaultManifest.from_json(manifest.to_json()))
-        for schema, contract in ((2, 3), (3, 2), (1, 3), (3, 1), (4, 4)):
-            value = _valid_v3_manifest()
+        for schema, contract in ((2, 3), (3, 2), (1, 3), (3, 1), (3, 4), (4, 3), (1, 4), (5, 5)):
+            value = _valid_v4_manifest()
             value["schema_version"] = schema
             value["contract_version"] = contract
             if schema == 1:
@@ -695,14 +728,16 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
             with self.subTest(schema=schema, contract=contract), self.assertRaises(ValueError):
                 validate_manifest(value)
 
-    def test_schema_3_manifest_keeps_external_records(self):
-        parsed = validate_manifest(_valid_v3_manifest())
+    def test_schema_3_and_4_manifests_keep_external_records(self):
+        for make in (_valid_v3_manifest, _valid_v4_manifest):
+            with self.subTest(schema=make()["schema_version"]):
+                parsed = validate_manifest(make())
 
-        self.assertEqual(3, len(parsed["external_records"]))
-        value = _valid_v3_manifest()
-        value.pop("external_records")
-        with self.assertRaisesRegex(ValueError, "external_records"):
-            validate_manifest(value)
+                self.assertEqual(3, len(parsed["external_records"]))
+                value = make()
+                value.pop("external_records")
+                with self.assertRaisesRegex(ValueError, "external_records"):
+                    validate_manifest(value)
 
     def test_manifest_parser_reads_v1_and_v2(self):
         v1 = {
@@ -795,7 +830,9 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
         cases["schema-2-contract-1"] = lambda value: value.__setitem__("contract_version", 1)
         cases["schema-2-contract-3"] = lambda value: value.__setitem__("contract_version", 3)
         cases["schema-3-contract-2"] = lambda value: value.__setitem__("schema_version", 3)
-        cases["schema-4"] = lambda value: value.update(schema_version=4, contract_version=4)
+        cases["schema-3-contract-4"] = lambda value: value.update(schema_version=3, contract_version=4)
+        cases["schema-4-contract-3"] = lambda value: value.update(schema_version=4, contract_version=3)
+        cases["schema-5"] = lambda value: value.update(schema_version=5, contract_version=5)
         cases["records-not-list"] = lambda value: value.__setitem__("external_records", {})
         cases["record-not-object"] = lambda value: value.__setitem__("external_records", ["x"])
         cases["unknown-kind"] = record(0, "kind", "directory")
@@ -1096,10 +1133,17 @@ class ContractCatalogTest(unittest.TestCase):
         v2 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
         self.assertEqual((2, "1.0.0"), (v2.contract_version, v2.builder_revision))
 
-    def test_v3_catalog_matches_current_managed_files(self):
-        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v3.json")
+    def test_v3_catalog_bytes_match_the_recorded_hash(self):
+        path = ROOT / "tools" / "vault_migration" / "contracts" / "v3.json"
 
-        self.assertEqual(3, catalog.contract_version)
+        self.assertEqual(V3_CATALOG_SHA256, sha256_file(path))
+        v3 = load_catalog(path)
+        self.assertEqual((3, "2.0.0"), (v3.contract_version, v3.builder_revision))
+
+    def test_v4_catalog_matches_current_managed_files(self):
+        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+
+        self.assertEqual(4, catalog.contract_version)
         self.assertEqual("2.0.0", catalog.builder_revision)
         self.assertEqual(read_version(ROOT), catalog.builder_revision)
         self.assertIn(".gitignore", catalog.managed_files)
@@ -1107,7 +1151,9 @@ class ContractCatalogTest(unittest.TestCase):
             ".agents/skills/memory-cleanup/SKILL.md",
             ".claude/skills/memory-cleanup/SKILL.md",
             "tools/wiki/lib/memory_scan.py",
+            "scripts/release_gate.sh",
             *SESSION_MANAGED_FILES,
+            *CONTRACT4_MANAGED_FILES,
         ):
             self.assertIn(relative, catalog.managed_files)
         self.assertFalse(
@@ -1547,27 +1593,27 @@ class MigrationApplyTest(unittest.TestCase):
 
             manifest = apply_plan(ROOT, target, plan, run_gate=gate)
 
-            self.assertEqual(3, manifest.contract_version)
+            self.assertEqual(4, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             persisted = load_manifest(target)
             self.assertIsNotNone(persisted)
             assert persisted is not None
             self.assertEqual(plan.migration_id, persisted.last_migration_id)
-            self.assertEqual([None, 3], gate_versions)
+            self.assertEqual([None, 4], gate_versions)
             self.assertEqual(protected_before, _protected_hashes(target))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
 
-    def test_v1_manifest_vault_audit_replaces_v1_hashes_and_apply_writes_v3_manifest(self):
+    def test_v1_manifest_vault_audit_replaces_v1_hashes_and_apply_writes_v4_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = _initialize_v1_vault(Path(tmpdir))
             before = load_manifest(target)
             assert before is not None
             self.assertEqual((1, 1), (before.schema_version, before.contract_version))
             v1 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v1.json")
-            v3 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v3.json")
+            v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
             changed = sorted(
                 path
-                for path, desired in v3.managed_files.items()
+                for path, desired in v4.managed_files.items()
                 if path in v1.managed_files and v1.managed_files[path].sha256 != desired.sha256
             )
 
@@ -1575,7 +1621,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             actions = {action.path: action for action in plan.actions}
             self.assertEqual(1, plan.current_contract_version)
-            self.assertEqual(3, plan.target_contract_version)
+            self.assertEqual(4, plan.target_contract_version)
             self.assertIn(".gitignore", changed)
             for relative in changed:
                 self.assertEqual("replace", actions[relative].action, relative)
@@ -1587,13 +1633,13 @@ class MigrationApplyTest(unittest.TestCase):
             persisted = load_manifest(target)
             assert persisted is not None
             for result in (manifest, persisted):
-                self.assertEqual(3, result.schema_version)
-                self.assertEqual(3, result.contract_version)
+                self.assertEqual(4, result.schema_version)
+                self.assertEqual(4, result.contract_version)
                 self.assertEqual((), result.external_records)
             stored = json.loads((target / ".vault-builder" / "manifest.json").read_text())
             self.assertEqual([], stored["external_records"])
-            self.assertEqual(3, stored["schema_version"])
-            for relative, desired in v3.managed_files.items():
+            self.assertEqual(4, stored["schema_version"])
+            for relative, desired in v4.managed_files.items():
                 self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
 
     def test_audit_uses_v1_catalog_hash_as_known_prior_hash(self):
@@ -1832,7 +1878,7 @@ class MigrationApplyTest(unittest.TestCase):
                 / "tools"
                 / "vault_migration"
                 / "contracts"
-                / "v3.json"
+                / "v4.json"
             )
             second_catalog = json.loads(second_catalog_path.read_text())
             second_catalog["builder_revision"] = "concurrent-builder"
@@ -1998,7 +2044,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             changed = target / "AGENTS.md"
             desired = load_catalog(
-                ROOT / "tools" / "vault_migration" / "contracts" / "v3.json"
+                ROOT / "tools" / "vault_migration" / "contracts" / "v4.json"
             ).managed_files["AGENTS.md"]
             changed.write_bytes((ROOT / "AGENTS.md").read_bytes())
             changed.chmod(int(desired.mode, 8))
@@ -3537,7 +3583,7 @@ class MigrationApplyTest(unittest.TestCase):
                 if stop_stage == "before-publication":
                     self.assertIsNone(load_manifest(target))
                 else:
-                    self.assertEqual(3, load_manifest(target).contract_version)
+                    self.assertEqual(4, load_manifest(target).contract_version)
                     self.assertEqual(
                         manifest_intent["candidate_sha256"],
                         sha256_file(target / ".vault-builder" / "manifest.json"),
@@ -3894,7 +3940,7 @@ class MigrationApplyTest(unittest.TestCase):
                 recover_migration(target, plan.migration_id)
 
             self.assertEqual(before_recovery, _tree_digest(target))
-            self.assertEqual(3, load_manifest(target).contract_version)
+            self.assertEqual(4, load_manifest(target).contract_version)
             self.assertTrue(journal_root.is_dir())
 
     def test_recovery_restores_manifest_before_managed_files(self):
@@ -3916,7 +3962,7 @@ class MigrationApplyTest(unittest.TestCase):
             _, child_status = os.waitpid(child, 0)
             self.assertTrue(os.WIFEXITED(child_status))
             self.assertEqual(37, os.WEXITSTATUS(child_status))
-            self.assertEqual(3, load_manifest(target).contract_version)
+            self.assertEqual(4, load_manifest(target).contract_version)
 
             with mock.patch.object(applying, "_restore_entry", side_effect=OSError("stop during managed restore")):
                 with self.assertRaisesRegex(OSError, "stop during managed restore"):
@@ -3929,17 +3975,17 @@ class MigrationApplyTest(unittest.TestCase):
         self._recover_interrupted_journal(1)
 
     def test_journal_contract_versions_are_listed_directly(self):
-        # Following MANIFEST_CONTRACT_VERSION alone would drop contract 2 (spec 결정N).
-        self.assertEqual(frozenset({1, 2, 3}), applying._JOURNAL_CONTRACT_VERSIONS)
+        # Following MANIFEST_CONTRACT_VERSION alone would drop contracts 2 and 3 (spec 결정N).
+        self.assertEqual(frozenset({1, 2, 3, 4}), applying._JOURNAL_CONTRACT_VERSIONS)
 
-    def test_recover_accepts_journals_from_contract_2_and_3_migrations(self):
-        for contract in (2, 3):
+    def test_recover_accepts_journals_from_contract_2_3_and_4_migrations(self):
+        for contract in (2, 3, 4):
             with self.subTest(contract=contract):
                 self._recover_interrupted_journal(contract)
 
     def test_recover_rejects_journal_for_unknown_contract(self):
         with self.assertRaisesRegex(ValueError, "journal is invalid"):
-            self._recover_interrupted_journal(4)
+            self._recover_interrupted_journal(5)
 
     def _recover_interrupted_journal(self, contract: int) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5983,7 +6029,7 @@ class VaultMigrationCliTest(unittest.TestCase):
 
 
 class VaultMigrationAcceptanceTest(unittest.TestCase):
-    def test_fresh_vault_has_v3_manifest_and_passes_its_release_gate(self):
+    def test_fresh_vault_has_v4_manifest_and_passes_its_release_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
 
@@ -5992,7 +6038,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(3, manifest.contract_version)
+            self.assertEqual(4, manifest.contract_version)
             self.assertIsNone(manifest.last_migration_id)
             self.assertFalse((target / "builder_tests").exists())
             self.assertFalse((target / "tools" / "vault_migration").exists())
@@ -6022,7 +6068,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             for relative, expected_mode in expected_user_modes.items():
                 self.assertIn(relative, protected_after)
                 self.assertEqual(expected_mode, protected_after[relative][1], relative)
-            self.assertEqual(3, manifest.contract_version)
+            self.assertEqual(4, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             self.assertEqual(manifest, load_manifest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
@@ -6648,7 +6694,7 @@ class ProjectMemoryRecallTest(unittest.TestCase):
                 self.assertNotIn("/Users/", text, path)
                 self.assertNotIn("/home/", text, path)
                 self.assertNotIn("~/", text, path)
-        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v3.json").read_text(encoding="utf-8"))
+        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v4.json").read_text(encoding="utf-8"))
         self.assertNotIn("assets/", json.dumps(catalog_paths))
         self.assertFalse([path for path in MANAGED_PATHS if path.startswith("tools/vault_migration/")])
 
@@ -6918,10 +6964,10 @@ class _UserHomeTestCase(unittest.TestCase):
         self.assertEqual({"command": python, "args": ["-I", str(router)]}, entry)
         self.assertFalse((target / ".mcp.json").exists())
         manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(3, manifest["schema_version"])
-        self.assertEqual(3, manifest["contract_version"])
+        self.assertEqual(4, manifest["schema_version"])
+        self.assertEqual(4, manifest["contract_version"])
         self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
-        for relative in SESSION_MANAGED_FILES:
+        for relative in (*SESSION_MANAGED_FILES, *CONTRACT4_MANAGED_FILES):
             self.assertTrue((target / relative).is_file(), relative)
             self.assertIn(relative, manifest["managed_files"])
         self.assertTrue((target / "raw" / "sessions" / ".gitkeep").is_file())
@@ -8997,12 +9043,12 @@ class ReleaseVersionTests(unittest.TestCase):
         self.assertIn("| 2.0.0 | 3 | 3 | 2 |", changelog)
 
     def test_version_label_names_release_and_contract(self):
-        self.assertEqual("vault-builder 2.0.0 (contract 3)", version_label(ROOT))
+        self.assertEqual("vault-builder 2.0.0 (contract 4)", version_label(ROOT))
 
     def test_catalog_command_defaults_revision_to_version(self):
         written = []
         with mock.patch.object(cli, "write_catalog", side_effect=lambda path, catalog, **_: written.append(catalog)):
-            self.assertEqual(0, cli.main(["catalog", "--contract-version", "3", "--output", "unused.json"]))
+            self.assertEqual(0, cli.main(["catalog", "--contract-version", "4", "--output", "unused.json"]))
         self.assertEqual(read_version(ROOT), written[0].builder_revision)
 
     def test_manifest_revision_defaults_to_version(self):
@@ -9077,10 +9123,10 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
     def _schema_problems(self, output: str) -> list[str]:
         return [line for line in output.splitlines() if line.startswith("Problem:") and "schema" in line]
 
-    def test_doctor_reports_no_schema_problem_for_schema_3_vault(self):
+    def test_doctor_reports_no_schema_problem_for_schema_4_vault(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
-        self.assertEqual(3, json.loads(self._manifest_path(target).read_text(encoding="utf-8"))["schema_version"])
+        self.assertEqual(4, json.loads(self._manifest_path(target).read_text(encoding="utf-8"))["schema_version"])
 
         result = self._cli("doctor", str(target))
 
@@ -9095,7 +9141,7 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
 
         problems = self._schema_problems(result.stdout)
         self.assertEqual(1, len(problems), result.stdout)
-        self.assertIn("schema is 2, not 3", problems[0])
+        self.assertIn("schema is 2, not 4", problems[0])
         self.assertIn("audit and apply", problems[0])
 
     def test_install_refuses_schema_2_vault_with_audit_command_and_writes_nothing(self):
@@ -9122,16 +9168,16 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
             with self.subTest(relative=relative):
                 self.assertNotIn("settings.json", (ROOT / relative).read_text(encoding="utf-8"))
 
-    def test_1_0_0_vault_audit_and_apply_reach_contract_3(self):
+    def test_1_0_0_vault_audit_and_apply_reach_contract_4(self):
         target = self._install_1_0_0_vault()
         before = load_manifest(target)
         assert before is not None
         self.assertTrue(before.external_records)
         v2 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
-        v3 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v3.json")
+        v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
         changed = sorted(
             path
-            for path, desired in v3.managed_files.items()
+            for path, desired in v4.managed_files.items()
             if path in v2.managed_files and v2.managed_files[path].sha256 != desired.sha256
         )
         self.assertTrue(changed)
@@ -9139,8 +9185,8 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         plan = audit_vault(ROOT, target)
 
         actions = {action.path: action.action for action in plan.actions}
-        self.assertEqual((2, 3), (plan.current_contract_version, plan.target_contract_version))
-        for relative in SESSION_MANAGED_FILES:
+        self.assertEqual((2, 4), (plan.current_contract_version, plan.target_contract_version))
+        for relative in (*SESSION_MANAGED_FILES, *CONTRACT4_MANAGED_FILES):
             self.assertEqual("create", actions[relative], relative)
         for relative in changed:
             self.assertEqual("replace", actions[relative], relative)
@@ -9152,9 +9198,9 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((3, 3, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((4, 4, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
-        for relative, desired in v3.managed_files.items():
+        for relative, desired in v4.managed_files.items():
             self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
         self.assertFalse((target / "raw" / "sessions").exists())
         gate = subprocess.run(
@@ -9184,3 +9230,166 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         result = self._cli("doctor", str(target))
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual([], [line for line in result.stdout.splitlines() if line.startswith("Problem:")], result.stdout)
+
+
+class ContractV4MigrationTests(_RouterVaultTestCase):
+    """Contract 4: a Vault installed at contract 3 reaches contract 4 through audit and apply (A-17, 위험8)."""
+
+    def _contract_3_vault(self) -> Path:
+        """Install with this builder, then make the Vault look as contract 3 left it.
+
+        The files contract 4 added are removed, and the manifest is rewritten as schema 3 and
+        contract 3, recording only the files whose bytes match v3.json. Files that changed
+        between v3 and v4 already hold v4 bytes here; the real contract-3 install test covers them.
+        """
+        target = self.work / "vault-c3"
+        self._install_ok(target, "c3")
+        for relative in CONTRACT4_MANAGED_FILES:
+            (target / relative).unlink()
+        v3 = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v3.json").read_text(encoding="utf-8"))
+        path = target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["schema_version"] = 3
+        manifest["contract_version"] = 3
+        manifest["managed_files"] = {
+            relative: entry
+            for relative, entry in v3["managed_files"].items()
+            if (target / relative).is_file() and sha256_file(target / relative) == entry["sha256"]
+        }
+        path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        loaded = load_manifest(target)
+        assert loaded is not None
+        self.assertEqual((3, 3), (loaded.schema_version, loaded.contract_version))
+        return target
+
+    def _install_contract_3_vault_from_commit(self) -> Path:
+        builder = _extract_git_archive(ROOT, V3_INSTALL_COMMIT, self.tmp / "builder-contract-3")
+        target = self.work / "vault-c3"
+        result = subprocess.run(
+            [sys.executable, "tools/vault_migration/cli.py", "install", str(target), "--name", "c3"],
+            cwd=builder,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=300,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        manifest = load_manifest(target)
+        assert manifest is not None
+        self.assertEqual((3, 3), (manifest.schema_version, manifest.contract_version))
+        self.assertEqual(V3_CATALOG_SHA256, sha256_file(builder / "tools" / "vault_migration" / "contracts" / "v3.json"))
+        return target
+
+    def _audit_apply_and_check(self, target: Path, *, expect_replaced: bool) -> None:
+        before = load_manifest(target)
+        assert before is not None
+        v3 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v3.json")
+        v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+        changed = sorted(
+            path
+            for path, desired in v4.managed_files.items()
+            if path in v3.managed_files and v3.managed_files[path].sha256 != desired.sha256
+        )
+        for relative in ("scripts/release_gate.sh", "tools/wiki/cli.py", "tools/wiki/lib/vault_manifest.py"):
+            self.assertIn(relative, changed)
+        for relative in CONTRACT4_MANAGED_FILES:
+            self.assertNotIn(relative, v3.managed_files)
+            self.assertFalse((target / relative).exists(), relative)
+
+        plan = audit_vault(ROOT, target)
+
+        actions = {action.path: action.action for action in plan.actions}
+        self.assertEqual((3, 4), (plan.current_contract_version, plan.target_contract_version))
+        for relative in CONTRACT4_MANAGED_FILES:
+            self.assertEqual("create", actions[relative], relative)
+        for relative in changed:
+            self.assertEqual("replace" if expect_replaced else "unchanged", actions[relative], relative)
+        self.assertEqual([], [path for path, action in actions.items() if action in {"review-required", "invalid"}])
+        self.assertFalse(plan.has_blocking_actions)
+
+        manifest = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+        persisted = load_manifest(target)
+        assert persisted is not None
+        for result in (manifest, persisted):
+            self.assertEqual((4, 4, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual(before.external_records, result.external_records)
+            self.assertEqual(set(v4.managed_files), set(result.managed_files))
+        for relative, desired in v4.managed_files.items():
+            self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
+        lint = self._run_in_vault(target, sys.executable, "tools/wiki/cli.py", "lint")
+        self.assertEqual(0, lint.returncode, lint.stdout[-4000:] + lint.stderr[-4000:])
+        gate = self._run_in_vault(target, "bash", "scripts/release_gate.sh")
+        self.assertEqual(0, gate.returncode, gate.stdout[-4000:] + gate.stderr[-4000:])
+        self.assertIn("test_publish_json.py", gate.stdout)
+        again = {action.path: action.action for action in audit_vault(ROOT, target).actions}
+        self.assertEqual("unchanged", again["tools/wiki/lib/publish.py"])
+
+    def _run_in_vault(self, target: Path, *command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(command),
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=900,
+        )
+
+    def test_contract_3_vault_audit_and_apply_reach_contract_4_and_lint_passes(self):
+        self._audit_apply_and_check(self._contract_3_vault(), expect_replaced=False)
+
+    @unittest.skipUnless(
+        _commit_available(V3_INSTALL_COMMIT),
+        f"builder commit {V3_INSTALL_COMMIT} is not in this history (rebase or squash merge)",
+    )
+    def test_vault_installed_by_contract_3_builder_reaches_contract_4(self):
+        self._audit_apply_and_check(self._install_contract_3_vault_from_commit(), expect_replaced=True)
+
+    def test_contract_3_vault_with_edited_managed_file_stops_without_overwriting(self):
+        target = self._contract_3_vault()
+        edited = target / "tools" / "wiki" / "lib" / "lint.py"
+        with edited.open("a", encoding="utf-8") as handle:
+            handle.write("# local edit\n")
+        edited_bytes = edited.read_bytes()
+        manifest_before = (target / ".vault-builder" / "manifest.json").read_bytes()
+
+        plan = audit_vault(ROOT, target)
+
+        blocked = [action.path for action in plan.actions if action.action == "review-required"]
+        self.assertEqual(["tools/wiki/lib/lint.py"], blocked)
+        self.assertTrue(plan.has_blocking_actions)
+        with self.assertRaisesRegex(ValueError, "requires human review"):
+            apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+        self.assertEqual(edited_bytes, edited.read_bytes())
+        self.assertEqual(manifest_before, (target / ".vault-builder" / "manifest.json").read_bytes())
+
+    def test_contract_3_vault_with_own_file_at_new_managed_path_is_not_overwritten(self):
+        target = self._contract_3_vault()
+        own = target / "tools" / "wiki" / "lib" / "publish.py"
+        own.write_text("# written by a person before contract 4\n", encoding="utf-8")
+
+        plan = audit_vault(ROOT, target)
+
+        actions = {action.path: action.action for action in plan.actions}
+        self.assertEqual("review-required", actions["tools/wiki/lib/publish.py"])
+        self.assertTrue(plan.has_blocking_actions)
+        with self.assertRaisesRegex(ValueError, "requires human review"):
+            apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+        self.assertEqual("# written by a person before contract 4\n", own.read_text(encoding="utf-8"))
+
+    def test_doctor_reports_schema_3_manifest_and_install_refuses_it(self):
+        target = self._contract_3_vault()
+
+        doctor = self._cli("doctor", str(target))
+        problems = [line for line in doctor.stdout.splitlines() if line.startswith("Problem:") and "schema" in line]
+        self.assertEqual(1, len(problems), doctor.stdout)
+        self.assertIn("schema is 3, not 4", problems[0])
+        before = _tree_snapshot(target)
+
+        install = self._install(str(target), "--name", "c3")
+
+        self.assertNotEqual(0, install.returncode, install.stdout + install.stderr)
+        self.assertIn("schema version 3", install.stdout + install.stderr)
+        self.assertEqual(before, _tree_snapshot(target))
