@@ -2,9 +2,9 @@
 
 Search ranks pages by how often the query terms appear in the title, summary,
 tags and body. Matching is by substring so Korean words with particles
-attached still match. Deprecated pages are left out unless asked for, and
+attached still match. Deprecated and retired pages are left out unless asked for, and
 superseded claim rows are left out so readers see current claims. Asking for
-deprecated pages also brings superseded claims back, for questions about history.
+deprecated pages also brings retired pages and superseded claims back, for questions about history.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .frontmatter import parse_page
 from .lint import claim_evidence_table, fenced_line_flags
+from .schema import NOT_CURRENT_STATUSES
 
 _TERM = re.compile(r"[^\W_]{2,}", re.UNICODE)
 # Generated listings repeat every page summary and would outrank the pages themselves.
@@ -64,7 +65,7 @@ def search_wiki(
         status = str(frontmatter.get("status", ""))
         if kind in _SKIP_TYPES or (page_type and kind != page_type):
             continue
-        if status == "deprecated" and not include_deprecated:
+        if status in NOT_CURRENT_STATUSES and not include_deprecated:
             continue
         current_body = _current_body(page.body, include_superseded=include_deprecated)
         score = _score(terms, frontmatter, current_body)

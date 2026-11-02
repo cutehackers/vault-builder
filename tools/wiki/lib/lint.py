@@ -9,6 +9,7 @@ from .authority import validate_authority_contract
 from .frontmatter import Page, parse_page
 from .hash_source import compute_sha256
 from .links import find_wiki_links, resolve_wiki_link, wiki_link_stays_in_root
+from .memory_fields import validate_memory_fields
 from .review import validate_review_queue
 from .schema import Issue, validate_schema
 from .session_archive import SessionFileCheck, check_session_archive, check_session_file, session_archive_root
@@ -136,6 +137,7 @@ def lint_repo(root: Path | str) -> LintResult:
 
     for page in pages:
         issues.extend(validate_schema(page))
+        issues.extend(validate_memory_fields(page))
         issues.extend(validate_page_links(page, wiki_root))
         issues.extend(validate_provenance(page, repo_root, session_lookup))
         issues.extend(validate_lifecycle(page, wiki_root))

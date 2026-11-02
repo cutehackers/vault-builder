@@ -9,6 +9,7 @@ from .frontmatter import Page, parse_page
 from .hash_source import display_path
 from .paths import resolve_report_path
 from .review import create_review_item, list_review_items
+from .schema import NOT_CURRENT_STATUSES
 
 
 @dataclass(frozen=True)
@@ -111,7 +112,7 @@ def _find_merge_candidates(root: Path) -> list[MergeCandidate]:
         if not page.frontmatter:
             continue
         status = page.frontmatter.get("status")
-        if status == "deprecated":
+        if status in NOT_CURRENT_STATUSES:
             continue
         title = str(page.frontmatter.get("title", "")).strip()
         for label, reason in _page_merge_keys(title, page.frontmatter.get("aliases", [])):
