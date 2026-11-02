@@ -8,6 +8,11 @@ whose vault list becomes empty). When no Vault remains it also deletes the vault
 files (skill, recall script, router), the mcpServers.llm-wiki server entry, and the folders
 those files leave empty. The mcpServers key stays.
 
+With the last Vault it also undoes install --with-hooks: from the Claude Code settings file (hooks.py) it removes only
+hook items whose command contains the launcher path (hooks.py), and it deletes the launcher when it equals
+the asset and vault-hooks.json when it has the form install writes. A settings file that is not valid JSON
+is left unchanged with a note.
+
 A shared `file` record counts as builder-owned when the file matches the recorded hash or the
 current builder asset form that install also accepts: SKILL.md and the router equal to the asset,
 recall.sh equal to the asset except its single PYTHON= line. The server entry counts as
@@ -39,6 +44,7 @@ from typing import TextIO
 from tools.vault_migration.versioning import read_version, version_label
 from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION, normalized_json_sha256
 
+from . import hooks as _hooks
 from .catalogs import _safe_relative_path, sha256_file
 from .durability import fsync_directory
 from .installing import (
@@ -235,6 +241,9 @@ class _UninstallPlan:
     remaining_vaults: list[str] = field(default_factory=list)
     delete_outside: list[Path] = field(default_factory=list)
     kept_outside: list[Path] = field(default_factory=list)
+    hooks_settings_path: Path | None = None  # set when the settings file has launcher hook items to remove
+    hooks_launcher: Path | None = None
+    hooks_removed: int = 0
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -391,6 +400,39 @@ def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: P
         else:
             plan.kept_outside.append(path)
 
+    if plan.last_vault:
+        _plan_hooks(plan, builder_root, user)
+
+
+def _plan_hooks(plan: _UninstallPlan, builder_root: Path, user: UserPaths) -> None:
+    """Plan the removal of what install --with-hooks wrote. The hooks are shared, so only the last Vault does it."""
+    launcher = _hooks.launcher_path(user.config_dir)
+    settings_path = _hooks.settings_path(user.config_dir)
+    if settings_path.is_symlink() or (settings_path.exists() and not settings_path.is_file()):
+        plan.notes.append(f"{settings_path} is not a regular file; hook entries that run {launcher} were not removed.")
+    elif settings_path.exists():
+        try:
+            settings = _hooks.load_settings(settings_path)
+        except _hooks.HooksError as exc:
+            plan.notes.append(f"{exc} Hook entries that run {launcher} were not removed; remove them by hand.")
+        else:
+            _updated, removed = _hooks.remove_launcher_hooks(settings, launcher)
+            if removed:
+                plan.hooks_settings_path = settings_path
+                plan.hooks_launcher = launcher
+                plan.hooks_removed = removed
+    if launcher.is_file() and not launcher.is_symlink():
+        if launcher.read_bytes() == (builder_root / _hooks.LAUNCHER_ASSET).read_bytes():
+            plan.delete_outside.append(launcher)
+        else:
+            plan.kept_outside.append(launcher)
+    config = _hooks.hooks_config_path(user.config_dir)
+    if config.is_file() and not config.is_symlink():
+        if _hooks.is_hooks_config(config.read_bytes()):
+            plan.delete_outside.append(config)
+        else:
+            plan.kept_outside.append(config)
+
 
 def _uninstall_outside(plan: _UninstallPlan) -> None:
     changes = _OutsideChanges()
@@ -405,6 +447,14 @@ def _uninstall_outside(plan: _UninstallPlan) -> None:
             config["mcpServers"] = servers
             mode = stat.S_IMODE(plan.entry_path.stat().st_mode)
             changes.write(plan.entry_path, _json_bytes(config, indent=2), mode)
+        if plan.hooks_settings_path is not None and plan.hooks_launcher is not None:
+            # Re-read just before writing, then remove only the launcher items (before the launcher goes).
+            settings, removed_hooks = _hooks.remove_launcher_hooks(
+                _hooks.load_settings(plan.hooks_settings_path), plan.hooks_launcher
+            )
+            if removed_hooks:
+                mode = stat.S_IMODE(plan.hooks_settings_path.stat().st_mode)
+                changes.write(plan.hooks_settings_path, _hooks.settings_bytes(settings), mode)
         if plan.vault_map_path is not None and plan.vault_map is not None:
             if plan.vault_map_action == "update":
                 mode = stat.S_IMODE(plan.vault_map_path.stat().st_mode)
@@ -483,6 +533,12 @@ def _print_uninstall(plan: _UninstallPlan, stream: TextIO, *, dry_run: bool) -> 
                 print(f"  {verb} {plan.vault_map_path} (no vault remains)", file=stream)
             else:
                 print(f"  kept shared files: vaults remain ({', '.join(plan.remaining_vaults)})", file=stream)
+    if plan.hooks_settings_path is not None:
+        print(
+            f"  {'remove' if dry_run else 'removed'} {plan.hooks_removed} hook entries that run "
+            f"{plan.hooks_launcher} from {plan.hooks_settings_path}",
+            file=stream,
+        )
     for path in plan.delete_outside:
         print(f"  {verb} {path}", file=stream)
     for path in plan.kept_outside:

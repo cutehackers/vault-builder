@@ -17,6 +17,10 @@ Outside files live beneath the config folder: CLAUDE_CONFIG_DIR when set, else $
 The MCP settings file is $HOME/.claude.json, or <config folder>/.claude.json when CLAUDE_CONFIG_DIR
 is set. Manifest records locate them relative to $HOME, so the config folder must be inside $HOME.
 The server entry is rewritten only when it changes, so a second Vault usually leaves that file alone.
+
+--with-hooks also copies the hook launcher vault_hooks.py next to the router, records the vg path in
+<config folder>/vault-builder/vault-hooks.json, and adds the launcher hook entries to
+the Claude Code settings file named in hooks.py. Without --with-hooks install does not open that file.
 """
 from __future__ import annotations
 
@@ -39,6 +43,7 @@ from typing import TextIO
 from tools.vault_migration.versioning import version_label
 from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION, normalized_json_sha256
 
+from . import hooks as _hooks
 from .applying import apply_plan
 from .catalogs import load_catalog, sha256_file
 from .durability import fsync_directory
@@ -219,6 +224,20 @@ class _FilePlan:
 
 
 @dataclass
+class _HooksPlan:
+    """--with-hooks: the launcher copy, the recorded vg path and the Claude Code settings hook entries.
+
+    These files are not manifest records: uninstall finds the hook entries by the launcher path.
+    """
+
+    launcher: _FilePlan
+    config_path: Path
+    config_contents: bytes | None  # None when vg was not found or the file already has these bytes
+    settings_path: Path
+    settings_action: str  # create | update | unchanged
+
+
+@dataclass
 class _InstallPlan:
     target: Path
     name: str
@@ -235,6 +254,7 @@ class _InstallPlan:
     mcp_entry_action: str
     notes: list[str] = field(default_factory=list)
     restore_plan: MigrationPlan | None = None  # set for a Vault without a manifest
+    hooks: _HooksPlan | None = None  # set by --with-hooks
 
     @property
     def mcp_key(self) -> str:
@@ -246,6 +266,7 @@ def install(
     *,
     name: str | None = None,
     with_stenc: bool = False,
+    with_hooks: bool = False,
     dry_run: bool = False,
     builder_root: Path = ROOT,
     environ: Mapping[str, str] | None = None,
@@ -265,6 +286,7 @@ def install(
         Path(target),
         name=name,
         with_stenc=with_stenc,
+        with_hooks=with_hooks,
         builder_root=builder_root,
         environ=environment,
         python=python,
@@ -291,6 +313,7 @@ def _precheck(
     *,
     name: str | None,
     with_stenc: bool,
+    with_hooks: bool = False,
     builder_root: Path,
     environ: Mapping[str, str],
     python: str,
@@ -400,6 +423,8 @@ def _precheck(
         if item.action == "keep":
             notes.append(f"Kept existing file with unknown content (not replaced): {item.path}")
 
+    hooks_plan = _hooks_precheck(user, builder_root, environ, python, notes) if with_hooks else None
+
     restore_plan = None
     if state == "existing":
         _require_audit_clean(builder_root, target)
@@ -422,6 +447,49 @@ def _precheck(
         mcp_entry_action=entry_action,
         notes=notes,
         restore_plan=restore_plan,
+        hooks=hooks_plan,
+    )
+
+
+def _hooks_precheck(
+    user: UserPaths, builder_root: Path, environ: Mapping[str, str], python: str, notes: list[str]
+) -> _HooksPlan:
+    """Read the Claude Code settings file and plan the hook files. Only called with --with-hooks."""
+    launcher = _hooks.launcher_path(user.config_dir)
+    config_path = _hooks.hooks_config_path(user.config_dir)
+    settings_path = _hooks.settings_path(user.config_dir)
+    for path in (launcher, config_path, settings_path):
+        _require_regular_or_absent(path)
+    try:
+        settings = _hooks.load_settings(settings_path)
+    except _hooks.HooksError as exc:
+        raise InstallError(f"{exc} Fix it, then run install --with-hooks again.") from exc
+    _updated, changed = _hooks.add_launcher_hooks(settings, python, launcher)
+    if not settings_path.exists():
+        settings_action = "create"
+    else:
+        settings_action = "update" if changed else "unchanged"
+    asset = (builder_root / _hooks.LAUNCHER_ASSET).read_bytes()
+    launcher_plan = _file_plan(launcher, asset, 0o644, lambda current: current == asset)
+    if launcher_plan.action == "keep":
+        notes.append(f"Kept existing file with unknown content (not replaced): {launcher}")
+    vg = _hooks.find_vg(environ)
+    config_contents: bytes | None = None
+    if vg is None:
+        notes.append(
+            "vg was not found (VAULT_GRAPH_BIN or PATH), so no vg path was recorded. The hooks use recall.sh "
+            "and direct capture until vg is on PATH or install --with-hooks runs again with vg available."
+        )
+    else:
+        wanted = _hooks.hooks_config_bytes(vg)
+        if not config_path.exists() or config_path.read_bytes() != wanted:
+            config_contents = wanted
+    return _HooksPlan(
+        launcher=launcher_plan,
+        config_path=config_path,
+        config_contents=config_contents,
+        settings_path=settings_path,
+        settings_action=settings_action,
     )
 
 
@@ -976,7 +1044,26 @@ def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list
             "shared": True,
         }
     )
+    if plan.hooks is not None:
+        _apply_hooks(plan.hooks, plan.python, changes)
     return records
+
+
+def _apply_hooks(hooks_plan: _HooksPlan, python: str, changes: _OutsideChanges) -> None:
+    """Write the launcher and the vg record before the settings entries that run the launcher."""
+    launcher = hooks_plan.launcher
+    if launcher.action in {"create", "replace"}:
+        changes.write(launcher.path, launcher.contents, launcher.mode)
+    if hooks_plan.config_contents is not None:
+        changes.write(hooks_plan.config_path, hooks_plan.config_contents, 0o644)
+    if hooks_plan.settings_action == "unchanged":
+        return
+    # Re-read just before writing: Claude Code may have rewritten the file since the precheck.
+    path = hooks_plan.settings_path
+    settings, changed = _hooks.add_launcher_hooks(_hooks.load_settings(path), python, launcher.path)
+    if changed:
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+        changes.write(path, _hooks.settings_bytes(settings), mode)
 
 
 def _json_bytes(value: object, *, indent: int) -> bytes:
@@ -1016,6 +1103,14 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
         print(f"  {item.action} {item.path}", file=stream)
     print(f"  {plan.vault_map_action} vault {plan.name} in {plan.user.vault_map}", file=stream)
     print(f"  {plan.mcp_entry_action} mcpServers.{plan.mcp_key} in {plan.user.mcp_config}", file=stream)
+    if plan.hooks is not None:
+        print(f"  {plan.hooks.launcher.action} {plan.hooks.launcher.path}", file=stream)
+        if plan.hooks.config_contents is not None:
+            print(f"  write vg path to {plan.hooks.config_path}", file=stream)
+        print(
+            f"  {plan.hooks.settings_action} hooks SessionStart, PreCompact, SessionEnd in {plan.hooks.settings_path}",
+            file=stream,
+        )
     print(f"  write {plan.target / '.vault-builder' / 'manifest.json'} with outside records", file=stream)
     for note in plan.notes:
         print(f"Note: {note}", file=stream)
@@ -1042,6 +1137,12 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
     print(f"Router: {plan.user.router}", file=stream)
     print(f"Vault map: {plan.user.vault_map}", file=stream)
     print(f"Skill: {plan.user.skill}", file=stream)
+    if plan.hooks is not None:
+        print(
+            f"Hooks: SessionStart, PreCompact, SessionEnd ({plan.hooks.settings_action}) in "
+            f"{plan.hooks.settings_path}, launcher {plan.hooks.launcher.path}",
+            file=stream,
+        )
     for note in plan.notes:
         print(f"Note: {note}", file=stream)
     print(
