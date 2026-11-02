@@ -43,12 +43,15 @@ def materialize_patch(target_path: Path, patch: dict[str, Any]) -> dict[str, Any
     """Return an upsert-page draft whose frontmatter and body apply the patch edits."""
     if not target_path.exists():
         raise PatchTargetMissing(f"patch-page target does not exist: {target_path}")
-    edits = patch.get("edits")
-    if not isinstance(edits, list) or not edits:
-        raise ValueError("Patch draft edits must be a non-empty list.")
+    edits = patch.get("edits", [])
+    if not isinstance(edits, list):
+        raise ValueError("Patch draft edits must be a list when present.")
     frontmatter_updates = patch.get("frontmatter", {})
     if not isinstance(frontmatter_updates, dict):
         raise ValueError("Patch draft frontmatter must be an object when present.")
+    # A frontmatter-only patch (for example retiring a page) keeps the current body as it is.
+    if not edits and not frontmatter_updates:
+        raise ValueError("Patch draft needs at least one of edits or frontmatter changes.")
 
     existing = parse_page(target_path)
     frontmatter = dict(existing.frontmatter or {})

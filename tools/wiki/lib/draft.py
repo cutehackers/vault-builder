@@ -213,7 +213,7 @@ def _validate_single_draft_shape(draft: dict[str, Any]) -> None:
     if not isinstance(remove_claims, list) or not all(isinstance(claim, str) for claim in remove_claims):
         raise ValueError("Draft remove_claims must be a list of claim texts when present.")
     if draft.get("operation") == "patch-page":
-        if not isinstance(draft.get("edits"), list):
+        if "edits" in draft and not isinstance(draft["edits"], list):
             raise ValueError("Patch draft edits must be a list.")
         if "body" in draft:
             raise ValueError("Patch draft must not include body; use edits.")
