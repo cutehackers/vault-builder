@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import sys
 from datetime import date
@@ -33,7 +35,15 @@ from tools.wiki.lib.merge import scan_merge_candidates
 from tools.wiki.lib.metrics import build_maintenance_metrics
 from tools.wiki.lib.publish import STDOUT, publish_draft
 from tools.wiki.lib.paths import resolve_report_path
-from tools.wiki.lib.review import create_review_item, list_review_items, render_review_list, resolve_review_item
+from tools.wiki.lib.memory_proposal import REVIEW_RESULT_FORMAT, accept as accept_memory_proposal, propose as propose_memory
+from tools.wiki.lib.review import (
+    MEMORY_PROPOSAL_TYPE,
+    create_review_item,
+    list_review_items,
+    read_review_item,
+    render_review_list,
+    resolve_review_item,
+)
 from tools.wiki.lib.schema import Issue, validate_schema
 from tools.wiki.lib.source_registry import (
     build_source_registry,
@@ -135,6 +145,13 @@ def main(argv: list[str] | None = None) -> int:
     review_create.add_argument("--related", action="append", default=[])
     review_create.add_argument("--evidence", action="append", default=[])
 
+    review_propose = review_subcommands.add_parser("propose")
+    review_propose.add_argument("--draft", required=True)
+    review_propose.add_argument("--summary", required=True)
+    review_propose.add_argument("--evidence", action="append", default=[])
+    review_propose.add_argument("--related", action="append", default=[])
+    review_propose.add_argument("--json", action="store_true")
+
     review_list = review_subcommands.add_parser("list")
     review_list.add_argument("--status")
 
@@ -142,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     review_resolve.add_argument("path")
     review_resolve.add_argument("--status", required=True)
     review_resolve.add_argument("--resolution", required=True)
+    review_resolve.add_argument("--json", action="store_true")
 
     merge_cmd = subcommands.add_parser("merge")
     merge_subcommands = merge_cmd.add_subparsers(dest="merge_command", required=True)
@@ -518,13 +536,93 @@ def _handle_review(args: argparse.Namespace) -> int:
             print(render_review_list(ROOT, items), end="")
             return 0
 
+        if args.review_command == "propose":
+            return _propose_memory(args)
+
         if args.review_command == "resolve":
-            return _resolve_review_with_gate(Path(args.path), status=args.status, resolution=args.resolution)
+            return _resolve_review(args)
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     return 2
+
+
+def _propose_memory(args: argparse.Namespace) -> int:
+    """Print a memory proposal result as text, or with --json as one vault-review-result/v1 object."""
+    draft_path = Path(args.draft)
+    if not draft_path.is_absolute():
+        draft_path = ROOT / draft_path
+    result = propose_memory(ROOT, draft_path, args.summary, evidence=args.evidence, related=args.related)
+    if args.json:
+        for message in result.messages:
+            print(message, file=sys.stderr)
+        print(json.dumps(result.to_json(), ensure_ascii=False))
+    elif result.review_path is not None:
+        print(f"Review item created: {result.review_path}")
+        print(f"Draft copy: {result.draft_path}")
+    else:
+        for message in result.messages:
+            print(message, file=sys.stderr)
+    return result.exit_code
+
+
+def _resolve_review(args: argparse.Namespace) -> int:
+    """Accepting a memory proposal publishes its draft. Every other resolution keeps the lint-gated path."""
+    review_path = Path(args.path)
+    if not review_path.is_absolute():
+        review_path = ROOT / review_path
+    if args.status == "accepted" and _is_memory_proposal(review_path):
+        result = accept_memory_proposal(ROOT, review_path, args.resolution)
+        for stream, text in result.lines:
+            print(text, file=sys.stdout if stream == STDOUT and not args.json else sys.stderr)
+        if args.json:
+            for message in result.messages:
+                print(message, file=sys.stderr)
+            print(json.dumps(result.to_json(), ensure_ascii=False))
+        elif result.exit_code == 0:
+            print(f"Review item resolved: {result.review_path}")
+        else:
+            for message in result.messages:
+                print(message, file=sys.stderr)
+        return result.exit_code
+    if not args.json:
+        return _resolve_review_with_gate(review_path, status=args.status, resolution=args.resolution)
+
+    stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout):
+            code = _resolve_review_with_gate(review_path, status=args.status, resolution=args.resolution)
+        messages: list[str] = []
+    except (OSError, ValueError) as exc:
+        code, messages = 1, [str(exc)]
+    print(stdout.getvalue(), end="", file=sys.stderr)
+    try:
+        item = read_review_item(ROOT, review_path)
+    except (OSError, ValueError):
+        item = None
+    payload = {
+        "format": REVIEW_RESULT_FORMAT,
+        "status": "resolved" if code == 0 else "rejected",
+        "review_status": item.status if item else None,
+        "reason": None if code == 0 else "review-invalid",
+        "review_id": item.review_id if item else None,
+        "review_path": display_path(review_path, ROOT),
+        "draft_path": None,
+        "target_path": None,
+        "written_paths": [],
+        "messages": messages,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    return code
+
+
+def _is_memory_proposal(review_path: Path) -> bool:
+    """An unreadable item is left to the lint-gated path, which reports it as before."""
+    try:
+        return read_review_item(ROOT, review_path).review_type == MEMORY_PROPOSAL_TYPE
+    except (OSError, ValueError):
+        return False
 
 
 def _resolve_review_with_gate(review_path: Path, status: str, resolution: str) -> int:
