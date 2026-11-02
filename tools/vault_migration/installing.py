@@ -64,6 +64,7 @@ _CATALOG_PATH = "tools/vault_migration/contracts/v4.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
 _REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
 _VAULT_MAP_VERSION = 2  # the version install writes
+_DEFAULT_ROLE = "personal"  # role of a new vault entry when install has no --role
 _VAULT_MAP_READ_VERSIONS = (1, 2)
 
 
@@ -250,6 +251,7 @@ class _InstallPlan:
     vault_map: dict[str, object]
     vault_map_action: str
     vault_map_write: bool
+    role: str
     mcp_entry: dict[str, object]
     mcp_entry_action: str
     notes: list[str] = field(default_factory=list)
@@ -267,6 +269,7 @@ def install(
     name: str | None = None,
     with_stenc: bool = False,
     with_hooks: bool = False,
+    role: str | None = None,
     dry_run: bool = False,
     builder_root: Path = ROOT,
     environ: Mapping[str, str] | None = None,
@@ -287,6 +290,7 @@ def install(
         name=name,
         with_stenc=with_stenc,
         with_hooks=with_hooks,
+        role=role,
         builder_root=builder_root,
         environ=environment,
         python=python,
@@ -314,12 +318,18 @@ def _precheck(
     name: str | None,
     with_stenc: bool,
     with_hooks: bool = False,
+    role: str | None = None,
     builder_root: Path,
     environ: Mapping[str, str],
     python: str,
 ) -> _InstallPlan:
+    """role None keeps an existing vault's role and gives a new vault entry the role personal."""
     if not os.path.isabs(python):
         raise InstallError(f"Interpreter path must be absolute: {python}")
+    if role is not None:
+        role = role.strip()
+        if not role:
+            raise InstallError("--role must be a non-empty string, for example personal, project, or team.")
     user = resolve_user_paths(environ)
     target = _absolute_target(target)
     state, empty_dir = _target_state(target, builder_root)
@@ -392,7 +402,8 @@ def _precheck(
         _require_one_vault_name(target, vault_name, vaults, user)
     existing_vault = vaults.get(vault_name)
     if existing_vault is None:
-        vaults[vault_name] = {"path": str(target), "role": "personal"}
+        vault_role = role or _DEFAULT_ROLE
+        vaults[vault_name] = {"path": str(target), "role": vault_role}
         map_action = "add"
     else:
         existing_path = existing_vault.get("path") if isinstance(existing_vault, dict) else None
@@ -400,10 +411,16 @@ def _precheck(
             raise InstallError(
                 f"Vault map {user.vault_map}: vault {vault_name} has no path. Fix it or choose --name."
             )
+        old_role = existing_vault.get("role")
+        vault_role = role or (old_role if isinstance(old_role, str) and old_role.strip() else _DEFAULT_ROLE)
         if _same_path(Path(existing_path).expanduser(), target):
-            map_action = "unchanged"
+            if old_role == vault_role:
+                map_action = "unchanged"
+            else:
+                existing_vault["role"] = vault_role
+                map_action = "update"
         elif not Path(existing_path).expanduser().exists():
-            vaults[vault_name] = {"path": str(target), "role": "personal"}
+            vaults[vault_name] = {"path": str(target), "role": vault_role}
             map_action = "replace"
             notes.append(f"Replacing vault map entry {vault_name}: its vault no longer exists ({existing_path}).")
         else:
@@ -443,6 +460,7 @@ def _precheck(
         vault_map=vault_map,
         vault_map_action=map_action,
         vault_map_write=map_upgrade or map_action != "unchanged" or not user.vault_map.exists(),
+        role=vault_role,
         mcp_entry=entry,
         mcp_entry_action=entry_action,
         notes=notes,
@@ -1087,6 +1105,7 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
     print(f"Dry run: install {kind} {plan.target}", file=stream)
     print(version_label(), file=stream)
     print(f"Vault name: {plan.name}", file=stream)
+    print(f"Vault role: {plan.role}", file=stream)
     print(f"Interpreter: {plan.python}", file=stream)
     if plan.new_vault:
         print(f"  create vault {plan.target} (assembled in a temporary sibling folder, then renamed)", file=stream)

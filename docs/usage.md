@@ -716,7 +716,7 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 
 저장소가 어느 project 항목에 해당하는지는 17.3의 project 찾기 순서(root 경로, remote URL, 폴더 이름)로 정합니다. `link` 명령으로 새 항목을 만들면 project id는 기본으로 저장소 root 폴더 이름입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다.
 
-저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 합니다. vault 역할(17.2)을 바꿀 때만 이 파일을 직접 고칩니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
+저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
 
 ### 17.2 vault 역할
 
@@ -728,7 +728,7 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 | `team` | 팀이 합의한 내용. 기본 branch에 직접 commit하지 않고 PR로만 반영합니다. |
 | `project` | 그 저장소의 결정과 이력 |
 
-install은 새로 등록하는 vault를 역할 `personal` 값으로 연결 설정에 더합니다. 팀 vault나 project vault라면 install 뒤에 연결 설정에서 `role` 값을 직접 바꿉니다.
+install은 새로 등록하는 vault를 `--role` 옵션 값으로 연결 설정에 더합니다. 옵션이 없으면 역할은 `personal`입니다. 이미 등록된 vault는 `--role` 옵션을 줄 때만 역할이 바뀝니다. 등록된 vault의 역할은 `python3 tools/vault_migration/cli.py set-role --vault <이름> --role <역할>` 명령으로 바꿉니다.
 
 ### 17.3 저장소 연결하기
 
@@ -934,12 +934,13 @@ Claude Code는 대화 파일(transcript)을 기본 30일 뒤에 지웁니다. `s
 
 #### project vault 연결하기
 
-수집 명령은 저장소에 역할 `project` vault가 정확히 하나 연결되어 있어야 파일을 씁니다. install은 새 vault를 역할 `personal` 값으로 등록하므로(17.2), project vault는 아래 순서로 따로 만들어 연결합니다.
+수집 명령은 저장소에 역할 `project` vault가 정확히 하나 연결되어 있어야 파일을 씁니다. install은 `--role` 옵션이 없으면 새 vault를 역할 `personal` 값으로 등록하므로(17.2), project vault는 아래 순서로 만들어 연결합니다.
 
-1. builder checkout에서 project vault를 만듭니다: `python3 tools/vault_migration/cli.py install /path/to/app-vault --name app`
-2. 연결 설정(17.1)에서 그 vault 항목의 `role` 값을 `project`로 바꿉니다.
-3. 저장소를 그 vault에 연결합니다: `python3 tools/vault_migration/cli.py link app --repo /path/to/my-app`
-4. `python3 tools/vault_migration/cli.py list --repo /path/to/my-app` 명령으로 연결을 확인합니다.
+1. builder checkout에서 project vault를 만듭니다: `python3 tools/vault_migration/cli.py install /path/to/app-vault --name app --role project`
+2. 저장소를 그 vault에 연결합니다: `python3 tools/vault_migration/cli.py link app --repo /path/to/my-app`
+3. `python3 tools/vault_migration/cli.py list --repo /path/to/my-app` 명령으로 연결을 확인합니다.
+
+이미 `personal` 역할로 등록한 vault는 `python3 tools/vault_migration/cli.py set-role --vault app --role project` 명령으로 역할을 바꿉니다. project vault가 없는 저장소를 `link`하면 명령은 세션 원문이 저장되지 않는다는 경고 한 줄을 출력합니다.
 
 수집 명령은 대상 vault의 manifest contract가 3 이상일 때만 씁니다. 지금 builder로 새로 install한 vault는 contract 3입니다. 이전 builder로 만든 vault라면 1.1절의 audit과 apply를 사람이 먼저 실행합니다. agent는 apply를 실행하지 않습니다.
 
