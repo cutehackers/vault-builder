@@ -191,9 +191,31 @@ wiki_tests=(
   tests/test_wiki_quality_baseline.py
   tests/test_wiki_tools.py
 )
+# Every other tests/test_*.py file also runs in the gate copy, so new test files need no
+# change here.
+more_wiki_tests=()
+for test_file in tests/test_*.py; do
+  case "$test_file" in
+    tests/test_wiki_quality_baseline.py|tests/test_wiki_tools.py) ;;
+    *)
+      if [ -f "$test_file" ]; then
+        more_wiki_tests+=("$test_file")
+      fi
+      ;;
+  esac
+done
+# Builder tests run from the vault root, and only where the builder ships them.
 if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then
   wiki_tests+=(builder_tests/test_vault_migration.py)
 fi
+for test_file in \
+  builder_tests/test_map_settings.py \
+  builder_tests/test_hooks_install.py \
+  builder_tests/test_vault_hooks_launcher.py; do
+  if [ -f "$test_file" ]; then
+    wiki_tests+=("$test_file")
+  fi
+done
 rsync -a --exclude ".git" --exclude "__pycache__" "$ROOT/" "$gate_root/"
 cd "$gate_root"
 
@@ -213,6 +235,10 @@ if [ "$unit_tests_cached" -eq 1 ]; then
 else
   run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:2}" \
     "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"
+  if [ "${#more_wiki_tests[@]}" -gt 0 ]; then
+    run "$PYTHON_BIN -m unittest ${more_wiki_tests[*]}" \
+      "$PYTHON_BIN" -m unittest "${more_wiki_tests[@]}"
+  fi
   if [ "${#wiki_tests[@]}" -gt 2 ]; then
     run "$PYTHON_BIN -m unittest ${wiki_tests[*]:2}" \
       run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"
