@@ -5708,11 +5708,21 @@ class MemoryReviewRegressionTest(unittest.TestCase):
         self.assertEqual([], short)
 
 
+def _ignore_session_transcripts(sessions_root: Path):
+    def ignore(folder: str, names: list[str]) -> list[str]:
+        if not Path(folder).is_relative_to(sessions_root):
+            return []
+        return [name for name in names if name.endswith(".md")]
+
+    return ignore
+
+
 def _project_fixture_vault(root: Path) -> None:
     """Copy this repository's lint-clean wiki so lint, maps and metrics run on a full vault."""
     repo = Path(__file__).resolve().parents[1]
     shutil.copytree(repo / "wiki", root / "wiki")
-    shutil.copytree(repo / "raw", root / "raw")
+    # Leave out session transcripts, so tests that count sessions also pass in a vault that has captured some.
+    shutil.copytree(repo / "raw", root / "raw", ignore=_ignore_session_transcripts(repo / "raw" / "sessions"))
     (root / "tools" / "wiki").mkdir(parents=True)
     shutil.copy2(repo / "tools" / "wiki" / "metrics-policy.json", root / "tools" / "wiki" / "metrics-policy.json")
     for folder in ("drafts", "reports", "review"):
