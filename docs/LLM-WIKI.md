@@ -290,7 +290,7 @@ A wiki operation is not complete until these conditions are satisfied:
 - A report is written under `scratch/reports/` for non-trivial ingest, lint, audit, or repair work.
 - `tools/wiki` validation passes before claiming completion.
 - `scripts/release_gate.sh` passes before claiming repo-level readiness.
-- The gate skips the tool unit tests when every file outside `wiki/`, `raw/` and `scratch/` (in the builder repository, outside `raw/` and `scratch/reports/`) matches the fingerprint of the last passing run (`llm-wiki-gate-tests.cache` in the Git directory, so the vault's own files never change). Baseline tests, lint, health, maps and metrics always run. `WIKI_GATE_FULL=1` forces the tool tests.
+- The gate has three tiers, chosen with `scripts/release_gate.sh --tier check|unit|full`. `check` runs lint, maps and metrics checks, `sessions git-check` and the whitespace check without tests. `unit` adds every test not marked `full_tier_only`. `full` adds every test. Without `--tier` a vault runs `check` and the builder repository runs `unit`. The first output line names the tier, for example `[release-gate] tier: check`.
 
 Stenc validation is not part of the ordinary completion gate. Run `WIKI_ENABLE_STENC=1 scripts/release_gate.sh` only when the user explicitly chooses the Stenc workflow.
 
@@ -537,19 +537,26 @@ For architecture or wiki-maintenance work, done means:
 scripts/release_gate.sh
 ```
 
-The release gate runs wiki tests, lint, health, map freshness, and metrics in a
-temporary repo copy. When builder migration tests exist, it runs them from the
-builder checkout so their historical Git fixtures remain available, then checks
-the working tree diff for whitespace issues:
+The release gate runs every step from the repository root and writes no files.
+In a Git work tree it fails with "Release gate changed tracked output" when a
+step changes a tracked file or adds an untracked file that is not ignored. The
+`check` tier, the default in a vault, runs:
 
 ```bash
-python3 -m unittest tests/test_wiki_quality_baseline.py tests/test_wiki_tools.py
-python3 -m unittest builder_tests/test_vault_migration.py # builder checkout only
-python3 tools/wiki/cli.py lint --report
-python3 tools/wiki/cli.py health
-python3 tools/wiki/cli.py maps build --check --report
-python3 tools/wiki/cli.py metrics --check --report
+python3 tools/wiki/cli.py lint
+python3 tools/wiki/cli.py maps build --check
+python3 tools/wiki/cli.py metrics --check
+python3 tools/wiki/cli.py sessions git-check
 git diff --check
+```
+
+The `unit` tier, the default in the builder repository, adds the tests with
+`WIKI_GATE_TIER=unit`, which skips tests marked `full_tier_only`. The `full`
+tier runs the same commands with `WIKI_GATE_TIER=full` and skips nothing:
+
+```bash
+python3 -m unittest discover -s tests -t . -p 'test_*.py'
+python3 -m unittest discover -s builder_tests -t . -p 'test_*.py' # builder checkout only
 ```
 
 Stenc validation/render checks are optional and run only when explicitly enabled by the user:
@@ -560,6 +567,12 @@ WIKI_ENABLE_STENC=1 scripts/release_gate.sh
 
 Do not require Stenc validation for ordinary LLM Wiki documentation management.
 
-The same gate is wired into `.github/workflows/release-gate.yml`.
+`.github/workflows/qa.yml` runs `scripts/release_gate.sh` without `--tier` on
+every pull request and on pushes to `main`, so a vault runs `check` and the
+builder runs `unit`. The builder repository also has
+`.github/workflows/qa-full.yml`, which runs `--tier full` on Python 3.10 and
+3.14 for `v*` tags, manual runs, and pull requests that change install,
+migration, gate, contract or workflow files. Vaults do not receive
+`qa-full.yml`.
 
 No completion claim should be made without fresh verification output.

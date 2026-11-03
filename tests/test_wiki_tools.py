@@ -34,6 +34,8 @@ from tools.wiki.lib.maps import MAP_DEFINITIONS, build_navigation_maps
 from tools.wiki.lib.schema import validate_schema
 from tools.wiki.lib.vault_manifest import validate_v1_manifest
 
+# Tests that run init-vault.sh or a release gate in another vault run only when WIKI_GATE_TIER is not "unit".
+full_tier_only = unittest.skipIf(os.environ.get("WIKI_GATE_TIER") == "unit", "full tier: runs init-vault.sh or a release gate in another vault")
 
 # init-vault.sh runs install, which writes the Claude Code config folder and ~/.claude.json.
 # Every test in this module runs with a temporary HOME so the real ones are never touched.
@@ -392,18 +394,21 @@ class WikiAuthorityContractTest(unittest.TestCase):
                 validate_v1_manifest(manifest)
 
     def test_lint_rejects_complete_v1_manifest_corruption_matrix(self):
-        for name, manifest in _invalid_v1_manifests().items():
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                _minimal_vault(root)
-                path = root / ".vault-builder" / "manifest.json"
-                path.parent.mkdir(parents=True)
-                path.write_text(json.dumps(manifest) + "\n")
+        manifests = _invalid_v1_manifests()
+        self.assertEqual(21, len(manifests))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            path = root / ".vault-builder" / "manifest.json"
+            path.parent.mkdir(parents=True)
+            for name, manifest in manifests.items():
+                with self.subTest(name=name):
+                    path.write_text(json.dumps(manifest) + "\n")
 
-                self.assertIn(
-                    "invalid-vault-builder-manifest",
-                    {issue.code for issue in lint_repo(root).issues},
-                )
+                    self.assertIn(
+                        "invalid-vault-builder-manifest",
+                        {issue.code for issue in lint_repo(root).issues},
+                    )
 
     def test_validate_page_rejects_complete_v1_manifest_corruption_matrix(self):
         from tools.wiki import cli
@@ -1195,27 +1200,38 @@ class WikiToolStructuralTest(unittest.TestCase):
         self.assertEqual([], state.ranges)
 
 
+_REPO_COPY_IGNORE = shutil.ignore_patterns(".git", ".worktrees", "__pycache__", ".DS_Store")
+
+
 class WikiToolCliTest(unittest.TestCase):
-    def setUp(self):
-        # Several tests publish into this repository and restore pages, index and log themselves.
-        # Publishing also rebuilds the generated maps, so restore those here.
-        # Project summary pages under wiki/maps/projects/ are generated too, so restore the whole tree.
-        maps_root = Path(__file__).resolve().parents[1] / "wiki" / "maps"
-        project_maps_root = maps_root / "projects"
-        project_maps_existed = project_maps_root.exists()
-        original_maps = {path: path.read_bytes() for path in maps_root.rglob("*.md")}
+    # Tests that publish, ingest or write reports run on a temporary copy of this repository,
+    # so running the suite from the repository root leaves the working tree unchanged.
+    # The copy is made once per class. Each test that asks for it gets fresh raw/, scratch/ and wiki/ folders.
+    _repo_copy_dir: tempfile.TemporaryDirectory | None = None
 
-        def restore_maps() -> None:
-            for path in maps_root.rglob("*.md"):
-                if path not in original_maps:
-                    path.unlink()
-            for path, contents in original_maps.items():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(contents)
-            if not project_maps_existed and project_maps_root.is_dir() and not any(project_maps_root.iterdir()):
-                project_maps_root.rmdir()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._repo_copy_dir = tempfile.TemporaryDirectory()
+        repo = Path(__file__).resolve().parents[1]
+        shutil.copytree(repo, Path(cls._repo_copy_dir.name) / "vault", ignore=_REPO_COPY_IGNORE)
 
-        self.addCleanup(restore_maps)
+    @classmethod
+    def tearDownClass(cls):
+        if cls._repo_copy_dir is not None:
+            cls._repo_copy_dir.cleanup()
+            cls._repo_copy_dir = None
+        super().tearDownClass()
+
+    def _repo_copy(self) -> Path:
+        """The class copy of this repository, with raw/, scratch/ and wiki/ reset from the repository."""
+        repo = Path(__file__).resolve().parents[1]
+        root = (Path(self._repo_copy_dir.name) / "vault").resolve()
+        for folder in ("raw", "scratch", "wiki"):
+            shutil.rmtree(root / folder, ignore_errors=True)
+            if (repo / folder).exists():
+                shutil.copytree(repo / folder, root / folder, ignore=_REPO_COPY_IGNORE)
+        return root
 
     def test_validate_page_cli_accepts_valid_page(self):
         root = Path(__file__).resolve().parents[1]
@@ -1318,7 +1334,7 @@ class WikiToolCliTest(unittest.TestCase):
         self.assertIn("source-drift", stdout.getvalue())
 
     def test_lint_cli_accepts_current_vault_and_writes_report(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "lint-cli-explicit-test.md"
         original_report = report_path.read_text() if report_path.exists() else None
 
@@ -1392,7 +1408,7 @@ class WikiToolCliTest(unittest.TestCase):
                 )
 
     def test_lint_cli_default_report_path_is_dated(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "lint.md"
         dated_report = root / "scratch" / "reports" / f"{date.today().isoformat()}-lint.md"
         original_report = dated_report.read_text() if dated_report.exists() else None
@@ -1419,7 +1435,7 @@ class WikiToolCliTest(unittest.TestCase):
                 dated_report.write_text(original_report)
 
     def test_health_cli_runs_lint_and_writes_default_report(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         dated_report = root / "scratch" / "reports" / f"{date.today().isoformat()}-lint.md"
         original_report = dated_report.read_text() if dated_report.exists() else None
 
@@ -1444,7 +1460,7 @@ class WikiToolCliTest(unittest.TestCase):
                 dated_report.write_text(original_report)
 
     def test_hash_source_cli_prints_sha256(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         source_path = root / "raw" / "sources" / "hash-source-test.tmp"
         source_path.write_text("stable source\n")
         expected = hashlib.sha256(b"stable source\n").hexdigest()
@@ -1504,7 +1520,7 @@ class WikiToolCliTest(unittest.TestCase):
         self.assertIn("source-drift", [issue.code for issue in result.issues])
 
     def test_apply_draft_cli_rejects_write_without_unsafe_flag(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "draft-application-test.md"
         draft_path = root / "scratch" / "drafts" / "draft-application-test.json"
         report_path = root / "scratch" / "reports" / "draft-application-test.md"
@@ -1576,7 +1592,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_publish_draft_cli_applies_valid_draft_then_lints(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "publish-draft-test.md"
         draft_path = root / "scratch" / "drafts" / "publish-draft-test.json"
         publish_report = root / "scratch" / "reports" / "publish-draft-test.md"
@@ -1656,7 +1672,7 @@ class WikiToolCliTest(unittest.TestCase):
                 lint_report.write_text(original_lint_report)
 
     def test_publish_draft_cli_stops_before_mutation_on_invalid_draft(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "publish-invalid-test.md"
         draft_path = root / "scratch" / "drafts" / "publish-invalid-test.json"
         draft = {
@@ -1689,7 +1705,7 @@ class WikiToolCliTest(unittest.TestCase):
             draft_path.unlink(missing_ok=True)
 
     def test_publish_draft_cli_rejects_invalid_log_event_before_mutation(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "publish-invalid-log-event.md"
         draft_path = root / "scratch" / "drafts" / "publish-invalid-log-event.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -1833,7 +1849,7 @@ class WikiToolCliTest(unittest.TestCase):
                 apply_draft(root, draft_path, dry_run=True)
 
     def test_publish_draft_cli_rejects_claim_level_page_without_claim_evidence_table(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "publish-claim-without-table.md"
         draft_path = root / "scratch" / "drafts" / "publish-claim-without-table.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -1896,7 +1912,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_publish_draft_cli_rolls_back_when_lint_fails_after_apply(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "publish-rollback-test.md"
         draft_path = root / "scratch" / "drafts" / "publish-rollback-test.json"
         publish_report = root / "scratch" / "reports" / "publish-rollback-test.md"
@@ -1974,7 +1990,7 @@ class WikiToolCliTest(unittest.TestCase):
                 lint_report.write_text(original_lint_report)
 
     def test_publish_batch_cli_applies_multiple_pages_and_writes_manifest_report(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         first_page = root / "wiki" / "concepts" / "batch-first.md"
         second_page = root / "wiki" / "workflows" / "batch-second.md"
         draft_path = root / "scratch" / "drafts" / "publish-batch-test.json"
@@ -2057,7 +2073,7 @@ class WikiToolCliTest(unittest.TestCase):
                 lint_report.write_text(original_lint_report)
 
     def test_publish_batch_cli_dry_run_validates_without_writing_pages(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "batch-dry-run.md"
         draft_path = root / "scratch" / "drafts" / "publish-batch-dry-run.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -2108,7 +2124,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_publish_batch_cli_stops_before_mutation_when_any_page_is_invalid(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         valid_page = root / "wiki" / "concepts" / "batch-valid-before-invalid.md"
         invalid_page = root / "wiki" / "concepts" / "batch-invalid.md"
         draft_path = root / "scratch" / "drafts" / "publish-batch-invalid.json"
@@ -2159,7 +2175,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_publish_batch_cli_rolls_back_all_pages_when_post_lint_fails(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         first_page = root / "wiki" / "concepts" / "batch-rollback-first.md"
         second_page = root / "wiki" / "concepts" / "batch-rollback-second.md"
         draft_path = root / "scratch" / "drafts" / "publish-batch-rollback.json"
@@ -2219,7 +2235,7 @@ class WikiToolCliTest(unittest.TestCase):
                 lint_report.write_text(original_lint_report)
 
     def test_publish_batch_cli_rejects_page_level_logs_before_mutation(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "batch-page-log.md"
         draft_path = root / "scratch" / "drafts" / "publish-batch-page-log.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -2264,6 +2280,7 @@ class WikiToolCliTest(unittest.TestCase):
             (root / "wiki" / "log.md").write_text(original_log)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_init_vault_creates_usable_environment(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2305,7 +2322,7 @@ class WikiToolCliTest(unittest.TestCase):
             expected_files = [
                 target / "AGENTS.md",
                 target / "README-kr.md",
-                target / ".github" / "workflows" / "release-gate.yml",
+                target / ".github" / "workflows" / "qa.yml",
                 target / "scripts" / "release_gate.sh",
                 target / "docs" / "LLM-WIKI.md",
                 target / "docs" / "usage.md",
@@ -2334,8 +2351,8 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
-            self.assertEqual(4, manifest["schema_version"])
-            self.assertEqual(4, manifest["contract_version"])
+            self.assertEqual(5, manifest["schema_version"])
+            self.assertEqual(5, manifest["contract_version"])
             self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
             for relative in (
                 "tools/wiki/lib/session_archive.py",
@@ -2358,6 +2375,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertEqual(0, stenc_optional_test_result.returncode, stenc_optional_test_result.stdout + stenc_optional_test_result.stderr)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_init_vault_uses_vault_as_default_target_directory(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2383,7 +2401,11 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn(f"cd {resolved_target}", init_result.stdout)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
-    def test_generated_release_gate_rejects_complete_v1_manifest_corruption_matrix(self):
+    @full_tier_only
+    def test_generated_release_gate_rejects_a_manifest_corruption(self):
+        # The 21 corruption cases are checked in process by
+        # WikiAuthorityContractTest.test_lint_rejects_complete_v1_manifest_corruption_matrix.
+        # This test runs the generated vault's gate once to show the lint failure stops the gate.
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "new-wiki"
@@ -2399,28 +2421,20 @@ class WikiToolCliTest(unittest.TestCase):
                 init_result.returncode,
                 init_result.stdout + init_result.stderr,
             )
-            manifest_path = target / ".vault-builder" / "manifest.json"
-            for name, manifest in _invalid_v1_manifests().items():
-                with self.subTest(name=name):
-                    manifest_path.write_text(json.dumps(manifest) + "\n")
-                    gate = subprocess.run(
-                        ["scripts/release_gate.sh"],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        check=False,
-                    )
-                    self.assertNotEqual(
-                        0,
-                        gate.returncode,
-                        gate.stdout + gate.stderr,
-                    )
-                    self.assertIn(
-                        "invalid-vault-builder-manifest",
-                        gate.stdout + gate.stderr,
-                    )
+            manifest = _invalid_v1_manifests()["unknown-top-level"]
+            (target / ".vault-builder" / "manifest.json").write_text(json.dumps(manifest) + "\n")
+            gate = subprocess.run(
+                ["scripts/release_gate.sh"],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(0, gate.returncode, gate.stdout + gate.stderr)
+            self.assertIn("invalid-vault-builder-manifest", gate.stdout + gate.stderr)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_init_vault_can_include_stenc_when_requested(self):
         root = Path(__file__).resolve().parents[1]
         if not _has_stenc_bundle(root):
@@ -2442,6 +2456,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertTrue((target / "tools" / "stenc" / "check-rendered-pages.js").exists())
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_init_vault_with_stenc_fails_when_bundle_is_unavailable(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2481,6 +2496,7 @@ class WikiToolCliTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_bootstrap_script_initializes_from_archive_url(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2523,6 +2539,7 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertIn("Ready:", bootstrap_result.stdout)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_bootstrap_skips_python_below_3_10(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2643,6 +2660,7 @@ PY
             self.assertIn("cd vault", bootstrap_result.stdout)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_bootstrap_script_can_include_stenc_from_archive_url(self):
         root = Path(__file__).resolve().parents[1]
         if not _has_stenc_bundle(root):
@@ -2733,6 +2751,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertEqual("", (tmp / "release-gate-env.txt").read_text())
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_generated_release_gate_ignores_parent_git_worktree(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2774,6 +2793,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertNotIn("outside.txt", gate_result.stderr)
 
     @unittest.skipUnless(BUILDER_CREATION_TOOLS_AVAILABLE, "Builder-only creation tooling is absent.")
+    @full_tier_only
     def test_release_gate_does_not_require_stenc_by_default(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2810,7 +2830,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertIn("Stenc checks skipped", gate_result.stdout)
 
     def test_ingest_source_cli_registers_raw_source(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         raw_source = root / "raw" / "sources" / "ingest-source-test.md"
         source_page = root / "wiki" / "sources" / "ingest-source-test.md"
         report_path = root / "scratch" / "reports" / "ingest-source-test.md"
@@ -3076,7 +3096,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertIn("Collision: 1", report_path.read_text())
 
     def test_source_registry_cli_writes_report_for_unregistered_raw_file(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         raw_source = root / "raw" / "sources" / "source-registry-cli-test.md"
         report_path = root / "scratch" / "reports" / "source-registry-cli-test.md"
         original_report = report_path.read_text() if report_path.exists() else None
@@ -3111,7 +3131,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report_path.write_text(original_report)
 
     def test_bulk_ingest_cli_registers_multiple_sources(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         first = root / "raw" / "sources" / "bulk-cli-first.md"
         second = root / "raw" / "sources" / "bulk-cli-second.md"
         first_page = root / "wiki" / "sources" / "bulk-cli-first.md"
@@ -3179,7 +3199,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertIn("Total: 0", report)
 
     def test_review_create_cli_writes_pending_review_item(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         source_path = root / "raw" / "sources" / "review-create-source.md"
         source_path.write_text("# Review Create Source\n")
 
@@ -3222,7 +3242,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 path.unlink(missing_ok=True)
 
     def test_review_resolve_cli_updates_item_and_appends_log(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         review_path = root / "scratch" / "review" / "2026-05-30-review-resolve-test.md"
         original_log = (root / "wiki" / "log.md").read_text()
         review_path.write_text(
@@ -3289,7 +3309,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_review_resolve_cli_rolls_back_when_log_lint_fails(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         review_path = root / "scratch" / "review" / "2026-05-30-review-resolve-rollback-test.md"
         original_log = (root / "wiki" / "log.md").read_text()
         reports_before = set((root / "scratch" / "reports").glob("*"))
@@ -3351,7 +3371,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report.unlink(missing_ok=True)
 
     def test_review_list_cli_reports_pending_and_resolved_counts(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         pending_path = root / "scratch" / "review" / "2026-05-30-review-list-pending.md"
         resolved_path = root / "scratch" / "review" / "2026-05-30-review-list-resolved.md"
         pending_path.write_text(
@@ -3385,7 +3405,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             resolved_path.unlink(missing_ok=True)
 
     def test_mcp_server_lists_and_calls_review_create_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         request = (
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
             + "\n"
@@ -3428,7 +3448,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 path.unlink(missing_ok=True)
 
     def test_merge_scan_cli_writes_duplicate_report_and_review_item(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         first_page = root / "wiki" / "concepts" / "merge-candidate-a.md"
         second_page = root / "wiki" / "concepts" / "merge-candidate-b.md"
         report_path = root / "scratch" / "reports" / "merge-scan-test.md"
@@ -3471,7 +3491,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 path.unlink(missing_ok=True)
 
     def test_mcp_server_lists_and_calls_merge_scan_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "mcp-merge-scan-test.md"
         request = (
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -3705,7 +3725,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("[[maps/topic-map]]", text)
 
     def test_mcp_server_lists_and_calls_maps_build_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "mcp-maps-build-test.md"
         request = (
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -3949,7 +3969,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("must be a non-negative integer or null", stderr.getvalue())
 
     def test_mcp_server_lists_and_calls_metrics_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "mcp-metrics-test.md"
         request = (
             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -4102,7 +4122,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertEqual("locked-section.md", result.target_path.name)
 
     def test_publish_draft_cli_rejects_changed_human_locked_section_before_apply(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "locked-section-publish-test.md"
         draft_path = root / "scratch" / "drafts" / "locked-section-publish-test.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -4196,7 +4216,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             self.assertEqual("wiki/concepts/example.md", result.target_paths[0].relative_to(temp_root).as_posix())
 
     def test_mcp_server_lists_and_calls_hash_source_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         source_path = root / "raw" / "sources" / "mcp-hash-test.tmp"
         source_path.write_text("mcp source\n")
         request = (
@@ -4236,7 +4256,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("raw/sources/mcp-hash-test.tmp", responses[1]["result"]["content"][0]["text"])
 
     def test_mcp_server_lists_and_calls_source_registry_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         source_path = root / "raw" / "sources" / "mcp-source-registry-test.md"
         report_path = root / "scratch" / "reports" / "mcp-source-registry-test.md"
         original_report = report_path.read_text() if report_path.exists() else None
@@ -4283,7 +4303,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("Source registry entries", responses[1]["result"]["content"][0]["text"])
 
     def test_mcp_server_lists_and_calls_health_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         lint_report = root / "scratch" / "reports" / f"{date.today().isoformat()}-lint.md"
         original_report = lint_report.read_text() if lint_report.exists() else None
         request = (
@@ -4322,7 +4342,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("No issues found", responses[1]["result"]["content"][0]["text"])
 
     def test_mcp_apply_draft_validates_without_writing(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "mcp-apply-draft-validation-test.md"
         draft_path = root / "scratch" / "drafts" / "mcp-apply-draft-validation-test.json"
         original_index = (root / "wiki" / "index.md").read_text()
@@ -4442,7 +4462,7 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertIn("invalid choice", responses[1]["result"]["content"][0]["text"])
 
     def test_mcp_server_lists_and_calls_publish_draft_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "mcp-publish-draft-test.md"
         draft_path = root / "scratch" / "drafts" / "mcp-publish-draft-test.json"
         publish_report = root / "scratch" / "reports" / "mcp-publish-draft-test.md"
@@ -4535,7 +4555,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 lint_report.write_text(original_lint_report)
 
     def test_mcp_server_lists_and_calls_publish_batch_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "concepts" / "mcp-publish-batch-test.md"
         draft_path = root / "scratch" / "drafts" / "mcp-publish-batch-test.json"
         report_path = root / "scratch" / "reports" / "mcp-publish-batch-test.md"
@@ -4610,7 +4630,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 lint_report.write_text(original_lint_report)
 
     def test_workflow_query_prepare_creates_required_report_scaffold(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / f"{date.today().isoformat()}-query-how-does-ingest-work.md"
         original_report = report_path.read_text() if report_path.exists() else None
 
@@ -4651,7 +4671,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report_path.write_text(original_report)
 
     def test_workflow_query_prepare_bounds_default_report_filename(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         long_question = "How does ingest work " + ("with a very long qualifier " * 20)
         created_reports_before = set((root / "scratch" / "reports").glob(f"{date.today().isoformat()}-query-*.md"))
 
@@ -4684,7 +4704,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 path.unlink(missing_ok=True)
 
     def test_workflow_query_answer_with_report_records_consulted_context(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "query-answer-with-report-test.md"
         original_report = report_path.read_text() if report_path.exists() else None
 
@@ -4737,7 +4757,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report_path.write_text(original_report)
 
     def test_workflow_query_answer_and_capture_creates_publishable_draft_scaffold(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "query-capture-test.json"
         report_path = root / "scratch" / "reports" / "query-capture-test.md"
 
@@ -4798,7 +4818,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             report_path.unlink(missing_ok=True)
 
     def test_workflow_query_capture_normalizes_wiki_relative_capture_target(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "query-capture-relative-target-test.json"
         report_path = root / "scratch" / "reports" / "query-capture-relative-target-test.md"
 
@@ -4852,7 +4872,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             report_path.unlink(missing_ok=True)
 
     def test_workflow_query_capture_rejects_dotdot_target_without_artifacts(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "query-capture-dotdot-target-test.json"
         report_path = root / "scratch" / "reports" / "query-capture-dotdot-target-test.md"
 
@@ -4895,7 +4915,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             report_path.unlink(missing_ok=True)
 
     def test_workflow_query_capture_rejects_escape_target_without_report_artifact(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "query-capture-escape-target-test.json"
         report_path = root / "scratch" / "reports" / "query-capture-escape-target-test.md"
 
@@ -4937,7 +4957,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             report_path.unlink(missing_ok=True)
 
     def test_workflow_update_preflight_reports_lock_state_without_mutating_page(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         target_page = root / "wiki" / "overview.md"
         original_page = target_page.read_text()
         report_path = root / "scratch" / "reports" / "workflow-update-preflight-test.md"
@@ -4978,7 +4998,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report_path.write_text(original_report)
 
     def test_workflow_update_publish_rejects_draft_target_mismatch(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "workflow-target-mismatch.json"
         draft_path.write_text(
             json.dumps(
@@ -5018,7 +5038,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             draft_path.unlink(missing_ok=True)
 
     def test_workflow_ingest_registers_source_and_marks_semantic_extraction_pending(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         raw_source = root / "raw" / "sources" / "workflow-ingest-test.md"
         source_page = root / "wiki" / "sources" / "workflow-ingest-test.md"
         report_path = root / "scratch" / "reports" / "workflow-ingest-test.md"
@@ -5056,7 +5076,7 @@ chmod +x "${target}/scripts/release_gate.sh"
             (root / "wiki" / "log.md").write_text(original_log)
 
     def test_mcp_server_lists_and_calls_workflow_query_prepare_tool(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         report_path = root / "scratch" / "reports" / "mcp-workflow-query-prepare-test.md"
         original_report = report_path.read_text() if report_path.exists() else None
         expected_tools = {
@@ -5110,7 +5130,7 @@ chmod +x "${target}/scripts/release_gate.sh"
                 report_path.write_text(original_report)
 
     def test_mcp_server_calls_workflow_query_capture_mode(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self._repo_copy()
         draft_path = root / "scratch" / "drafts" / "mcp-query-capture-test.json"
         report_path = root / "scratch" / "reports" / "mcp-query-capture-test.md"
         request = (
@@ -6422,6 +6442,35 @@ class SharedJsonEntryTests(unittest.TestCase):
         value.pop("external_records")
 
         with self.assertRaisesRegex(ValueError, "external_records"):
+            validate_manifest(value)
+
+    def test_schema_4_manifest_may_list_retired_release_gate_workflow(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        value = _shared_json_entry_manifest()
+        value["schema_version"] = 4
+        value["contract_version"] = 4
+        path = ".github/workflows/release-gate.yml"
+        value["managed_files"] = {
+            path: {"mode": "0644", "path": path, "policy": "replace-if-unmodified", "sha256": "c" * 64}
+        }
+
+        manifest = validate_manifest(value)
+
+        self.assertIn(path, manifest["managed_files"])
+
+    def test_schema_5_manifest_rejects_retired_release_gate_workflow(self):
+        from tools.wiki.lib.vault_manifest import validate_manifest
+
+        value = _shared_json_entry_manifest()
+        value["schema_version"] = 5
+        value["contract_version"] = 5
+        path = ".github/workflows/release-gate.yml"
+        value["managed_files"] = {
+            path: {"mode": "0644", "path": path, "policy": "replace-if-unmodified", "sha256": "c" * 64}
+        }
+
+        with self.assertRaisesRegex(ValueError, "outside the contract-managed catalog scope"):
             validate_manifest(value)
 
     def test_validate_page_accepts_contract_3_manifest(self):
@@ -8576,9 +8625,9 @@ class SessionGitCheckTests(unittest.TestCase):
 
         self.assertEqual(0, code, output)
 
-    def test_release_gate_runs_git_check_from_root_after_metrics(self):
+    def test_release_gate_runs_git_check_after_metrics(self):
         script = (Path(__file__).resolve().parents[1] / "scripts" / "release_gate.sh").read_text()
-        metrics = script.index("tools/wiki/cli.py metrics --check --report")
-        git_check = script.index('run_from_root "$PYTHON_BIN" tools/wiki/cli.py sessions git-check')
+        metrics = script.index('"$PYTHON_BIN" tools/wiki/cli.py metrics --check\n')
+        git_check = script.index('"$PYTHON_BIN" tools/wiki/cli.py sessions git-check\n')
 
         self.assertLess(metrics, git_check)

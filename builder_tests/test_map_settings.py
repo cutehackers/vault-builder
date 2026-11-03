@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from builder_tests._tiers import full_tier_only
 from tools.vault_migration import installing, map_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -238,6 +239,7 @@ class LinkKeepsDefaultWriteTests(_MapCase):
 
 
 class InstallKeepsDefaultWriteTests(_MapCase):
+    @full_tier_only
     def test_install_new_vault_keeps_default_write_vault(self) -> None:
         data = self.read_map()
         data["projects"]["r"]["default_write_vault"] = "t"
@@ -292,6 +294,7 @@ class InstallRoleTests(_MapCase):
         self.install("new")
         self.assertEqual("personal", self.read_map()["vaults"]["new"]["role"])
 
+    @full_tier_only
     def test_new_vault_gets_the_given_role(self) -> None:
         result = self.cli("install", str(self.tmp / "vault-new"), "--name", "new", "--role", "project")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -322,6 +325,7 @@ class InstallRoleTests(_MapCase):
         self.assertIn("Vault role: team", self.install("new", role="team", dry_run=True))
         self.assertEqual("project", self.read_map()["vaults"]["new"]["role"])
 
+    @full_tier_only
     def test_empty_role_is_refused(self) -> None:
         before = self.digest()
         result = self.cli("install", str(self.tmp / "vault-new"), "--name", "new", "--role", " ")

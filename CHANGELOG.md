@@ -25,6 +25,42 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+
+- vault에 설치되는 workflow 이름을 `.github/workflows/release-gate.yml`에서 `.github/workflows/qa.yml`로 바꿨다. 관리 파일 목록이 바뀌어 contract와 manifest schema를 5로 올렸다. node를 설치하지 않고, setup-python이 설치한 Python을 `PYTHON`으로 gate에 넘긴다.
+- `scripts/release_gate.sh`에 `--tier check|unit|full` 인자를 더했다. `check`는 `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, whitespace 검사만 하고 test를 실행하지 않는다. `unit`은 `full_tier_only` 표시가 없는 test를 더하고, `full`은 test 전부를 더한다. 인자가 없으면 vault는 `check`, builder 저장소는 `unit`을 실행한다. 출력 첫 줄에 `[release-gate] tier: <단계>`를 쓴다.
+- gate는 저장소를 임시 폴더로 복사하지 않고 루트에서 실행하며 report 파일을 쓰지 않는다. Git 작업 트리에서 추적 파일이 바뀌거나 ignore되지 않은 새 파일이 생기면 "Release gate changed tracked output"으로 실패한다.
+- gate에서 `health` 단계를 뺐다. `health` 명령 자체는 그대로다.
+- gate의 test fingerprint 캐시(`llm-wiki-gate-tests.cache`)와 `WIKI_GATE_FULL`을 없앴다. `WIKI_GATE_FULL=1`을 설정해도 오류 없이 무시된다.
+- builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.10과 3.14로 `--tier full`을 실행한다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
+- install은 manifest schema가 5가 아닌 기존 vault를 audit 안내와 함께 거부한다. doctor는 schema 5를 기준으로 검사한다.
+
+### Upgrade
+
+- 기존 vault(contract 4, manifest schema 4)는 새 builder checkout에서 audit을 실행하고, plan을 검토한 뒤 apply를 실행한다. 순서는 `docs/usage.md` 1.1절을 따른다. `.github/workflows/qa.yml`은 `create`, contract 4 내용 그대로인 관리 파일(예: `scripts/release_gate.sh`)은 `replace`, 사람이 고친 관리 파일은 `review-required`로 나온다. apply는 manifest를 schema 5, contract 5로 새로 쓴다.
+
+  ```bash
+  python3 tools/vault_migration/cli.py audit --target /path/to/vault --plan-out /tmp/vault-migration-plan.json
+  ```
+
+  ```bash
+  python3 tools/vault_migration/cli.py apply --target /path/to/vault --plan /tmp/vault-migration-plan.json
+  ```
+
+- apply 뒤 doctor를 실행한다. doctor 첫 줄이 `vault-builder <릴리스 버전> (contract 5)`이고 `Problem:` 줄이 없으면 끝이다.
+- migration은 옛 workflow `.github/workflows/release-gate.yml`을 지우지 않는다. 그대로 두면 PR마다 CI가 두 번 돈다. apply와 doctor가 끝나면 vault에서 그 파일을 지우고 commit한다.
+
+  ```bash
+  git -C /path/to/vault rm .github/workflows/release-gate.yml
+  ```
+
+  ```bash
+  git -C /path/to/vault commit -m "ci: remove release-gate.yml replaced by qa.yml"
+  ```
+
+- 사람이 고친 `release-gate.yml`도 migration은 건드리지 않는다. 고친 내용이 필요하면 `qa.yml`로 옮긴 뒤 지운다.
+- 옮긴 vault에서 인자 없는 `scripts/release_gate.sh`는 `check` 단계만 실행한다. vault의 `tests/`를 실행하려면 `scripts/release_gate.sh --tier unit`을 쓴다.
+
 ## [2.0.0] - 2026-10-30
 
 Claude Code 세션 원문을 vault의 `raw/sessions/`에 보관한다. 관리 파일 목록이 바뀌어 contract와 manifest schema를 3으로 올렸다.

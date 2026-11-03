@@ -1,0 +1,31 @@
+name: QA
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # sessions git-check reads the full history (git log --diff-filter=A), so no shallow clone.
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.12"
+      - name: Run release gate
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: scripts/release_gate.sh

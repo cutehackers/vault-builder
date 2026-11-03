@@ -1499,7 +1499,7 @@ Git archive check (release gate):
 
 - `python3 tools/wiki/cli.py sessions git-check` prints `skipped` and exits 0 when the vault is not a Git work tree.
 - Otherwise it collects every path ever added under `raw/sessions/` in history reachable from the current branch, with the blob first added. It prints one line per path that is missing from the work tree or whose bytes differ from that first blob, and exits 1. Restoring the file makes it pass again.
-- `scripts/release_gate.sh` runs it from the vault root after the metrics step, because the gate copy has no `.git`.
+- `scripts/release_gate.sh` runs it from the vault root after the metrics step in every tier, including `check`.
 - Uncommitted session files get only the archive check. `python3 tools/wiki/cli.py sessions status` reports how many are uncommitted.
 
 ---

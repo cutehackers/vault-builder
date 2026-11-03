@@ -60,7 +60,7 @@ MCP_ENTRY_PREFIX = "llm-wiki-"
 RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
 _ASSET_ROOT = Path("tools/vault_migration/assets/project-memory")
 _ROUTER_ASSET = Path("tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py")
-_CATALOG_PATH = "tools/vault_migration/contracts/v4.json"
+_CATALOG_PATH = "tools/vault_migration/contracts/v5.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
 _REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
 _VAULT_MAP_VERSION = 2  # the version install writes
@@ -91,9 +91,9 @@ _COPY_FILES = (
     ".claude/skills/memory-cleanup/SKILL.md",
     ".claude/skills/session-capture/SKILL.md",
     "scripts/release_gate.sh",
+    ".github/workflows/qa.yml",
 )
 _COPY_TREES = (
-    ".github",
     ".agents",
     "docs/agent",
     "tools/wiki",

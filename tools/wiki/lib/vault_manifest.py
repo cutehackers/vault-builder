@@ -1,4 +1,4 @@
-"""Shared Vault manifest schema validation for schema versions 1, 2, 3, and 4."""
+"""Shared Vault manifest schema validation for schema versions 1, 2, 3, 4, and 5."""
 from __future__ import annotations
 
 import hashlib
@@ -27,7 +27,7 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
         ".claude/skills/wiki-ingest/SKILL.md",
         ".claude/skills/wiki-query/SKILL.md",
         ".claude/skills/wiki-update/SKILL.md",
-        ".github/workflows/release-gate.yml",
+        ".github/workflows/qa.yml",
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
@@ -85,6 +85,9 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
     }
 )
 MANAGED_TREE_ROOT_SCOPE: tuple[str, ...] = ()
+# Paths earlier contracts managed. Only manifests below schema 5 may list them.
+RETIRED_MANAGED_PATHS = frozenset({".github/workflows/release-gate.yml"})
+_RETIRED_PATHS_LAST_SCHEMA = 4
 _REQUIRED_MANIFEST_KEYS = frozenset(
     {
         "builder_revision",
@@ -98,10 +101,10 @@ _OPTIONAL_MANIFEST_KEYS = frozenset({"last_migration_id"})
 _MANAGED_FILE_KEYS = frozenset({"mode", "path", "policy", "sha256"})
 
 # Written manifests always use the current schema; older schemas stay readable.
-MANIFEST_SCHEMA_VERSION = 4
-MANIFEST_CONTRACT_VERSION = 4
+MANIFEST_SCHEMA_VERSION = 5
+MANIFEST_CONTRACT_VERSION = 5
 # Each readable schema version has exactly one contract version.
-_SUPPORTED_VERSIONS = {1: 1, 2: 2, 3: 3, 4: 4}
+_SUPPORTED_VERSIONS = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
 EXTERNAL_RECORDS_KEY = "external_records"
 # Records of files and entries created outside the Vault, located relative to $HOME.
 EXTERNAL_RECORD_KEYS = {
@@ -186,7 +189,7 @@ def validate_manifest(value: object) -> dict[str, object]:
             "Vault builder manifest builder_revision must be a non-empty string."
         )
     generated_at = _utc_timestamp(value["generated_at"])
-    managed_files = _managed_files(value["managed_files"])
+    managed_files = _managed_files(value["managed_files"], schema_version)
     last_migration_id = value.get("last_migration_id")
     if last_migration_id is not None and (
         not isinstance(last_migration_id, str)
@@ -343,15 +346,20 @@ def _utc_timestamp(value: object) -> str:
     return value
 
 
-def _managed_files(value: object) -> dict[str, dict[str, str]]:
+def _managed_files(
+    value: object, schema_version: int
+) -> dict[str, dict[str, str]]:
     if not isinstance(value, dict):
         raise ValueError(
             "Vault builder manifest managed_files must be an object."
         )
+    retired_allowed = schema_version <= _RETIRED_PATHS_LAST_SCHEMA
     managed: dict[str, dict[str, str]] = {}
     for raw_path, raw_entry in value.items():
         path = _safe_path(raw_path, "managed_files path")
-        if not managed_path_is_in_contract_scope(path):
+        if not managed_path_is_in_contract_scope(path) and not (
+            retired_allowed and path in RETIRED_MANAGED_PATHS
+        ):
             raise ValueError(
                 "Vault builder manifest managed file is outside the "
                 f"contract-managed catalog scope: {path}."

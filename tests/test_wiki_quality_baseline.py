@@ -165,27 +165,22 @@ class WikiQualityBaselineTest(unittest.TestCase):
         for token in [
             "set -euo pipefail",
             "PYTHON_BIN=\"$(choose_python)\"",
-            "wiki_tests=(",
-            "tests/test_wiki_quality_baseline.py",
-            "tests/test_wiki_tools.py",
-            'if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then',
-            "wiki_tests+=(builder_tests/test_vault_migration.py)",
-            '"$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"',
-            'run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"',
-            "WIKI_GATE_FULL",
-            "llm-wiki-gate-tests.cache",
-            "$PYTHON_BIN tools/wiki/cli.py lint --report",
-            "$PYTHON_BIN tools/wiki/cli.py health",
-            "$PYTHON_BIN tools/wiki/cli.py maps build --check --report",
-            "$PYTHON_BIN tools/wiki/cli.py metrics --check --report",
+            "usage: scripts/release_gate.sh [--tier check|unit|full]",
+            "--tier)",
+            "check|unit|full) ;;",
+            'if [ "$tier" != "check" ]; then',
+            'env WIKI_GATE_TIER="$tier" "$PYTHON_BIN" -m unittest discover -s tests -t . -p \'test_*.py\'',
+            '"$PYTHON_BIN" tools/wiki/cli.py lint',
+            '"$PYTHON_BIN" tools/wiki/cli.py maps build --check',
+            '"$PYTHON_BIN" tools/wiki/cli.py metrics --check',
+            '"$PYTHON_BIN" tools/wiki/cli.py sessions git-check',
             "WIKI_ENABLE_STENC",
             "Stenc checks skipped",
             "validate-stenc-doc.js",
             "setup-project.js",
             "check-rendered-pages.js",
-            "mktemp -d",
-            "rsync -a",
             'git -C "$ROOT" rev-parse --show-toplevel',
+            'git -C "$ROOT" status --porcelain --untracked-files=all -- .',
             "No Git worktree detected",
             "check_workspace_whitespace",
             'git -C "$ROOT" diff --no-ext-diff --binary -- .',
@@ -194,8 +189,21 @@ class WikiQualityBaselineTest(unittest.TestCase):
         ]:
             self.assertIn(token, text)
 
-        self.assertNotIn("$HOME/.codex/skills/stenc", text)
-        self.assertIn("scripts/release_gate.sh", (ROOT / ".github" / "workflows" / "release-gate.yml").read_text())
+        # Steps removed by the tiered gate: the repo copy, the test cache, health, and node probing.
+        for removed in [
+            "rsync",
+            "mktemp",
+            "llm-wiki-gate-tests.cache",
+            "WIKI_GATE_FULL",
+            "node --version",
+            "cli.py health",
+            "$HOME/.codex/skills/stenc",
+        ]:
+            self.assertNotIn(removed, text)
+
+        workflow = (ROOT / ".github" / "workflows" / "qa.yml").read_text()
+        self.assertIn("scripts/release_gate.sh", workflow)
+        self.assertNotIn("setup-node", workflow)
 
         for doc in [
             "README.md",
@@ -229,8 +237,9 @@ class WikiQualityBaselineTest(unittest.TestCase):
 
     def test_release_gate_runs_builder_tests_only_when_available(self):
         text = (ROOT / "scripts" / "release_gate.sh").read_text()
-        self.assertIn("builder_tests/test_vault_migration.py", text)
-        self.assertIn('if [ -f "builder_tests/test_vault_migration.py" ]', text)
+        self.assertIn('[ -f "$ROOT/init-vault.sh" ] && [ -d "$ROOT/tools/vault_migration" ]', text)
+        self.assertIn('if is_builder_repo && [ -d "builder_tests" ]; then', text)
+        self.assertIn("-m unittest discover -s builder_tests", text)
 
     def test_repo_local_wiki_skill_docs_exist_and_preserve_boundary(self):
         skill_paths = [
