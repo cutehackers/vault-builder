@@ -186,7 +186,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "f989aa3ec70a02ba6fe6c70484e292045b2b78ddb1b8210ede166bb09f8d47e1"
+      "sha256": "2513d7e905be127d8316f6495970c9f0376c3bc8485189a78497089edd9bf543"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
