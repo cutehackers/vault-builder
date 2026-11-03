@@ -20,10 +20,10 @@ vault-builder 릴리스를 내는 순서다. 사람이든 agent든 이 순서를
    ```
 
 5. `CHANGELOG.md`에서 `## [Unreleased]` 아래 내용을 `## [X.Y.Z] - YYYY-MM-DD`로 옮기고, 호환표 한 줄과 `### Upgrade` 절을 쓴다. `## [Unreleased]` 제목은 비운 채 남긴다.
-6. release gate를 실행한다. `VERSION`, `CHANGELOG.md`의 최신 릴리스 제목, 카탈로그 `builder_revision`이 다르면 여기서 실패한다.
+6. release gate를 `--tier full`로 실행한다. 인자 없이 실행하면 `unit` 단계라 `full_tier_only` 표시가 붙은 설치·migration test를 건너뛴다. `VERSION`, `CHANGELOG.md`의 최신 릴리스 제목, 카탈로그 `builder_revision`이 다르면 여기서 실패한다. tag push 뒤에는 `.github/workflows/qa-full.yml`이 Python 3.10과 3.14에서 같은 단계를 다시 실행한다.
 
    ```bash
-   bash scripts/release_gate.sh
+   bash scripts/release_gate.sh --tier full
    ```
 
 7. commit하고 main에 병합한다. commit 메시지는 `chore(release): vX.Y.Z`다.

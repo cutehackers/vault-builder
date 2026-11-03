@@ -1,0 +1,39 @@
+name: QA Full
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "init-vault.sh"
+      - "scripts/bootstrap.sh"
+      - "scripts/release_gate.sh"
+      - "tools/vault_migration/**"
+      - "tools/wiki/lib/vault_manifest.py"
+      - "tools/wiki/lib/authority.py"
+      - "builder_tests/**"
+      - ".github/workflows/**"
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Builder tests read file contents from older commits (git archive, git show).
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run release gate (full tier)
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: scripts/release_gate.sh --tier full

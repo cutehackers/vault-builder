@@ -3,7 +3,43 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-gate_root=""
+
+usage() {
+  echo "usage: scripts/release_gate.sh [--tier check|unit|full]" >&2
+  exit 2
+}
+
+is_builder_repo() {
+  [ -f "$ROOT/init-vault.sh" ] && [ -d "$ROOT/tools/vault_migration" ]
+}
+
+# check: vault content checks only. unit: check plus the tests not marked full_tier_only.
+# full: check plus every test. Without --tier the builder runs unit and a vault runs check.
+tier=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --tier)
+      [ "$#" -ge 2 ] || usage
+      tier="$2"
+      shift 2
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+if [ -z "$tier" ]; then
+  if is_builder_repo; then
+    tier="unit"
+  else
+    tier="check"
+  fi
+fi
+case "$tier" in
+  check|unit|full) ;;
+  *) usage ;;
+esac
+printf '[release-gate] tier: %s\n' "$tier"
 
 print_python_install_help() {
   local found
@@ -45,13 +81,9 @@ PY
 }
 
 PYTHON_BIN="$(choose_python)"
-
-cleanup() {
-  if [ -n "$gate_root" ]; then
-    rm -rf "$gate_root"
-  fi
-}
-trap cleanup EXIT
+printf '[release-gate] python: %s (%s)\n' \
+  "$(command -v "$PYTHON_BIN")" \
+  "$("$PYTHON_BIN" -c 'import platform; print(platform.python_version())')"
 
 run() {
   local label="$1"
@@ -60,15 +92,12 @@ run() {
   "$@"
 }
 
-run_from_root() {
-  (
-    cd "$ROOT"
-    "$@"
-  )
-}
-
 tracked_diff_fingerprint() {
   git -C "$ROOT" diff --no-ext-diff --binary -- . | shasum -a 256
+}
+
+worktree_status() {
+  git -C "$ROOT" status --porcelain --untracked-files=all -- .
 }
 
 is_vault_git_worktree() {
@@ -123,36 +152,6 @@ if issues:
 PY
 }
 
-code_fingerprint() {
-  local node_version
-  node_version="$(node --version 2>/dev/null || echo none)"
-  "$PYTHON_BIN" - "$1" "$PYTHON_BIN" "$node_version" <<'PY'
-from pathlib import Path
-import hashlib
-import sys
-
-root = Path(sys.argv[1])
-skip_prefixes = {("wiki",), ("raw",), ("scratch",), (".git",), (".worktrees",), (".obsidian",)}
-if (root / "init-vault.sh").is_file():
-    # The builder copies wiki/, scratch/drafts and scratch/review into new vaults and tests that output.
-    skip_prefixes = {("raw",), ("scratch", "reports"), (".git",), (".worktrees",), (".obsidian",)}
-skip_parts = {"__pycache__", "node_modules", ".DS_Store"}
-digest = hashlib.sha256()
-digest.update(f"{sys.argv[2]}\0{sys.version}\0{sys.argv[3]}\0".encode())
-for path in sorted(root.rglob("*")):
-    relative = path.relative_to(root)
-    if any(relative.parts[: len(prefix)] == prefix for prefix in skip_prefixes):
-        continue
-    if any(part in skip_parts for part in relative.parts):
-        continue
-    if path.suffix == ".pyc" or path.is_symlink() or not path.is_file():
-        continue
-    digest.update(relative.as_posix().encode() + b"\0")
-    digest.update(hashlib.sha256(path.read_bytes()).digest())
-print(digest.hexdigest())
-PY
-}
-
 stenc_checks_enabled() {
   case "${WIKI_ENABLE_STENC:-0}" in
     1|true|TRUE|yes|YES)
@@ -164,97 +163,36 @@ stenc_checks_enabled() {
   esac
 }
 
+# Every step runs in $ROOT and must not write tracked or untracked (non-ignored) files.
+# The write guard compares the tracked diff and the porcelain status before and after.
 git_worktree=0
 tracked_diff_before=""
+status_before=""
 if is_vault_git_worktree; then
   git_worktree=1
   tracked_diff_before="$(tracked_diff_fingerprint)"
+  status_before="$(worktree_status)"
 else
-  printf '[release-gate] No Git worktree detected; tracked-diff guard will be skipped.\n'
+  printf '[release-gate] No Git worktree detected; write guard will be skipped.\n'
 fi
 
-# Tool tests take most of the gate's time and depend on code and docs, not on vault knowledge.
-# In the builder repository they also test the wiki/ and scratch/ files copied into new vaults,
-# so those count as code there.
-# A passing run records a fingerprint of everything outside the knowledge directories in the Git
-# directory, so later runs that only changed wiki/, raw/ or scratch/ skip the tool tests. The cache
-# never lives in the vault's own files. Vaults without Git and fresh CI checkouts run every test.
-tests_cache=""
-code_fingerprint=""
-unit_tests_cached=0
-if [ "$git_worktree" -eq 1 ]; then
-  tests_cache="$(git -C "$ROOT" rev-parse --absolute-git-dir)/llm-wiki-gate-tests.cache"
-fi
-
-gate_root="$(mktemp -d "${TMPDIR:-/tmp}/llm-wiki-release-gate.XXXXXX")"
-wiki_tests=(
-  tests/test_wiki_quality_baseline.py
-  tests/test_wiki_tools.py
-)
-# Every other tests/test_*.py file also runs in the gate copy, so new test files need no
-# change here.
-more_wiki_tests=()
-for test_file in tests/test_*.py; do
-  case "$test_file" in
-    tests/test_wiki_quality_baseline.py|tests/test_wiki_tools.py) ;;
-    *)
-      if [ -f "$test_file" ]; then
-        more_wiki_tests+=("$test_file")
-      fi
-      ;;
-  esac
-done
-# Builder tests run from the vault root, and only where the builder ships them.
-if [ -f "builder_tests/test_vault_migration.py" ] && [ -d "tools/vault_migration" ]; then
-  wiki_tests+=(builder_tests/test_vault_migration.py)
-fi
-for test_file in \
-  builder_tests/test_map_settings.py \
-  builder_tests/test_hooks_install.py \
-  builder_tests/test_vault_hooks_launcher.py; do
-  if [ -f "$test_file" ]; then
-    wiki_tests+=("$test_file")
-  fi
-done
-rsync -a --exclude ".git" --exclude "__pycache__" "$ROOT/" "$gate_root/"
-cd "$gate_root"
-
-# Fingerprint the copy that the tests run against, so a file edited during the gate cannot be
-# recorded as tested.
-if [ -n "$tests_cache" ]; then
-  code_fingerprint="$(code_fingerprint "$gate_root")"
-  if [ "${WIKI_GATE_FULL:-0}" != "1" ] && [ -f "$tests_cache" ] && [ "$(cat "$tests_cache")" = "$code_fingerprint" ]; then
-    unit_tests_cached=1
+if [ "$tier" != "check" ]; then
+  run "WIKI_GATE_TIER=$tier $PYTHON_BIN -m unittest discover -s tests -t . -p 'test_*.py'" \
+    env WIKI_GATE_TIER="$tier" "$PYTHON_BIN" -m unittest discover -s tests -t . -p 'test_*.py'
+  if is_builder_repo && [ -d "builder_tests" ]; then
+    run "WIKI_GATE_TIER=$tier $PYTHON_BIN -m unittest discover -s builder_tests -t . -p 'test_*.py'" \
+      env WIKI_GATE_TIER="$tier" "$PYTHON_BIN" -m unittest discover -s builder_tests -t . -p 'test_*.py'
   fi
 fi
 
-if [ "$unit_tests_cached" -eq 1 ]; then
-  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:1}" \
-    "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:1}"
-  printf '\n[release-gate] Tool tests skipped: code and docs match the last passing run. Set WIKI_GATE_FULL=1 to run them.\n'
-else
-  run "$PYTHON_BIN -m unittest ${wiki_tests[*]:0:2}" \
-    "$PYTHON_BIN" -m unittest "${wiki_tests[@]:0:2}"
-  if [ "${#more_wiki_tests[@]}" -gt 0 ]; then
-    run "$PYTHON_BIN -m unittest ${more_wiki_tests[*]}" \
-      "$PYTHON_BIN" -m unittest "${more_wiki_tests[@]}"
-  fi
-  if [ "${#wiki_tests[@]}" -gt 2 ]; then
-    run "$PYTHON_BIN -m unittest ${wiki_tests[*]:2}" \
-      run_from_root "$PYTHON_BIN" -m unittest "${wiki_tests[@]:2}"
-  fi
-fi
-run "$PYTHON_BIN tools/wiki/cli.py lint --report" \
-  "$PYTHON_BIN" tools/wiki/cli.py lint --report
-run "$PYTHON_BIN tools/wiki/cli.py health" \
-  "$PYTHON_BIN" tools/wiki/cli.py health
-run "$PYTHON_BIN tools/wiki/cli.py maps build --check --report" \
-  "$PYTHON_BIN" tools/wiki/cli.py maps build --check --report
-run "$PYTHON_BIN tools/wiki/cli.py metrics --check --report" \
-  "$PYTHON_BIN" tools/wiki/cli.py metrics --check --report
-# The gate copy has no .git, so the committed session file check runs in the vault root.
+run "$PYTHON_BIN tools/wiki/cli.py lint" \
+  "$PYTHON_BIN" tools/wiki/cli.py lint
+run "$PYTHON_BIN tools/wiki/cli.py maps build --check" \
+  "$PYTHON_BIN" tools/wiki/cli.py maps build --check
+run "$PYTHON_BIN tools/wiki/cli.py metrics --check" \
+  "$PYTHON_BIN" tools/wiki/cli.py metrics --check
 run "$PYTHON_BIN tools/wiki/cli.py sessions git-check" \
-  run_from_root "$PYTHON_BIN" tools/wiki/cli.py sessions git-check
+  "$PYTHON_BIN" tools/wiki/cli.py sessions git-check
 
 if stenc_checks_enabled; then
   if [ ! -d "docs/stenc/content" ]; then
@@ -278,8 +216,8 @@ if stenc_checks_enabled; then
       node "$stenc_validate" "$stenc_doc"
   done < <(find docs/stenc/content -type f -name '*.json' | sort)
 
-  run "node setup-project.js --project-root $gate_root --docs-dir docs/stenc" \
-    node "$stenc_setup" --project-root "$gate_root" --docs-dir docs/stenc
+  run "node setup-project.js --project-root $ROOT --docs-dir docs/stenc" \
+    node "$stenc_setup" --project-root "$ROOT" --docs-dir docs/stenc
   run "node check-rendered-pages.js docs/stenc" \
     node "$stenc_check" docs/stenc
 else
@@ -289,7 +227,12 @@ fi
 cd "$ROOT"
 if [ "$git_worktree" -eq 1 ]; then
   tracked_diff_after="$(tracked_diff_fingerprint)"
-  if [ "$tracked_diff_before" != "$tracked_diff_after" ]; then
+  status_after="$(worktree_status)"
+  if [ "$tracked_diff_before" != "$tracked_diff_after" ] || [ "$status_before" != "$status_after" ]; then
+    changed_paths="$(comm -13 <(printf '%s\n' "$status_before" | sort) <(printf '%s\n' "$status_after" | sort) | sed '/^$/d')"
+    if [ -n "$changed_paths" ]; then
+      printf '[release-gate] Paths changed or created during the gate:\n%s\n' "$changed_paths" >&2
+    fi
     printf '[release-gate] Release gate changed tracked output. Re-run or inspect generated artifacts.\n' >&2
     exit 1
   fi
@@ -297,10 +240,4 @@ if [ "$git_worktree" -eq 1 ]; then
   run "git diff --check" git -C "$ROOT" diff --check -- .
 else
   run "check_workspace_whitespace" check_workspace_whitespace
-fi
-
-if [ -n "$tests_cache" ] && [ "$unit_tests_cached" -eq 0 ]; then
-  if ! printf '%s\n' "$code_fingerprint" 2>/dev/null > "$tests_cache"; then
-    printf '[release-gate] Could not record the passing test fingerprint; the next run will run every test.\n' >&2
-  fi
 fi

@@ -1026,13 +1026,24 @@ git commit -m "wiki: update example concept"
 
 `git add` 대상은 `git status --short`에 나온 실제 변경 파일입니다. Wiki content만 바꾼 경우에는 보통 `wiki/`, `scratch/reports/`, `scratch/drafts/`, `scratch/review/`가 포함될 수 있고, workflow/tooling 개선에서는 `docs/`, `tools/`, `scripts/`, `.github/`도 함께 stage해야 합니다.
 
-`scripts/release_gate.sh`는 임시 복사본에서 tests, lint, health, maps, metrics를 실행합니다. 검증 중 생기는 report나 test artifact가 현재 vault를 오염시키지 않으며, 같은 gate는 `.github/workflows/release-gate.yml`에서도 실행됩니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다. 도구 test는 gate 시간의 대부분을 차지하고 코드와 문서에만 영향을 받습니다. 단, builder 저장소에서는 `init-vault.sh`가 `wiki/`, `scratch/drafts`, `scratch/review`를 새 vault에 복사하고 test가 그 결과를 검사하므로, 이 폴더들도 fingerprint에 넣습니다. 그래서 Git 저장소인 vault에서 통과한 gate는 `wiki/`, `raw/`, `scratch/` 밖의 파일 fingerprint를 Git 디렉터리의 `llm-wiki-gate-tests.cache`에 기록하고, 다음 실행에서 fingerprint가 같으면 도구 test를 건너뜁니다. 지식 페이지만 바꾼 경우 gate가 몇 초 안에 끝납니다. baseline test, lint, health, maps, metrics는 항상 실행합니다. 도구 test를 강제로 실행하려면 `WIKI_GATE_FULL=1 scripts/release_gate.sh`를 씁니다. Git이 없는 vault와 CI는 cache가 없으므로 항상 전체를 실행합니다.
+`scripts/release_gate.sh`는 검사 범위를 세 단계 중 하나로 고릅니다. 단계는 `--tier check|unit|full` 인자로 정하고, 출력 첫 줄에 `[release-gate] tier: check`처럼 고른 단계를 씁니다.
+
+| 단계 | 실행 내용 | 인자 없이 실행할 때 |
+|---|---|---|
+| `check` | `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, whitespace 검사. test는 실행하지 않습니다 | vault의 기본값 |
+| `unit` | `check`에 더해 `full_tier_only` 표시가 없는 test를 실행합니다 | builder 저장소의 기본값 |
+| `full` | `check`에 더해 test 전부를 실행합니다 | 없음. builder 릴리스 전에 직접 실행합니다 |
+
+gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지 않습니다. Git 작업 트리에서는 실행 전후를 비교해, 추적 파일이 바뀌거나 ignore되지 않은 새 파일이 생기면 "Release gate changed tracked output"으로 실패합니다. `health`는 gate에 포함되지 않으므로 필요하면 따로 실행합니다. Stenc 문서 검증은 선택 기능이므로 필요한 경우에만 `WIKI_ENABLE_STENC=1 scripts/release_gate.sh`로 실행합니다.
+
+같은 gate는 `.github/workflows/qa.yml`에서 인자 없이 실행됩니다. 그래서 vault의 CI는 `check`만 실행합니다. builder 저장소에는 `.github/workflows/qa-full.yml`이 더 있어 tag push, 수동 실행, 설치·migration 관련 파일을 바꾼 PR에서 `--tier full`을 실행합니다. 이 파일은 vault에 설치되지 않습니다.
 
 ## 19. 전체 명령 요약
 
 | 목적 | 명령 |
 |---|---|
-| 전체 release gate 실행 | `scripts/release_gate.sh` |
+| release gate 실행 (vault는 `check`, builder는 `unit`) | `scripts/release_gate.sh` |
+| release gate의 test 전부 실행 | `scripts/release_gate.sh --tier full` |
 | 전체 wiki 검사 | `python3 tools/wiki/cli.py lint --report` |
 | 전체 wiki 상태 점검 | `python3 tools/wiki/cli.py health` |
 | page 하나 검사 | `python3 tools/wiki/cli.py validate-page wiki/overview.md` |

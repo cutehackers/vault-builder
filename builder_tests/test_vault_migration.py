@@ -21,6 +21,7 @@ from typing import Callable
 from unittest import mock
 
 from builder_tests import test_llm_wiki_router as _router_tests
+from builder_tests._tiers import full_tier_only
 from tools.vault_migration import cli
 from tools.vault_migration import applying
 from tools.vault_migration import installing
@@ -78,19 +79,6 @@ def tearDownModule() -> None:
             os.environ[key] = value
     if _MODULE_HOME is not None:
         _MODULE_HOME.cleanup()
-
-
-def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
-    """Run the router tests (builder_tests/test_llm_wiki_router.py) with this file.
-
-    The release gate runs only this file. The router tests come first as one block, so the router
-    module's own setUpModule (temporary HOME, template vault) runs once and is not interleaved with
-    this module's fixtures. loader.loadTestsFromModule applies the same -k patterns.
-    """
-    suite = unittest.TestSuite()
-    suite.addTests(loader.loadTestsFromModule(_router_tests))
-    suite.addTests(tests)
-    return suite
 
 
 def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -207,6 +195,33 @@ def _normalize_legacy_modes(target: Path) -> None:
             path.chmod(int(managed.mode, 8))
 
 
+def _retired_workflow_journal(contract: int) -> dict[str, object]:
+    """Journal of an interrupted migration that touched the retired release-gate workflow."""
+    return {
+        "schema_version": 1,
+        "migration_id": "0123456789abcdef",
+        "target_contract_version": contract,
+        "state": "applying",
+        "entries": [{
+            "path": ".github/workflows/release-gate.yml",
+            "existed": True,
+            "sha256": "a" * 64,
+            "mode": "0644",
+        }],
+        "manifest": {
+            "existed": False,
+            "sha256": None,
+            "mode": None,
+            "backup_state": "not-required",
+            "backup_staged_path": None,
+            "candidate_sha256": "c" * 64,
+            "publication_state": "intent",
+        },
+        "directory_nonce": "b" * 64,
+        "directories": [],
+    }
+
+
 def _copy_legacy_fixture(target: Path) -> None:
     _extract_git_archive(ROOT, "47cbf83", target)
     _normalize_legacy_modes(target)
@@ -245,6 +260,10 @@ V3_CATALOG_SHA256 = "304c5fa794d365c54dc2f3334e8f67ac52d2f223a99367924af2ba309b8
 # A builder commit that installs contract-3 Vaults. A rebase or squash merge can remove it from
 # the history; the one test that needs it is skipped then.
 V3_INSTALL_COMMIT = "f562d77"
+# v4.json is frozen the same way as v3.json.
+V4_CATALOG_SHA256 = "b0a2d0a156f7ad286a2eeb3c107fdeaed9f2040e07e82023927be5bfaf0d08ba"
+# A builder commit on main that installs contract-4 Vaults (the last commit before contract 5).
+V4_INSTALL_COMMIT = "a92f5d3"
 
 
 def _commit_available(revision: str) -> bool:
@@ -266,6 +285,10 @@ CONTRACT4_MANAGED_FILES = (
     "tests/test_publish_json.py",
     "tests/test_wiki_lib_import_direction.py",
 )
+# Contract 5 (CI QA redesign spec 4.5): the Vault gets one workflow, qa.yml.
+CONTRACT5_WORKFLOW = ".github/workflows/qa.yml"
+# Workflows a Vault must not get from contract 5: the builder-only full run and the contract-4 workflow.
+NON_VAULT_WORKFLOWS = (".github/workflows/qa-full.yml", ".github/workflows/release-gate.yml")
 
 
 def _initialize_v1_vault(root: Path) -> Path:
@@ -468,6 +491,7 @@ class VaultManifestTest(unittest.TestCase):
                     }
                 )
 
+    @full_tier_only
     def test_manifest_records_only_copied_managed_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -484,13 +508,14 @@ class VaultManifestTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(4, manifest.contract_version)
+            self.assertEqual(5, manifest.contract_version)
             self.assertEqual("test-revision", manifest.builder_revision)
             self.assertNotIn("wiki/overview.md", manifest.managed_files)
             self.assertNotIn("tools/vault_migration/cli.py", manifest.managed_files)
             for relative, managed in manifest.managed_files.items():
                 self.assertEqual(managed.sha256, sha256_file(target / relative), relative)
 
+    @full_tier_only
     def test_manifest_creation_rejects_managed_file_mode_drift(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -508,6 +533,7 @@ class VaultManifestTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "mode"):
                 create_manifest(ROOT, target, "test")
 
+    @full_tier_only
     def test_init_rejects_old_python_before_writing_target(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -703,6 +729,13 @@ def _valid_v4_manifest() -> dict[str, object]:
     return value
 
 
+def _valid_v5_manifest() -> dict[str, object]:
+    value = _valid_v2_manifest()
+    value["schema_version"] = 5
+    value["contract_version"] = 5
+    return value
+
+
 class VaultManifestV2SchemaTest(unittest.TestCase):
     def test_manifest_parser_reads_each_schema_contract_pair_and_rejects_mismatches(self):
         v1 = {
@@ -712,15 +745,15 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
             "generated_at": "2026-07-30T00:00:00Z",
             "managed_files": {},
         }
-        for value in (v1, _valid_v2_manifest(), _valid_v3_manifest(), _valid_v4_manifest()):
+        for value in (v1, _valid_v2_manifest(), _valid_v3_manifest(), _valid_v4_manifest(), _valid_v5_manifest()):
             with self.subTest(schema=value["schema_version"]):
                 parsed = parse_manifest_json(json.dumps(value))
                 self.assertEqual(value["schema_version"], parsed["schema_version"])
                 self.assertEqual(value["contract_version"], parsed["contract_version"])
                 manifest = VaultManifest.from_dict(value)
                 self.assertEqual(manifest, VaultManifest.from_json(manifest.to_json()))
-        for schema, contract in ((2, 3), (3, 2), (1, 3), (3, 1), (3, 4), (4, 3), (1, 4), (5, 5)):
-            value = _valid_v4_manifest()
+        for schema, contract in ((2, 3), (3, 2), (1, 3), (3, 1), (3, 4), (4, 3), (1, 4), (4, 5), (5, 4), (6, 6)):
+            value = _valid_v5_manifest()
             value["schema_version"] = schema
             value["contract_version"] = contract
             if schema == 1:
@@ -728,8 +761,8 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
             with self.subTest(schema=schema, contract=contract), self.assertRaises(ValueError):
                 validate_manifest(value)
 
-    def test_schema_3_and_4_manifests_keep_external_records(self):
-        for make in (_valid_v3_manifest, _valid_v4_manifest):
+    def test_schema_3_4_and_5_manifests_keep_external_records(self):
+        for make in (_valid_v3_manifest, _valid_v4_manifest, _valid_v5_manifest):
             with self.subTest(schema=make()["schema_version"]):
                 parsed = validate_manifest(make())
 
@@ -832,7 +865,9 @@ class VaultManifestV2SchemaTest(unittest.TestCase):
         cases["schema-3-contract-2"] = lambda value: value.__setitem__("schema_version", 3)
         cases["schema-3-contract-4"] = lambda value: value.update(schema_version=3, contract_version=4)
         cases["schema-4-contract-3"] = lambda value: value.update(schema_version=4, contract_version=3)
-        cases["schema-5"] = lambda value: value.update(schema_version=5, contract_version=5)
+        cases["schema-4-contract-5"] = lambda value: value.update(schema_version=4, contract_version=5)
+        cases["schema-5-contract-4"] = lambda value: value.update(schema_version=5, contract_version=4)
+        cases["schema-6"] = lambda value: value.update(schema_version=6, contract_version=6)
         cases["records-not-list"] = lambda value: value.__setitem__("external_records", {})
         cases["record-not-object"] = lambda value: value.__setitem__("external_records", ["x"])
         cases["unknown-kind"] = record(0, "kind", "directory")
@@ -925,6 +960,7 @@ class ContractCatalogTest(unittest.TestCase):
             )
             self.assertFalse(external.exists())
 
+    @full_tier_only
     def test_legacy_catalog_reads_git_bytes_and_mode(self):
         catalog = build_catalog(ROOT, 0, "47cbf83", source_ref="47cbf83")
         managed = catalog.managed_files["tools/wiki/cli.py"]
@@ -1094,6 +1130,7 @@ class ContractCatalogTest(unittest.TestCase):
                 }
             )
 
+    @full_tier_only
     def test_v1_baseline_commit_is_in_the_checked_out_history(self):
         # A rebase or squash merge rewrites commit ids; the baseline must stay reachable from HEAD.
         result = subprocess.run(
@@ -1105,6 +1142,7 @@ class ContractCatalogTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr)
 
+    @full_tier_only
     def test_v1_catalog_bytes_are_fixed_at_v1_baseline_commit(self):
         relative = "tools/vault_migration/contracts/v1.json"
         frozen = subprocess.run(
@@ -1116,6 +1154,7 @@ class ContractCatalogTest(unittest.TestCase):
 
         self.assertEqual(frozen, (ROOT / relative).read_bytes())
 
+    @full_tier_only
     def test_prior_catalog_bytes_are_fixed_at_their_release_commits(self):
         for relative, commit in (
             ("tools/vault_migration/contracts/v0.json", V2_BASELINE_COMMIT),
@@ -1140,10 +1179,19 @@ class ContractCatalogTest(unittest.TestCase):
         v3 = load_catalog(path)
         self.assertEqual((3, "2.0.0"), (v3.contract_version, v3.builder_revision))
 
-    def test_v4_catalog_matches_current_managed_files(self):
-        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+    def test_v4_catalog_bytes_match_the_recorded_hash(self):
+        path = ROOT / "tools" / "vault_migration" / "contracts" / "v4.json"
 
-        self.assertEqual(4, catalog.contract_version)
+        self.assertEqual(V4_CATALOG_SHA256, sha256_file(path))
+        v4 = load_catalog(path)
+        self.assertEqual((4, "2.0.0"), (v4.contract_version, v4.builder_revision))
+        self.assertIn(".github/workflows/release-gate.yml", v4.managed_files)
+        self.assertNotIn(CONTRACT5_WORKFLOW, v4.managed_files)
+
+    def test_v5_catalog_matches_current_managed_files(self):
+        catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v5.json")
+
+        self.assertEqual(5, catalog.contract_version)
         self.assertEqual("2.0.0", catalog.builder_revision)
         self.assertEqual(read_version(ROOT), catalog.builder_revision)
         self.assertIn(".gitignore", catalog.managed_files)
@@ -1152,10 +1200,13 @@ class ContractCatalogTest(unittest.TestCase):
             ".claude/skills/memory-cleanup/SKILL.md",
             "tools/wiki/lib/memory_scan.py",
             "scripts/release_gate.sh",
+            CONTRACT5_WORKFLOW,
             *SESSION_MANAGED_FILES,
             *CONTRACT4_MANAGED_FILES,
         ):
             self.assertIn(relative, catalog.managed_files)
+        for relative in NON_VAULT_WORKFLOWS:
+            self.assertNotIn(relative, catalog.managed_files)
         self.assertFalse(
             any(path.startswith("tools/vault_migration/assets/") for path in catalog.managed_files)
         )
@@ -1220,6 +1271,7 @@ class ContractCatalogTest(unittest.TestCase):
                 self.assertEqual(plan, MigrationPlan.from_json(plan.to_json()))
 
 
+@full_tier_only
 class MigrationPlanningTest(unittest.TestCase):
     def test_audit_is_read_only_and_classifies_known_custom_and_owned_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1575,6 +1627,7 @@ class MigrationApplyTest(unittest.TestCase):
 
         return before, plan, resolved_target, journal_root, journal, action, record_directory
 
+    @full_tier_only
     def test_apply_replaces_only_approved_managed_files_and_runs_two_gates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1593,27 +1646,28 @@ class MigrationApplyTest(unittest.TestCase):
 
             manifest = apply_plan(ROOT, target, plan, run_gate=gate)
 
-            self.assertEqual(4, manifest.contract_version)
+            self.assertEqual(5, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             persisted = load_manifest(target)
             self.assertIsNotNone(persisted)
             assert persisted is not None
             self.assertEqual(plan.migration_id, persisted.last_migration_id)
-            self.assertEqual([None, 4], gate_versions)
+            self.assertEqual([None, 5], gate_versions)
             self.assertEqual(protected_before, _protected_hashes(target))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
 
-    def test_v1_manifest_vault_audit_replaces_v1_hashes_and_apply_writes_v4_manifest(self):
+    @full_tier_only
+    def test_v1_manifest_vault_audit_replaces_v1_hashes_and_apply_writes_v5_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = _initialize_v1_vault(Path(tmpdir))
             before = load_manifest(target)
             assert before is not None
             self.assertEqual((1, 1), (before.schema_version, before.contract_version))
             v1 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v1.json")
-            v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+            v5 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v5.json")
             changed = sorted(
                 path
-                for path, desired in v4.managed_files.items()
+                for path, desired in v5.managed_files.items()
                 if path in v1.managed_files and v1.managed_files[path].sha256 != desired.sha256
             )
 
@@ -1621,7 +1675,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             actions = {action.path: action for action in plan.actions}
             self.assertEqual(1, plan.current_contract_version)
-            self.assertEqual(4, plan.target_contract_version)
+            self.assertEqual(5, plan.target_contract_version)
             self.assertIn(".gitignore", changed)
             for relative in changed:
                 self.assertEqual("replace", actions[relative].action, relative)
@@ -1633,15 +1687,16 @@ class MigrationApplyTest(unittest.TestCase):
             persisted = load_manifest(target)
             assert persisted is not None
             for result in (manifest, persisted):
-                self.assertEqual(4, result.schema_version)
-                self.assertEqual(4, result.contract_version)
+                self.assertEqual(5, result.schema_version)
+                self.assertEqual(5, result.contract_version)
                 self.assertEqual((), result.external_records)
             stored = json.loads((target / ".vault-builder" / "manifest.json").read_text())
             self.assertEqual([], stored["external_records"])
-            self.assertEqual(4, stored["schema_version"])
-            for relative, desired in v4.managed_files.items():
+            self.assertEqual(5, stored["schema_version"])
+            for relative, desired in v5.managed_files.items():
                 self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
 
+    @full_tier_only
     def test_audit_uses_v1_catalog_hash_as_known_prior_hash(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1660,6 +1715,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("replace", action.action)
             self.assertEqual(hashlib.sha256(v1_gitignore).hexdigest(), action.current_sha256)
 
+    @full_tier_only
     def test_apply_preserves_existing_v2_external_records(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1683,6 +1739,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(records, manifest.external_records)
             self.assertEqual(records, load_manifest(target).external_records)
 
+    @full_tier_only
     def test_apply_creates_missing_managed_parents_and_rollback_removes_them(self):
         for fail_gate in (False, True):
             with self.subTest(fail_gate=fail_gate), tempfile.TemporaryDirectory() as tmpdir:
@@ -1719,6 +1776,7 @@ class MigrationApplyTest(unittest.TestCase):
                     self.assertEqual(manifest.last_migration_id, load_manifest(target).last_migration_id)
                     self.assertEqual([], list((target / ".agents").rglob(".vault-builder-migration.json")))
 
+    @full_tier_only
     def test_apply_rolls_back_parents_when_create_write_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1758,6 +1816,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".agents").exists())
 
+    @full_tier_only
     def test_apply_rolls_back_parent_created_before_later_mkdir_failure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1779,6 +1838,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".agents").exists())
 
+    @full_tier_only
     def test_apply_aborts_before_writes_for_blocking_or_changed_plan(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1802,6 +1862,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
 
+    @full_tier_only
     def test_outstanding_rollback_blocks_every_apply_until_recovered(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1856,6 +1917,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(fresh_plan.migration_id, manifest.last_migration_id)
 
+    @full_tier_only
     def test_concurrent_apply_is_serialized_before_journal_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1878,7 +1940,7 @@ class MigrationApplyTest(unittest.TestCase):
                 / "tools"
                 / "vault_migration"
                 / "contracts"
-                / "v4.json"
+                / "v5.json"
             )
             second_catalog = json.loads(second_catalog_path.read_text())
             second_catalog["builder_revision"] = "concurrent-builder"
@@ -1946,6 +2008,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertTrue(os.WIFEXITED(child_status))
             self.assertEqual(0, os.WEXITSTATUS(child_status), child_error)
 
+    @full_tier_only
     def test_recovery_acquires_directory_lock_after_process_crash(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -1991,6 +2054,7 @@ class MigrationApplyTest(unittest.TestCase):
             )
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_apply_reports_every_outstanding_migration_deterministically(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2022,6 +2086,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertLess(message.index(first), message.index(second))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_stale_journal_cannot_roll_back_a_later_committed_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2044,7 +2109,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             changed = target / "AGENTS.md"
             desired = load_catalog(
-                ROOT / "tools" / "vault_migration" / "contracts" / "v4.json"
+                ROOT / "tools" / "vault_migration" / "contracts" / "v5.json"
             ).managed_files["AGENTS.md"]
             changed.write_bytes((ROOT / "AGENTS.md").read_bytes())
             changed.chmod(int(desired.mode, 8))
@@ -2067,6 +2132,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before_recovery, _tree_digest(target))
             self.assertEqual(later_manifest, load_manifest(target))
 
+    @full_tier_only
     def test_apply_rolls_back_on_either_gate_failure_and_restores_manifest(self):
         for fail_after_manifest in (False, True):
             with self.subTest(fail_after_manifest=fail_after_manifest), tempfile.TemporaryDirectory() as tmpdir:
@@ -2084,10 +2150,11 @@ class MigrationApplyTest(unittest.TestCase):
 
                 self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_mode_only_apply_repairs_and_failed_apply_restores_modes(self):
         cases = (
             ("AGENTS.md", 0o755, "0644"),
-            (".github/workflows/release-gate.yml", 0o755, "0644"),
+            (CONTRACT5_WORKFLOW, 0o755, "0644"),
         )
         for relative, drift_mode, desired_mode in cases:
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmpdir:
@@ -2128,6 +2195,7 @@ class MigrationApplyTest(unittest.TestCase):
                 apply_plan(ROOT, target, fresh, run_gate=lambda _: None)
                 self.assertEqual(desired_mode, applying._observed_mode(managed))
 
+    @full_tier_only
     def test_apply_rejects_content_edit_between_verification_and_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2167,6 +2235,7 @@ class MigrationApplyTest(unittest.TestCase):
                 (target / ".vault-builder" / "recovery").exists()
             )
 
+    @full_tier_only
     def test_apply_rejects_mode_change_during_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2197,6 +2266,7 @@ class MigrationApplyTest(unittest.TestCase):
                 (target / ".vault-builder" / "recovery").exists()
             )
 
+    @full_tier_only
     def test_apply_revalidates_all_snapshots_before_first_target_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2237,6 +2307,7 @@ class MigrationApplyTest(unittest.TestCase):
                 (target / ".vault-builder" / "recovery").exists()
             )
 
+    @full_tier_only
     def test_managed_publication_revalidates_destination_inside_publish_boundary(self):
         cases = (
             ("replace", "AGENTS.md"),
@@ -2294,6 +2365,7 @@ class MigrationApplyTest(unittest.TestCase):
                     ).is_file()
                 )
 
+    @full_tier_only
     def test_transactional_gate_failure_preserves_command_exit_and_rollback_result(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2318,6 +2390,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIsNone(failure.recover_command)
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_transactional_noncommand_failure_reports_completed_rollback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2336,6 +2409,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIn("validation exploded", str(failure))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_transactional_rollback_failure_preserves_original_failure_and_recover_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2360,6 +2434,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIsNone(failure.audit_command)
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
+    @full_tier_only
     def test_rollback_cleanup_fsync_failure_remains_recoverable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2421,6 +2496,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_rollback_ancestry_fsync_failure_keeps_terminal_marker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2473,6 +2549,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_precondition_failure_is_not_reported_as_a_rollback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2486,6 +2563,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertNotIsInstance(raised.exception, getattr(applying, "MigrationApplyError", ()))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
 
+    @full_tier_only
     def test_journal_preparation_failure_reports_completed_cleanup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2509,6 +2587,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIsNone(failure.recover_command)
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_journal_preparation_cleanup_failure_preserves_original_and_recover_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2543,6 +2622,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_preparation_backup_hard_stop_has_durable_cleanup_authority(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2585,6 +2665,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_preparation_bootstrap_hard_stop_has_durable_cleanup_authority(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2623,6 +2704,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_partial_preparing_journal_has_durable_cleanup_authority(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2670,6 +2752,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_preparing_root_recovery_publication_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2736,6 +2819,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("rolled-back", recover_migration(target, plan.migration_id))
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_apply_rejects_changed_builder_bytes_before_journal_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2756,6 +2840,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".vault-builder").exists())
 
+    @full_tier_only
     def test_apply_rolls_back_when_candidate_manifest_write_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -2772,6 +2857,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_apply_never_overwrites_manifest_newer_than_journal_precondition(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3005,6 +3091,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual("0600", applying._observed_mode(destination))
             self.assertEqual(candidate, staged.read_bytes())
 
+    @full_tier_only
     def test_candidate_manifest_preserves_final_boundary_external_writer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3069,6 +3156,7 @@ class MigrationApplyTest(unittest.TestCase):
                 ).is_file()
             )
 
+    @full_tier_only
     def test_rollback_preserves_final_boundary_external_writer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3118,6 +3206,7 @@ class MigrationApplyTest(unittest.TestCase):
                 ).is_file()
             )
 
+    @full_tier_only
     def test_recovery_preserves_managed_external_writer_captured_by_hard_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3161,6 +3250,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(external, destination.read_bytes())
             self.assertEqual("0600", applying._observed_mode(destination))
 
+    @full_tier_only
     def test_recovery_preserves_manifest_external_writer_captured_by_hard_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3219,6 +3309,7 @@ class MigrationApplyTest(unittest.TestCase):
                 recover_migration(target, plan.migration_id)
             self.assertEqual(later, load_manifest(target))
 
+    @full_tier_only
     def test_recovery_preserves_rollback_external_writer_captured_by_hard_stop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3274,6 +3365,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(external, destination.read_bytes())
             self.assertEqual("0600", applying._observed_mode(destination))
 
+    @full_tier_only
     def test_rollback_quarantines_external_replacements_of_created_files(self):
         cases = ("managed", "manifest")
         for boundary in cases:
@@ -3351,6 +3443,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(external, destination.read_bytes())
                 self.assertEqual("0600", applying._observed_mode(destination))
 
+    @full_tier_only
     def test_recovery_restores_external_writer_from_interrupted_deletion_quarantine(self):
         cases = ("managed", "manifest")
         for index, boundary in enumerate(cases):
@@ -3439,6 +3532,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(external, destination.read_bytes())
                 self.assertEqual("0600", applying._observed_mode(destination))
 
+    @full_tier_only
     def test_candidate_publication_rechecks_manifest_precondition(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3489,6 +3583,7 @@ class MigrationApplyTest(unittest.TestCase):
             )
             self.assertTrue((journal_root / "journal.json").is_file())
 
+    @full_tier_only
     def test_candidate_publication_revalidates_manifest_inside_publish_boundary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3553,6 +3648,7 @@ class MigrationApplyTest(unittest.TestCase):
                 ).is_file()
             )
 
+    @full_tier_only
     def test_candidate_manifest_write_ahead_crash_windows_recover_exactly(self):
         for stop_stage, exit_code in (("before-publication", 31), ("after-publication", 32)):
             with self.subTest(stop_stage=stop_stage), tempfile.TemporaryDirectory() as tmpdir:
@@ -3583,7 +3679,7 @@ class MigrationApplyTest(unittest.TestCase):
                 if stop_stage == "before-publication":
                     self.assertIsNone(load_manifest(target))
                 else:
-                    self.assertEqual(4, load_manifest(target).contract_version)
+                    self.assertEqual(5, load_manifest(target).contract_version)
                     self.assertEqual(
                         manifest_intent["candidate_sha256"],
                         sha256_file(target / ".vault-builder" / "manifest.json"),
@@ -3594,6 +3690,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(before, _tree_digest(target))
                 self.assertIsNone(load_manifest(target))
 
+    @full_tier_only
     def test_candidate_manifest_crash_recovery_restores_prior_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3630,6 +3727,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertEqual(prior_bytes, (target / ".vault-builder" / "manifest.json").read_bytes())
 
+    @full_tier_only
     def test_prior_manifest_backup_write_ahead_crash_recovers_exactly(self):
         cases = (
             ("after-intent", 38, False, False),
@@ -3688,6 +3786,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(before, _tree_digest(target))
                 self.assertEqual(prior, load_manifest(target))
 
+    @full_tier_only
     def test_prior_manifest_partial_backup_staging_recovers_exactly(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3735,6 +3834,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertEqual(prior, load_manifest(target))
 
+    @full_tier_only
     def test_candidate_manifest_recovery_refuses_unknown_current_hash(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3764,6 +3864,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before_recovery, _tree_digest(target))
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
+    @full_tier_only
     def test_candidate_manifest_recovery_refuses_unknown_current_mode(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3793,6 +3894,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before_recovery, _tree_digest(target))
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
+    @full_tier_only
     def test_recovery_preflights_all_managed_targets_before_restoring_any(self):
         for mutation in ("unknown-bytes", "unsafe-symlink"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
@@ -3830,6 +3932,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(before_recovery, _tree_digest(target))
                 self.assertTrue(journal_root.is_dir())
 
+    @full_tier_only
     def test_automatic_rollback_preflights_all_originals_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3901,6 +4004,7 @@ class MigrationApplyTest(unittest.TestCase):
             )
             self.assertFalse((target / ".vault-builder" / "manifest.json").exists())
 
+    @full_tier_only
     def test_candidate_manifest_requires_prior_backup_before_recovery_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3940,9 +4044,10 @@ class MigrationApplyTest(unittest.TestCase):
                 recover_migration(target, plan.migration_id)
 
             self.assertEqual(before_recovery, _tree_digest(target))
-            self.assertEqual(4, load_manifest(target).contract_version)
+            self.assertEqual(5, load_manifest(target).contract_version)
             self.assertTrue(journal_root.is_dir())
 
+    @full_tier_only
     def test_recovery_restores_manifest_before_managed_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -3962,7 +4067,7 @@ class MigrationApplyTest(unittest.TestCase):
             _, child_status = os.waitpid(child, 0)
             self.assertTrue(os.WIFEXITED(child_status))
             self.assertEqual(37, os.WEXITSTATUS(child_status))
-            self.assertEqual(4, load_manifest(target).contract_version)
+            self.assertEqual(5, load_manifest(target).contract_version)
 
             with mock.patch.object(applying, "_restore_entry", side_effect=OSError("stop during managed restore")):
                 with self.assertRaisesRegex(OSError, "stop during managed restore"):
@@ -3971,21 +4076,68 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertIsNone(load_manifest(target))
             self.assertTrue((target / ".vault-builder" / "recovery" / plan.migration_id).is_dir())
 
+    @full_tier_only
     def test_recover_restores_interrupted_journal_and_prior_manifest(self):
         self._recover_interrupted_journal(1)
 
     def test_journal_contract_versions_are_listed_directly(self):
         # Following MANIFEST_CONTRACT_VERSION alone would drop contracts 2 and 3 (spec 결정N).
-        self.assertEqual(frozenset({1, 2, 3, 4}), applying._JOURNAL_CONTRACT_VERSIONS)
+        self.assertEqual(frozenset({1, 2, 3, 4, 5}), applying._JOURNAL_CONTRACT_VERSIONS)
 
-    def test_recover_accepts_journals_from_contract_2_3_and_4_migrations(self):
-        for contract in (2, 3, 4):
+    @full_tier_only
+    def test_recover_accepts_journals_from_contract_2_3_4_and_5_migrations(self):
+        for contract in (2, 3, 4, 5):
             with self.subTest(contract=contract):
                 self._recover_interrupted_journal(contract)
 
+    def test_journal_from_contract_1_to_4_may_list_retired_release_gate_workflow(self):
+        # Contracts 1-4 managed .github/workflows/release-gate.yml. A journal those migrations
+        # left behind must stay recoverable after contract 5 retired the path.
+        for contract in (1, 2, 3, 4):
+            with self.subTest(contract=contract):
+                entries = applying._journal_entries(_retired_workflow_journal(contract))
+                self.assertEqual((".github/workflows/release-gate.yml",), tuple(item["path"] for item in entries))
+
+    def test_journal_from_contract_5_rejects_retired_release_gate_workflow(self):
+        with self.assertRaisesRegex(ValueError, "not a managed file"):
+            applying._journal_entries(_retired_workflow_journal(5))
+
+    def test_journal_without_contract_version_rejects_retired_release_gate_workflow(self):
+        journal = _retired_workflow_journal(4)
+        del journal["target_contract_version"]
+        with self.assertRaisesRegex(ValueError, "not a managed file"):
+            applying._journal_entries(journal)
+
+    def test_recover_restores_retired_release_gate_workflow_from_contract_4_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            relative = Path(".github/workflows/release-gate.yml")
+            original = b"name: release gate\n"
+            interrupted = b"interrupted replacement\n"
+            (target / relative).parent.mkdir(parents=True)
+            (target / relative).write_bytes(interrupted)
+            os.chmod(target / relative, 0o644)
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            original_path = journal_root / "originals" / relative
+            original_path.parent.mkdir(parents=True)
+            original_path.write_bytes(original)
+            os.chmod(original_path, 0o644)
+            journal = _retired_workflow_journal(4)
+            journal["entries"][0]["sha256"] = hashlib.sha256(original).hexdigest()
+            journal["entries"][0]["applied_sha256"] = hashlib.sha256(interrupted).hexdigest()
+            journal["entries"][0]["applied_mode"] = "0644"
+            (journal_root / "journal.json").write_text(json.dumps(journal, indent=2, sort_keys=True) + "\n")
+
+            recover_migration(target, migration_id)
+
+            self.assertEqual(original, (target / relative).read_bytes())
+            self.assertFalse(journal_root.exists())
+
+    @full_tier_only
     def test_recover_rejects_journal_for_unknown_contract(self):
         with self.assertRaisesRegex(ValueError, "journal is invalid"):
-            self._recover_interrupted_journal(5)
+            self._recover_interrupted_journal(6)
 
     def _recover_interrupted_journal(self, contract: int) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4040,6 +4192,7 @@ class MigrationApplyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not found"):
                 recover_migration(target, migration_id)
 
+    @full_tier_only
     def test_recover_prepared_journal_at_exact_path_removes_created_parent_chain(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4103,6 +4256,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertFalse((target / ".agents").exists())
             self.assertFalse(journal_root.exists())
 
+    @full_tier_only
     def test_recover_interrupted_transaction_uses_durable_directory_markers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4137,6 +4291,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_directory_write_ahead_crash_windows_recover_exactly(self):
         class StopAfterDirectoryStep(Exception):
             pass
@@ -4182,6 +4337,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(before, _tree_digest(target))
                 self.assertFalse((target / ".agents" / ".vault-builder-migration.json").exists())
 
+    @full_tier_only
     def test_directory_rollback_hard_stops_resume_after_marker_and_rmdir(self):
         class StopDuringDirectoryRollback(Exception):
             pass
@@ -4237,6 +4393,7 @@ class MigrationApplyTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "not found"):
                     recover_migration(target, plan.migration_id)
 
+    @full_tier_only
     def test_directory_marker_partial_write_never_reaches_target(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4285,6 +4442,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_directory_marker_mode_and_recovery_ignore_restrictive_umask(self):
         class StopAfterMarkerPublication(Exception):
             pass
@@ -4334,6 +4492,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_directory_marker_revalidates_staged_source_immediately_before_link(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4357,6 +4516,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertFalse((target / ".vault-builder" / "recovery" / plan.migration_id).exists())
 
+    @full_tier_only
     def test_directory_marker_publish_preserves_hard_link_identity(self):
         class StopAfterMarkerPublication(Exception):
             pass
@@ -4395,6 +4555,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_recovery_uses_hard_link_identity_after_linked_inode_corruption(self):
         class StopAfterMarkerCorruption(Exception):
             pass
@@ -4424,6 +4585,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_recovery_refuses_replaced_directory_marker_inode(self):
         class StopAfterMarkerPublication(Exception):
             pass
@@ -4466,6 +4628,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertEqual(before_recovery, _tree_digest(target))
                 self.assertTrue(journal_root.is_dir())
 
+    @full_tier_only
     def test_apply_with_restrictive_umask_cleans_up_directory_markers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4530,6 +4693,7 @@ class MigrationApplyTest(unittest.TestCase):
                 applying._fsync_directory(Path("/durability-test"))
             self.assertEqual(errno.EACCES, raised.exception.errno)
 
+    @full_tier_only
     def test_journal_ancestry_fsync_failure_aborts_without_target_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4556,6 +4720,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertTrue(failed)
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_journal_state_parent_fsync_failure_aborts_without_target_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4582,6 +4747,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_managed_replacement_parent_fsync_failure_rolls_back_exactly(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4644,6 +4810,7 @@ class MigrationApplyTest(unittest.TestCase):
                 calls,
             )
 
+    @full_tier_only
     def test_candidate_manifest_parent_fsync_failure_rolls_back_exactly(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4672,6 +4839,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertTrue(failed)
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_managed_and_manifest_staging_hard_stops_recover_exactly(self):
         cases = (
             ("managed", 51),
@@ -4718,6 +4886,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertFalse(journal_root.exists())
                 self.assertEqual([], list(target.rglob("*.tmp")))
 
+    @full_tier_only
     def test_cleanup_parent_fsync_failure_is_cleanup_pending_not_rollback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4757,6 +4926,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual([], list(target.rglob(".vault-builder-migration.json")))
             self.assertFalse(recovery.exists())
 
+    @full_tier_only
     def test_cleanup_recovers_when_final_tombstone_fsync_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4798,6 +4968,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(committed, load_manifest(target))
             self.assertFalse(recovery.exists())
 
+    @full_tier_only
     def test_cleanup_transient_nonempty_error_keeps_journal_for_resume(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4840,6 +5011,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(committed, load_manifest(target))
             self.assertFalse(recovery.exists())
 
+    @full_tier_only
     def test_idempotent_cleanup_preserves_preexisting_recovery_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4856,6 +5028,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(committed, load_manifest(target))
             self.assertTrue(recovery.is_dir())
 
+    @full_tier_only
     def test_cleanup_pending_rejects_symlinked_created_directory_without_mutation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4885,6 +5058,7 @@ class MigrationApplyTest(unittest.TestCase):
                 (target / ".vault-builder" / "recovery" / plan.migration_id).is_dir()
             )
 
+    @full_tier_only
     def test_cleanup_hard_stops_resume_without_rollback(self):
         cases = (
             ("after-marker-removal", 61, True),
@@ -4928,6 +5102,7 @@ class MigrationApplyTest(unittest.TestCase):
                 self.assertFalse(recovery.exists())
                 self.assertEqual("cleanup-completed", recover_migration(target, plan.migration_id))
 
+    @full_tier_only
     def test_recovery_refuses_hostile_journals_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -4969,6 +5144,7 @@ class MigrationApplyTest(unittest.TestCase):
 
             self.assertEqual(before, _tree_digest(target))
 
+    @full_tier_only
     def test_recovery_refuses_corrupt_original_and_complete_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5015,6 +5191,7 @@ class MigrationApplyTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "complete"):
                 recover_migration(target, migration_id)
 
+    @full_tier_only
     def test_recovery_rejects_duplicate_json_keys_and_hostile_created_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5066,6 +5243,7 @@ class MigrationApplyTest(unittest.TestCase):
             self.assertEqual(before, _tree_digest(target))
             self.assertTrue(user_directory.is_dir())
 
+    @full_tier_only
     def test_recovery_preserves_preexisting_directory_without_a_valid_marker(self):
         for marker_kind in ("missing", "symlink", "directory", "duplicate-json", "wrong-content", "wrong-nonce"):
             with self.subTest(marker_kind=marker_kind), tempfile.TemporaryDirectory() as tmpdir:
@@ -5198,6 +5376,7 @@ class ReleaseGateValidationTest(unittest.TestCase):
 
         self.assertNotIn("Output", str(failure))
 
+    @full_tier_only
     def test_apply_default_validation_runs_target_release_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5221,6 +5400,7 @@ class ReleaseGateValidationTest(unittest.TestCase):
 
 
 class VaultMigrationCliTest(unittest.TestCase):
+    @full_tier_only
     def test_audit_stdout_is_deterministic_and_target_is_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5240,6 +5420,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             summary, _, _ = first.stdout.partition("\n\n{")
             self.assertNotIn("fingerprint", summary.lower())
 
+    @full_tier_only
     def test_audit_returns_two_and_writes_blocking_plan(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5256,6 +5437,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertTrue(MigrationPlan.from_json(plan_path.read_text()).has_blocking_actions)
             self.assertFalse((target / ".vault-builder").exists())
 
+    @full_tier_only
     def test_audit_warns_once_about_uncommitted_changes_without_changing_plan_or_exit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5278,6 +5460,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertIn("uncommitted", warnings[0])
             self.assertIn("before apply", warnings[0])
 
+    @full_tier_only
     def test_audit_uncommitted_warning_keeps_blocking_exit_code(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5292,6 +5475,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, len(result.stderr.splitlines()), result.stderr)
             self.assertIn("before apply", result.stderr)
 
+    @full_tier_only
     def test_audit_report_written_by_audit_does_not_trigger_uncommitted_warning(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -5309,6 +5493,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual("", result.stderr)
 
+    @full_tier_only
     def test_audit_report_does_not_invalidate_the_plan_emitted_by_that_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5334,6 +5519,7 @@ class VaultMigrationCliTest(unittest.TestCase):
                 MigrationPlan.from_json(checked_json),
             )
 
+    @full_tier_only
     def test_audit_rejects_plan_and_report_pair_as_non_atomic_contract(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5489,6 +5675,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual("0600", f"{output.stat().st_mode & 0o7777:04o}")
             self.assertFalse(list(root.glob(".migration-plan.json.*.tmp")))
 
+    @full_tier_only
     def test_audit_refuses_to_overwrite_existing_plan_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5509,6 +5696,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertIn("already exists", result.stderr)
             self.assertEqual("external output\n", output.read_text())
 
+    @full_tier_only
     def test_audit_validates_all_outputs_before_writing_either_one(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5529,6 +5717,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertFalse(plan_path.exists())
 
+    @full_tier_only
     def test_audit_prepares_report_before_writing_external_plan(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5672,6 +5861,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual("first\n", first_output.read_text())
             self.assertEqual("second\n", second_output.read_text())
 
+    @full_tier_only
     def test_audit_rejects_raw_traversal_for_report_and_plan_output_without_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5690,6 +5880,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, plan_result.returncode)
             self.assertFalse(plan_path.exists())
 
+    @full_tier_only
     def test_audit_creates_safe_external_plan_parent_with_mode_0644_under_restrictive_umask(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5705,6 +5896,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual("0644", f"{plan_path.stat().st_mode & 0o7777:04o}")
 
+    @full_tier_only
     def test_audit_rejects_nonregular_report_leaf(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5718,6 +5910,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, result.returncode)
             self.assertTrue(report.is_dir())
 
+    @full_tier_only
     def test_audit_report_is_an_explicit_safe_target_write(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5732,6 +5925,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertIn("Target writes: scratch/reports/migration-audit.md", result.stdout)
             self.assertIn('"migration_id"', report.read_text())
 
+    @full_tier_only
     def test_audit_rejects_symlinked_report_parent_and_leaf(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5752,6 +5946,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertEqual(1, leaf_result.returncode)
             self.assertIn("symlink", leaf_result.stderr)
 
+    @full_tier_only
     def test_audit_rejects_symlinked_plan_output_parent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -6011,6 +6206,7 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertIn("Migration committed; cleanup completed.", stdout.getvalue())
             self.assertNotIn("rollback completed", stdout.getvalue().lower())
 
+    @full_tier_only
     def test_recover_prints_actionable_failure_for_missing_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
@@ -6028,8 +6224,9 @@ class VaultMigrationCliTest(unittest.TestCase):
             self.assertIn("Recovery journal not found", result.stderr)
 
 
+@full_tier_only
 class VaultMigrationAcceptanceTest(unittest.TestCase):
-    def test_fresh_vault_has_v4_manifest_and_passes_its_release_gate(self):
+    def test_fresh_vault_has_v5_manifest_and_passes_its_release_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "vault"
 
@@ -6038,7 +6235,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             manifest = load_manifest(target)
             self.assertIsNotNone(manifest)
             assert manifest is not None
-            self.assertEqual(4, manifest.contract_version)
+            self.assertEqual((5, 5), (manifest.schema_version, manifest.contract_version))
             self.assertIsNone(manifest.last_migration_id)
             self.assertFalse((target / "builder_tests").exists())
             self.assertFalse((target / "tools" / "vault_migration").exists())
@@ -6068,7 +6265,7 @@ class VaultMigrationAcceptanceTest(unittest.TestCase):
             for relative, expected_mode in expected_user_modes.items():
                 self.assertIn(relative, protected_after)
                 self.assertEqual(expected_mode, protected_after[relative][1], relative)
-            self.assertEqual(4, manifest.contract_version)
+            self.assertEqual(5, manifest.contract_version)
             self.assertEqual(plan.migration_id, manifest.last_migration_id)
             self.assertEqual(manifest, load_manifest(target))
             self.assertFalse((target / ".vault-builder" / "recovery").exists())
@@ -6156,6 +6353,7 @@ def _skill_frontmatter(path: Path) -> dict[str, str]:
     return fields
 
 
+@full_tier_only
 class FreshVaultClaudeIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -6694,7 +6892,7 @@ class ProjectMemoryRecallTest(unittest.TestCase):
                 self.assertNotIn("/Users/", text, path)
                 self.assertNotIn("/home/", text, path)
                 self.assertNotIn("~/", text, path)
-        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v4.json").read_text(encoding="utf-8"))
+        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v5.json").read_text(encoding="utf-8"))
         self.assertNotIn("assets/", json.dumps(catalog_paths))
         self.assertFalse([path for path in MANAGED_PATHS if path.startswith("tools/vault_migration/")])
 
@@ -6964,8 +7162,8 @@ class _UserHomeTestCase(unittest.TestCase):
         self.assertEqual({"command": python, "args": ["-I", str(router)]}, entry)
         self.assertFalse((target / ".mcp.json").exists())
         manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(4, manifest["schema_version"])
-        self.assertEqual(4, manifest["contract_version"])
+        self.assertEqual(5, manifest["schema_version"])
+        self.assertEqual(5, manifest["contract_version"])
         self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
         for relative in (*SESSION_MANAGED_FILES, *CONTRACT4_MANAGED_FILES):
             self.assertTrue((target / relative).is_file(), relative)
@@ -6999,6 +7197,7 @@ class _UserHomeTestCase(unittest.TestCase):
 class InstallTest(_UserHomeTestCase):
     """install runs with a temporary HOME and without CLAUDE_CONFIG_DIR unless a test sets it (A-26)."""
 
+    @full_tier_only
     def test_install_new_vault_creates_vault_user_files_and_v2_manifest(self):
         claude_json = self._write_claude_json(
             {
@@ -7040,6 +7239,7 @@ class InstallTest(_UserHomeTestCase):
         )
         self.assertEqual(0, recall.returncode, recall.stdout + recall.stderr)
 
+    @full_tier_only
     def test_install_creates_claude_json_when_absent_and_new_vault_git_status_omits_mcp_json(self):
         target = self.work / "notes"
 
@@ -7060,6 +7260,24 @@ class InstallTest(_UserHomeTestCase):
         self.assertNotIn("__pycache__", status)
         self.assertIn("tools/wiki/cli.py", status)
 
+    @full_tier_only
+    def test_install_new_vault_gets_only_the_qa_workflow(self):
+        """A-17: the Vault gets qa.yml and no builder-only or contract-4 workflow."""
+        target = self.work / "notes"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        workflows = sorted(path.relative_to(target).as_posix() for path in (target / ".github").rglob("*"))
+        self.assertEqual([".github/workflows", CONTRACT5_WORKFLOW], workflows)
+        manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual((5, 5), (manifest["schema_version"], manifest["contract_version"]))
+        self.assertIn(CONTRACT5_WORKFLOW, manifest["managed_files"])
+        for relative in NON_VAULT_WORKFLOWS:
+            self.assertFalse((target / relative).exists(), relative)
+            self.assertNotIn(relative, manifest["managed_files"])
+
+    @full_tier_only
     def test_install_second_vault_shares_user_files_and_adds_its_own_entry(self):
         first = self.work / "a"
         second = self.work / "b"
@@ -7076,6 +7294,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(["llm-wiki"], list(claude["mcpServers"]))
         self._assert_installed(second, "b", self.config, self.home / ".claude.json")
 
+    @full_tier_only
     def test_install_uses_claude_config_dir_when_set(self):
         config = self.home / "custom-config"
         target = self.work / "vault-a"
@@ -7087,6 +7306,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertFalse(self.config.exists())
         self.assertFalse((self.home / ".claude.json").exists())
 
+    @full_tier_only
     def test_install_rejects_claude_config_dir_outside_home(self):
         outside = self.tmp / "outside-config"
         target = self.work / "vault-a"
@@ -7098,6 +7318,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertIn("CLAUDE_CONFIG_DIR", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_install_default_name_is_target_basename_or_requires_name(self):
         target = self.work / "my-notes"
         self.assertEqual(0, self._install(str(target)).returncode)
@@ -7116,6 +7337,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertFalse(odd.exists())
 
+    @full_tier_only
     def test_install_rejects_invalid_claude_json_without_writing(self):
         self._write_claude_json("{not json")
         target = self.work / "vault-a"
@@ -7129,6 +7351,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual([], list(self.work.iterdir()))
         self.assertEqual(before, self._user_snapshot())
 
+    @full_tier_only
     def test_install_rejects_name_used_by_another_vault(self):
         other = self.work / "other"
         self.assertEqual(0, self._install(str(other), "--name", "a").returncode)
@@ -7142,6 +7365,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertFalse(target.exists())
         self.assertEqual(before, self._user_snapshot())
 
+    @full_tier_only
     def test_install_replaces_entry_whose_vault_no_longer_exists(self):
         gone = self.work / "gone"
         self.assertEqual(0, self._install(str(gone), "--name", "a").returncode)
@@ -7153,6 +7377,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self._assert_installed(target, "a", self.config, self.home / ".claude.json")
 
+    @full_tier_only
     def test_install_rejects_non_empty_target_and_accepts_empty_directory(self):
         busy = self.work / "busy"
         busy.mkdir()
@@ -7169,6 +7394,7 @@ class InstallTest(_UserHomeTestCase):
         self._assert_installed(empty, "empty", self.config, self.home / ".claude.json")
         self.assertEqual(0o755, empty.stat().st_mode & 0o777)
 
+    @full_tier_only
     def test_install_keeps_unknown_user_skill_and_lists_it(self):
         skill = self.config / "skills" / "project-memory" / "SKILL.md"
         skill.parent.mkdir(parents=True)
@@ -7185,6 +7411,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertNotIn(".claude/skills/project-memory/SKILL.md", locations)
         self.assertIn(".claude/skills/project-memory/scripts/recall.sh", locations)
 
+    @full_tier_only
     def test_install_replaces_recall_script_built_for_another_interpreter(self):
         recall = self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
         recall.parent.mkdir(parents=True)
@@ -7199,6 +7426,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self._assert_installed(target, "a", self.config, self.home / ".claude.json")
 
+    @full_tier_only
     def test_install_dry_run_writes_nothing(self):
         self._write_claude_json({"mcpServers": {}})
         target = self.work / "vault-a"
@@ -7219,6 +7447,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_install_existing_vault_reinstalls_user_files_only(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7243,6 +7472,7 @@ class InstallTest(_UserHomeTestCase):
             },
         )
 
+    @full_tier_only
     def test_install_existing_vault_refuses_when_audit_needs_changes(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7257,6 +7487,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertIn("audit", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_install_existing_vault_refuses_another_name(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7270,6 +7501,7 @@ class InstallTest(_UserHomeTestCase):
         self.assertIn("--name a", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_install_existing_vault_refuses_another_config_folder(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7336,6 +7568,7 @@ class InstallTest(_UserHomeTestCase):
             installing.require_python((3, 9, 18))
         installing.require_python((3, 10, 0))
 
+    @full_tier_only
     def test_init_vault_builds_install_structure_and_prints_chosen_python(self):
         target = self.work / "init-vault"
         result = subprocess.run(
@@ -7357,6 +7590,7 @@ class InstallTest(_UserHomeTestCase):
             self.assertFalse(command.startswith("python3 "), command)
             self.assertTrue(command.startswith(shlex.quote(self._chosen_python()) + " "), command)
 
+    @full_tier_only
     def test_init_vault_with_old_python_only_writes_nothing(self):
         stub_bin = self.tmp / "bin"
         stub_bin.mkdir()
@@ -7467,6 +7701,7 @@ class InstallRouterTests(_UserHomeTestCase):
     def router(self) -> Path:
         return self.config / "vault-builder" / "llm_wiki_router.py"
 
+    @full_tier_only
     def test_new_vault_registers_one_llm_wiki_entry_and_no_mcp_json(self):
         target = self.work / "vault-a"
 
@@ -7486,6 +7721,7 @@ class InstallRouterTests(_UserHomeTestCase):
         self.assertIn("/mcp", result.stdout)
         self.assertIn("doctor", result.stdout)
 
+    @full_tier_only
     def test_second_vault_leaves_mcp_settings_bytes_unchanged(self):
         self.assertEqual(0, self._install(str(self.work / "a")).returncode)
         claude_json = self.home / ".claude.json"
@@ -7502,6 +7738,7 @@ class InstallRouterTests(_UserHomeTestCase):
         self.assertEqual(["a", "b"], sorted(vault_map["vaults"]))
         self._assert_installed(self.work / "b", "b", self.config, claude_json)
 
+    @full_tier_only
     def test_old_entry_mcp_json_and_foreign_llm_wiki_entry_are_refused_without_writes(self):
         existing = self.work / "existing"
         self.assertEqual(0, self._install(str(existing), "--name", "existing").returncode)
@@ -7560,6 +7797,7 @@ class InstallRouterTests(_UserHomeTestCase):
         notes = [line for line in out.getvalue().splitlines() if line.startswith("Note:")]
         self.assertTrue(any(str(first_python) in line and str(second_python) in line for line in notes), notes)
 
+    @full_tier_only
     def test_router_with_other_bytes_is_kept_and_listed(self):
         self.router.parent.mkdir(parents=True)
         self.router.write_text("# my own router\n", encoding="utf-8")
@@ -7574,6 +7812,7 @@ class InstallRouterTests(_UserHomeTestCase):
         locations = [record["location"] for record in manifest["external_records"]]
         self.assertNotIn(".claude/vault-builder/llm_wiki_router.py", locations)
 
+    @full_tier_only
     def test_vault_map_version_1_is_read_and_written_as_version_2(self):
         vault_map_path = self.config / "vault-builder" / "vault-map.json"
         vault_map_path.parent.mkdir(parents=True)
@@ -7595,6 +7834,7 @@ class InstallRouterTests(_UserHomeTestCase):
         self.assertEqual({"path": str(target), "role": "personal"}, vault_map["vaults"]["a"])
         self.assertEqual(projects, vault_map["projects"])
 
+    @full_tier_only
     def test_vault_map_version_1_is_rewritten_even_when_the_vault_is_already_listed(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7608,6 +7848,7 @@ class InstallRouterTests(_UserHomeTestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(2, json.loads(vault_map_path.read_text(encoding="utf-8"))["version"])
 
+    @full_tier_only
     def test_vault_map_with_unknown_version_is_refused_without_writes(self):
         vault_map_path = self.config / "vault-builder" / "vault-map.json"
         vault_map_path.parent.mkdir(parents=True)
@@ -7620,6 +7861,7 @@ class InstallRouterTests(_UserHomeTestCase):
         self.assertIn("vault-map.json", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_existing_vault_with_old_entry_record_is_refused_without_writes(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7695,6 +7937,7 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
         self.assertIn("create AGENTS.md", out.getvalue())
         self.assertIn("create tools/wiki/cli.py", out.getvalue())
 
+    @full_tier_only
     def test_unknown_managed_file_is_refused_and_dry_run_writes_nothing(self):
         target = self._uninstalled_vault()
         (target / "AGENTS.md").write_text("my own agent rules\n", encoding="utf-8")
@@ -7709,6 +7952,7 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
                 self.assertIn("audit", result.stderr)
                 self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_dry_run_prints_audit_plan_and_outside_plan_without_writes(self):
         target = self._uninstalled_vault()
         before = _tree_snapshot(self.tmp)
@@ -7756,6 +8000,7 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
         self.assertEqual(0, installing.install(target, name="a", out=io.StringIO()))
         self._assert_installed(target, "a", self.config, self.home / ".claude.json")
 
+    @full_tier_only
     def test_folder_without_vault_structure_is_still_refused(self):
         busy = self.work / "busy"
         busy.mkdir()
@@ -7769,6 +8014,7 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
 
+@full_tier_only
 class VaultMapVersionStrictTests(_UserHomeTestCase):
     """install and uninstall accept only an int version 1 or 2, like the router, recall and memory-scan."""
 
@@ -7859,6 +8105,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
     def _knowledge_snapshot(self, vault: Path) -> dict[str, tuple[str, int]]:
         return _tree_snapshot(*(vault / name for name in ("raw", "wiki", "scratch", ".git")))
 
+    @full_tier_only
     def test_uninstall_dry_run_writes_nothing(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7872,6 +8119,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertIn("Nothing was written.", result.stdout)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_uninstall_vault_a_then_b_removes_only_owned_files(self):
         claude_json = self._write_claude_json(
             {
@@ -7946,6 +8194,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertFalse((self.config / "settings.json").exists())
         self.assertEqual([], sorted(str(path) for path in self.home.rglob("*vault-builder-backup*")))
 
+    @full_tier_only
     def test_uninstall_last_vault_keeps_changed_entry_and_unknown_recall(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -7966,6 +8215,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertFalse(self.vault_map.exists())
         self.assertFalse((self.config / "vault-builder").exists())
 
+    @full_tier_only
     def test_uninstall_v1_manifest_processes_vault_only(self):
         target = _initialize_v1_vault(self.work)
         claude_json = self._write_claude_json({"mcpServers": {"llm-wiki-vault": {"command": "x", "args": []}}})
@@ -7994,6 +8244,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertIn("manifest", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_uninstall_rejects_invalid_claude_json_and_writes_nothing(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -8006,6 +8257,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         self.assertIn(".claude.json", result.stderr)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_uninstall_and_doctor_refuse_unexpected_outside_records(self):
         settings = self.config / "settings.json"
         settings.parent.mkdir(parents=True)
@@ -8064,6 +8316,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
                     self.vault_map.write_bytes(vault_map_saved)
         self.assertEqual(0, self._cli("doctor", str(target)).returncode)
 
+    @full_tier_only
     def test_doctor_healthy_vault_exits_zero_and_each_problem_exits_one(self):
         target = self.work / "vault-a"
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
@@ -8105,6 +8358,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
                     path.chmod(mode)
         self.assertEqual(0, self._cli("doctor", str(target)).returncode)
 
+    @full_tier_only
     def test_doctor_checks_claude_mcp_list_when_claude_config_dir_is_set(self):
         config = self.home / "custom-config"
         target = self.work / "vault-a"
@@ -8231,6 +8485,7 @@ class UninstallRouterTests(_RouterVaultTestCase):
             self.assertFalse((vault / ".mcp.json").exists())
         self.assertEqual([], sorted(str(path) for path in self.home.rglob("*vault-builder-backup*")))
 
+    @full_tier_only
     def test_remaining_vault_keeps_shared_files_and_last_vault_removes_everything(self):
         self._uninstall_both(
             {
@@ -8240,6 +8495,7 @@ class UninstallRouterTests(_RouterVaultTestCase):
             }
         )
 
+    @full_tier_only
     def test_last_vault_leaves_an_empty_mcp_servers_object_when_none_existed(self):
         self._uninstall_both(None)
         self.assertEqual({"mcpServers": {}}, self._claude())
@@ -8264,6 +8520,7 @@ class UninstallRouterTests(_RouterVaultTestCase):
         self.assertEqual({}, self._claude()["mcpServers"], out.getvalue())
         self.assertFalse((self.config / "vault-builder").exists())
 
+    @full_tier_only
     def test_last_vault_keeps_changed_entry_and_unknown_router_and_lists_them(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
@@ -8283,6 +8540,7 @@ class UninstallRouterTests(_RouterVaultTestCase):
         self.assertFalse(self.skill.exists())
         self.assertFalse((self.config / "skills" / "project-memory").exists())
 
+    @full_tier_only
     def test_old_entry_record_is_refused_without_writes(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
@@ -8303,6 +8561,7 @@ class UninstallRouterTests(_RouterVaultTestCase):
                 self.assertIn("previous vault-builder version", result.stderr)
                 self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_old_mcp_json_is_deleted_and_other_mcp_json_is_kept_and_printed(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
@@ -8345,12 +8604,13 @@ class DoctorRouterTests(_RouterVaultTestCase):
     def setUp(self):
         super().setUp()
         self.target = self.work / "vault-a"
-        self._install_ok(self.target, "a")
 
     def _problems(self, result: subprocess.CompletedProcess[str]) -> list[str]:
         return [line for line in result.stdout.splitlines() if line.startswith("Problem:")]
 
+    @full_tier_only
     def test_healthy_vault_exits_zero_and_writes_nothing(self):
+        self._install_ok(self.target, "a")
         before = _tree_snapshot(self.tmp)
 
         result = self._cli("doctor", str(self.target))
@@ -8360,7 +8620,9 @@ class DoctorRouterTests(_RouterVaultTestCase):
         self.assertEqual(before, _tree_snapshot(self.tmp))
         self.assertFalse((self.target / ".mcp.json").exists())
 
+    @full_tier_only
     def test_each_problem_exits_one_without_writing(self):
+        self._install_ok(self.target, "a")
         saved_claude = self.claude_json.read_bytes()
         saved_router = self.router.read_bytes()
 
@@ -8408,19 +8670,30 @@ class DoctorRouterTests(_RouterVaultTestCase):
                     (self.target / ".mcp.json").unlink(missing_ok=True)
         self.assertEqual(0, self._cli("doctor", str(self.target)).returncode)
 
-    def test_router_that_never_answers_is_a_problem_within_40_seconds(self):
+    def test_router_that_never_answers_is_a_problem_after_the_start_timeout(self):
+        from tools.vault_migration import uninstalling
+
+        # No install: doctor reaches the server start check with only the entry and the router file.
+        self.target.mkdir()
+        self.router.parent.mkdir(parents=True)
         self.router.write_text("import time\ntime.sleep(600)\n", encoding="utf-8")
+        self._write_claude_json({"mcpServers": {"llm-wiki": {"command": sys.executable, "args": ["-I", str(self.router)]}}})
         before = _tree_snapshot(self.tmp)
+        out = io.StringIO()
         started = time.monotonic()
 
-        result = self._cli("doctor", str(self.target))
+        with mock.patch.object(uninstalling, "_START_TIMEOUT_SECONDS", 1):
+            code = uninstalling.doctor(self.target, environ=self._env(), out=out)
 
-        self.assertLess(time.monotonic() - started, 40)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertTrue(any("did not answer" in line for line in self._problems(result)), result.stdout)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(1, code, out.getvalue())
+        problems = [line for line in out.getvalue().splitlines() if line.startswith("Problem:")]
+        self.assertTrue(any("did not answer" in line for line in problems), out.getvalue())
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
+    @full_tier_only
     def test_server_start_problem_includes_first_stderr_line(self):
+        self._install_ok(self.target, "a")
         self.router.write_text("import sys\nsys.stderr.write('router broke here\\n')\nsys.exit(3)\n", encoding="utf-8")
 
         result = self._cli("doctor", str(self.target))
@@ -8428,9 +8701,11 @@ class DoctorRouterTests(_RouterVaultTestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertTrue(any("router broke here" in line for line in self._problems(result)), result.stdout)
 
+    @full_tier_only
     def test_patch_version_command_with_another_path_is_a_note_only(self):
         from tools.vault_migration import uninstalling
 
+        self._install_ok(self.target, "a")
         patch_python = self.tmp / "3.12.7" / "bin" / "python3"
         patch_python.parent.mkdir(parents=True)
         patch_python.symlink_to(sys.executable)
@@ -8874,6 +9149,7 @@ class VaultMapV1CompatTests(_ProjectLookupCase):
                     self._answers(start),
                 )
 
+    @full_tier_only
     def test_install_rewrites_version_1_map_as_version_2_without_losing_content(self):
         original = {
             "version": 1,
@@ -8907,6 +9183,7 @@ def _changed_paths(before: dict[str, tuple[str, int]], after: dict[str, tuple[st
     return sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
 
 
+@full_tier_only
 class ReinstallRoundTripTests(_RouterVaultTestCase):
     """install, publish, uninstall, install, twice, with the real commands (decision 42, A-23)."""
 
@@ -8950,14 +9227,14 @@ class ReinstallRoundTripTests(_RouterVaultTestCase):
         return page
 
     def _knowledge(self, target: Path) -> dict[str, tuple[str, int]]:
-        """raw/, wiki/, scratch/, and .git, without the two .git files the vault release gate refreshes.
+        """raw/, wiki/, scratch/, and .git, without .git/index, which the vault release gate refreshes.
 
-        install runs the vault release gate through apply_plan (decision 42). The gate stores its
-        test cache in .git/llm-wiki-gate-tests.cache, and its git commands refresh the stat data in
-        .git/index. The index entries themselves are compared through git ls-files --stage.
+        install runs the vault release gate through apply_plan (decision 42). The gate's git
+        commands refresh the stat data in .git/index. The index entries themselves are compared
+        through git ls-files --stage. The gate keeps no test cache, so nothing else is excluded.
         """
         git_dir = target / ".git"
-        runtime = {str(git_dir / "index"), str(git_dir / "llm-wiki-gate-tests.cache")}
+        runtime = {str(git_dir / "index")}
         snapshot = {path: state for path, state in self._knowledge_snapshot(target).items() if path not in runtime}
         staged = subprocess.run(
             ["git", "-C", str(target), "ls-files", "--stage"], text=True, capture_output=True, check=True
@@ -9043,7 +9320,7 @@ class ReleaseVersionTests(unittest.TestCase):
         self.assertIn("| 2.0.0 | 3 | 3 | 2 |", changelog)
 
     def test_version_label_names_release_and_contract(self):
-        self.assertEqual("vault-builder 2.0.0 (contract 4)", version_label(ROOT))
+        self.assertEqual("vault-builder 2.0.0 (contract 5)", version_label(ROOT))
 
     def test_catalog_command_defaults_revision_to_version(self):
         written = []
@@ -9058,6 +9335,7 @@ class ReleaseVersionTests(unittest.TestCase):
                 self.assertEqual(read_version(ROOT), create_manifest(ROOT, target, "").builder_revision)
 
 
+@full_tier_only
 class DoctorVersionTests(_RouterVaultTestCase):
     """install and doctor print the release; doctor notes a vault written by another release."""
 
@@ -9123,15 +9401,17 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
     def _schema_problems(self, output: str) -> list[str]:
         return [line for line in output.splitlines() if line.startswith("Problem:") and "schema" in line]
 
-    def test_doctor_reports_no_schema_problem_for_schema_4_vault(self):
+    @full_tier_only
+    def test_doctor_reports_no_schema_problem_for_schema_5_vault(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
-        self.assertEqual(4, json.loads(self._manifest_path(target).read_text(encoding="utf-8"))["schema_version"])
+        self.assertEqual(5, json.loads(self._manifest_path(target).read_text(encoding="utf-8"))["schema_version"])
 
         result = self._cli("doctor", str(target))
 
         self.assertEqual([], self._schema_problems(result.stdout), result.stdout)
 
+    @full_tier_only
     def test_doctor_reports_schema_2_manifest_at_current_revision(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
@@ -9141,9 +9421,10 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
 
         problems = self._schema_problems(result.stdout)
         self.assertEqual(1, len(problems), result.stdout)
-        self.assertIn("schema is 2, not 4", problems[0])
+        self.assertIn("schema is 2, not 5", problems[0])
         self.assertIn("audit and apply", problems[0])
 
+    @full_tier_only
     def test_install_refuses_schema_2_vault_with_audit_command_and_writes_nothing(self):
         target = self.work / "vault-a"
         self._install_ok(target, "a")
@@ -9173,16 +9454,17 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
             with self.subTest(relative=relative):
                 self.assertNotIn("settings.json", (ROOT / relative).read_text(encoding="utf-8"))
 
-    def test_1_0_0_vault_audit_and_apply_reach_contract_4(self):
+    @full_tier_only
+    def test_1_0_0_vault_audit_and_apply_reach_contract_5(self):
         target = self._install_1_0_0_vault()
         before = load_manifest(target)
         assert before is not None
         self.assertTrue(before.external_records)
         v2 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v2.json")
-        v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+        v5 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v5.json")
         changed = sorted(
             path
-            for path, desired in v4.managed_files.items()
+            for path, desired in v5.managed_files.items()
             if path in v2.managed_files and v2.managed_files[path].sha256 != desired.sha256
         )
         self.assertTrue(changed)
@@ -9190,8 +9472,8 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         plan = audit_vault(ROOT, target)
 
         actions = {action.path: action.action for action in plan.actions}
-        self.assertEqual((2, 4), (plan.current_contract_version, plan.target_contract_version))
-        for relative in (*SESSION_MANAGED_FILES, *CONTRACT4_MANAGED_FILES):
+        self.assertEqual((2, 5), (plan.current_contract_version, plan.target_contract_version))
+        for relative in (*SESSION_MANAGED_FILES, *CONTRACT4_MANAGED_FILES, CONTRACT5_WORKFLOW):
             self.assertEqual("create", actions[relative], relative)
         for relative in changed:
             self.assertEqual("replace", actions[relative], relative)
@@ -9203,9 +9485,9 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((4, 4, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((5, 5, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
-        for relative, desired in v4.managed_files.items():
+        for relative, desired in v5.managed_files.items():
             self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
         self.assertFalse((target / "raw" / "sessions").exists())
         gate = subprocess.run(
@@ -9220,6 +9502,7 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         self.assertEqual(0, gate.returncode, gate.stdout[-4000:] + gate.stderr[-4000:])
         self._doctor_ok(target)
 
+    @full_tier_only
     def test_1_0_0_vault_with_one_edited_managed_file_marks_only_that_file(self):
         target = self._install_1_0_0_vault()
         edited = "tools/wiki/lib/lint.py"
@@ -9238,18 +9521,18 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
 
 
 class ContractV4MigrationTests(_RouterVaultTestCase):
-    """Contract 4: a Vault installed at contract 3 reaches contract 4 through audit and apply (A-17, 위험8)."""
+    """A Vault installed at contract 3 reaches the current contract (5) through audit and apply (A-17, 위험8)."""
 
     def _contract_3_vault(self) -> Path:
         """Install with this builder, then make the Vault look as contract 3 left it.
 
-        The files contract 4 added are removed, and the manifest is rewritten as schema 3 and
-        contract 3, recording only the files whose bytes match v3.json. Files that changed
-        between v3 and v4 already hold v4 bytes here; the real contract-3 install test covers them.
+        The files contracts 4 and 5 added are removed, and the manifest is rewritten as schema 3
+        and contract 3, recording only the files whose bytes match v3.json. Files that changed
+        between v3 and v5 already hold v5 bytes here; the real contract-3 install test covers them.
         """
         target = self.work / "vault-c3"
         self._install_ok(target, "c3")
-        for relative in CONTRACT4_MANAGED_FILES:
+        for relative in (*CONTRACT4_MANAGED_FILES, CONTRACT5_WORKFLOW):
             (target / relative).unlink()
         v3 = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v3.json").read_text(encoding="utf-8"))
         path = target / ".vault-builder" / "manifest.json"
@@ -9290,10 +9573,10 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         before = load_manifest(target)
         assert before is not None
         v3 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v3.json")
-        v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+        v5 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v5.json")
         changed = sorted(
             path
-            for path, desired in v4.managed_files.items()
+            for path, desired in v5.managed_files.items()
             if path in v3.managed_files and v3.managed_files[path].sha256 != desired.sha256
         )
         for relative in ("scripts/release_gate.sh", "tools/wiki/cli.py", "tools/wiki/lib/vault_manifest.py"):
@@ -9305,8 +9588,8 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         plan = audit_vault(ROOT, target)
 
         actions = {action.path: action.action for action in plan.actions}
-        self.assertEqual((3, 4), (plan.current_contract_version, plan.target_contract_version))
-        for relative in CONTRACT4_MANAGED_FILES:
+        self.assertEqual((3, 5), (plan.current_contract_version, plan.target_contract_version))
+        for relative in (*CONTRACT4_MANAGED_FILES, CONTRACT5_WORKFLOW):
             self.assertEqual("create", actions[relative], relative)
         for relative in changed:
             self.assertEqual("replace" if expect_replaced else "unchanged", actions[relative], relative)
@@ -9318,16 +9601,17 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((4, 4, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((5, 5, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
-            self.assertEqual(set(v4.managed_files), set(result.managed_files))
-        for relative, desired in v4.managed_files.items():
+            self.assertEqual(set(v5.managed_files), set(result.managed_files))
+        for relative, desired in v5.managed_files.items():
             self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
         lint = self._run_in_vault(target, sys.executable, "tools/wiki/cli.py", "lint")
         self.assertEqual(0, lint.returncode, lint.stdout[-4000:] + lint.stderr[-4000:])
         gate = self._run_in_vault(target, "bash", "scripts/release_gate.sh")
         self.assertEqual(0, gate.returncode, gate.stdout[-4000:] + gate.stderr[-4000:])
-        self.assertIn("test_publish_json.py", gate.stdout)
+        # The Vault gate runs only the check tier, so it runs no tests (CI QA redesign 결정B).
+        self.assertIn("[release-gate] tier: check", gate.stdout)
         again = {action.path: action.action for action in audit_vault(ROOT, target).actions}
         self.assertEqual("unchanged", again["tools/wiki/lib/publish.py"])
 
@@ -9342,16 +9626,18 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
             timeout=900,
         )
 
-    def test_contract_3_vault_audit_and_apply_reach_contract_4_and_lint_passes(self):
+    @full_tier_only
+    def test_contract_3_vault_audit_and_apply_reach_contract_5_and_lint_passes(self):
         self._audit_apply_and_check(self._contract_3_vault(), expect_replaced=False)
 
-    @unittest.skipUnless(
-        _commit_available(V3_INSTALL_COMMIT),
-        f"builder commit {V3_INSTALL_COMMIT} is not in this history (rebase or squash merge)",
-    )
-    def test_vault_installed_by_contract_3_builder_reaches_contract_4(self):
+    @full_tier_only
+    def test_vault_installed_by_contract_3_builder_reaches_contract_5(self):
+        # Checked here, not in a skipUnless decorator, so importing this module reads no old commit.
+        if not _commit_available(V3_INSTALL_COMMIT):
+            self.skipTest(f"builder commit {V3_INSTALL_COMMIT} is not in this history (rebase or squash merge)")
         self._audit_apply_and_check(self._install_contract_3_vault_from_commit(), expect_replaced=True)
 
+    @full_tier_only
     def test_contract_3_vault_with_edited_managed_file_stops_without_overwriting(self):
         target = self._contract_3_vault()
         edited = target / "tools" / "wiki" / "lib" / "lint.py"
@@ -9370,6 +9656,7 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         self.assertEqual(edited_bytes, edited.read_bytes())
         self.assertEqual(manifest_before, (target / ".vault-builder" / "manifest.json").read_bytes())
 
+    @full_tier_only
     def test_contract_3_vault_with_own_file_at_new_managed_path_is_not_overwritten(self):
         target = self._contract_3_vault()
         own = target / "tools" / "wiki" / "lib" / "publish.py"
@@ -9384,13 +9671,14 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
             apply_plan(ROOT, target, plan, run_gate=lambda _: None)
         self.assertEqual("# written by a person before contract 4\n", own.read_text(encoding="utf-8"))
 
+    @full_tier_only
     def test_doctor_reports_schema_3_manifest_and_install_refuses_it(self):
         target = self._contract_3_vault()
 
         doctor = self._cli("doctor", str(target))
         problems = [line for line in doctor.stdout.splitlines() if line.startswith("Problem:") and "schema" in line]
         self.assertEqual(1, len(problems), doctor.stdout)
-        self.assertIn("schema is 3, not 4", problems[0])
+        self.assertIn("schema is 3, not 5", problems[0])
         before = _tree_snapshot(target)
 
         install = self._install(str(target), "--name", "c3")
@@ -9398,3 +9686,86 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         self.assertNotEqual(0, install.returncode, install.stdout + install.stderr)
         self.assertIn("schema version 3", install.stdout + install.stderr)
         self.assertEqual(before, _tree_snapshot(target))
+
+
+@full_tier_only
+class ContractV5MigrationTests(_RouterVaultTestCase):
+    """A Vault installed at contract 4 reaches contract 5 through audit and apply (CI QA redesign A-18)."""
+
+    def _install_contract_4_vault_from_commit(self) -> Path:
+        builder = _extract_git_archive(ROOT, V4_INSTALL_COMMIT, self.tmp / "builder-contract-4")
+        self.assertEqual(V4_CATALOG_SHA256, sha256_file(builder / "tools" / "vault_migration" / "contracts" / "v4.json"))
+        target = self.work / "vault-c4"
+        result = subprocess.run(
+            [sys.executable, "tools/vault_migration/cli.py", "install", str(target), "--name", "c4"],
+            cwd=builder,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=600,
+        )
+        self.assertEqual(0, result.returncode, result.stdout[-4000:] + result.stderr[-4000:])
+        manifest = load_manifest(target)
+        assert manifest is not None
+        self.assertEqual((4, 4), (manifest.schema_version, manifest.contract_version))
+        return target
+
+    def _run_in_vault(self, target: Path, *command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(command),
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self._env(),
+            timeout=600,
+        )
+
+    def test_contract_4_vault_audit_creates_qa_workflow_replaces_gate_and_apply_reaches_contract_5(self):
+        target = self._install_contract_4_vault_from_commit()
+        before = load_manifest(target)
+        assert before is not None
+        v4 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v4.json")
+        v5 = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v5.json")
+        changed = sorted(
+            path
+            for path, desired in v5.managed_files.items()
+            if path in v4.managed_files and v4.managed_files[path].sha256 != desired.sha256
+        )
+        self.assertIn("scripts/release_gate.sh", changed)
+        for relative in changed:
+            # The Vault holds the contract-4 bytes of every file contract 5 changed.
+            self.assertEqual(v4.managed_files[relative].sha256, sha256_file(target / relative), relative)
+        self.assertNotIn(CONTRACT5_WORKFLOW, v4.managed_files)
+        self.assertFalse((target / CONTRACT5_WORKFLOW).exists())
+
+        plan = audit_vault(ROOT, target)
+
+        actions = {action.path: action.action for action in plan.actions}
+        self.assertEqual((4, 5), (plan.current_contract_version, plan.target_contract_version))
+        self.assertEqual("create", actions[CONTRACT5_WORKFLOW])
+        self.assertEqual("replace", actions["scripts/release_gate.sh"])
+        for relative in changed:
+            self.assertEqual("replace", actions[relative], relative)
+        self.assertEqual([], [path for path, action in actions.items() if action in {"review-required", "invalid"}])
+        self.assertFalse(plan.has_blocking_actions)
+
+        manifest = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+
+        persisted = load_manifest(target)
+        assert persisted is not None
+        for result in (manifest, persisted):
+            self.assertEqual((5, 5, "2.0.0"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual(before.external_records, result.external_records)
+            self.assertEqual(set(v5.managed_files), set(result.managed_files))
+        for relative, desired in v5.managed_files.items():
+            self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
+        lint = self._run_in_vault(target, sys.executable, "tools/wiki/cli.py", "lint")
+        self.assertEqual(0, lint.returncode, lint.stdout[-4000:] + lint.stderr[-4000:])
+        gate = self._run_in_vault(target, "bash", "scripts/release_gate.sh")
+        self.assertEqual(0, gate.returncode, gate.stdout[-4000:] + gate.stderr[-4000:])
+        self.assertIn("[release-gate] tier: check", gate.stdout)
+        again = {action.path: action.action for action in audit_vault(ROOT, target).actions}
+        self.assertEqual("unchanged", again[CONTRACT5_WORKFLOW])
+        self.assertEqual("unchanged", again["scripts/release_gate.sh"])

@@ -1138,7 +1138,7 @@ Check for:
 - Generated navigation maps that are stale relative to current wiki state.
 - Report paths or generated query-capture draft paths that escape `scratch/reports/` or `scratch/drafts/`.
 
-The full release gate also runs tests, health, `maps build --check`, `metrics --check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` in a temporary repo copy.
+`scripts/release_gate.sh` runs every step in the vault root. Its `check` tier (the default in a vault) runs `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` (a trailing-whitespace scan outside a Git work tree). The `unit` and `full` tiers also run the tests first. In a Git work tree the gate fails if any step changes a tracked file or creates a new file that is not ignored. The gate does not run `health`. Run it separately when needed.
 
 ### 9.2 Lint Report
 
@@ -1469,7 +1469,7 @@ Body:
 - Line endings become `\n`, trailing spaces and tabs are removed, and the file ends with one `\n`.
 - Known secret patterns (PEM private keys, `Authorization`/`Bearer` values, known token prefixes, values of secret-named keys, URL passwords) become `[REDACTED:<kind>]`. Patterns outside this list can remain.
 
-Archive check (`lint`, `health`; no Git needed, so it also runs in the release gate copy):
+Archive check (`lint`, `health`; no Git needed. The release gate runs it through `lint`):
 
 | Code | Condition |
 |---|---|
@@ -1499,7 +1499,7 @@ Git archive check (release gate):
 
 - `python3 tools/wiki/cli.py sessions git-check` prints `skipped` and exits 0 when the vault is not a Git work tree.
 - Otherwise it collects every path ever added under `raw/sessions/` in history reachable from the current branch, with the blob first added. It prints one line per path that is missing from the work tree or whose bytes differ from that first blob, and exits 1. Restoring the file makes it pass again.
-- `scripts/release_gate.sh` runs it from the vault root after the metrics step, because the gate copy has no `.git`.
+- `scripts/release_gate.sh` runs it from the vault root after the metrics step in every tier, including `check`.
 - Uncommitted session files get only the archive check. `python3 tools/wiki/cli.py sessions status` reports how many are uncommitted.
 
 ---
