@@ -102,7 +102,7 @@
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "17ddd451110c20dd138df28ca2fe5d0ced46aec2c086baf4f57c3673ad18bf5c"
+      "sha256": "5ae30ae16ffea0c87e4304c25b84f695032221d05e5e4c8638dc558dbab2cf0b"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "99f398f7ce5d6bb5c966f25bbd26f27d98180d56af589e446be86efb82815c7f"
+      "sha256": "a721aea4bc46aab0179a296176e4dafb012efdcb1728fb5a9fd10a0361507871"
     },
     "docs/usage.md": {
       "mode": "0644",

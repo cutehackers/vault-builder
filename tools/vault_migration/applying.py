@@ -20,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover - supported migrations are POSIX-only
     fcntl = None  # type: ignore[assignment]
 
-from tools.wiki.lib.vault_manifest import MANIFEST_CONTRACT_VERSION
+from tools.wiki.lib.vault_manifest import MANIFEST_CONTRACT_VERSION, RETIRED_MANAGED_PATHS
 
 from .catalogs import _safe_relative_path, _validate_root, load_catalog, sha256_file
 from .durability import (
@@ -38,6 +38,8 @@ _CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v5.json"
 # Journals left by an interrupted contract-v1, v2, v3, or v4 migration stay recoverable.
 # Listed directly: following MANIFEST_CONTRACT_VERSION alone would drop contracts 2 and 3.
 _JOURNAL_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5})
+# Journals from contract 4 or lower may list paths those contracts managed and contract 5 retired.
+_RETIRED_PATHS_LAST_JOURNAL_CONTRACT = 4
 _MIGRATION_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _RELEASE_GATE_COMMAND = ("bash", "scripts/release_gate.sh")
 _GATE_OUTPUT_TAIL_LINES = 20
@@ -2613,6 +2615,8 @@ def _journal_entries(journal: dict[str, object]) -> tuple[dict[str, object], ...
     raw_entries = journal.get("entries")
     if not isinstance(raw_entries, list):
         raise ValueError("Migration recovery journal entries are invalid.")
+    contract = journal.get("target_contract_version")
+    retired_allowed = type(contract) is int and contract <= _RETIRED_PATHS_LAST_JOURNAL_CONTRACT
     parsed: list[dict[str, object]] = []
     paths: set[str] = set()
     for raw in raw_entries:
@@ -2629,7 +2633,7 @@ def _journal_entries(journal: dict[str, object]) -> tuple[dict[str, object], ...
         path = raw.get("path")
         if not isinstance(path, str):
             raise ValueError("Migration recovery journal path is invalid.")
-        _validate_managed_relative(path)
+        _validate_managed_relative(path, retired_allowed=retired_allowed)
         if path in paths:
             raise ValueError("Migration recovery journal contains duplicate paths.")
         paths.add(path)
@@ -2748,11 +2752,11 @@ def _require_original(path: Path, digest: str, mode: str) -> None:
         raise ValueError("Migration recovery original is invalid.")
 
 
-def _validate_managed_relative(relative: str) -> None:
+def _validate_managed_relative(relative: str, *, retired_allowed: bool = False) -> None:
     candidate = PurePosixPath(relative)
     if "\\" in relative or candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
         raise ValueError("Migration recovery path must be a safe relative path.")
-    if relative not in MANAGED_PATHS:
+    if relative not in MANAGED_PATHS and not (retired_allowed and relative in RETIRED_MANAGED_PATHS):
         raise ValueError("Migration recovery path is not a managed file.")
 
 

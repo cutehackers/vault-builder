@@ -81,19 +81,6 @@ def tearDownModule() -> None:
         _MODULE_HOME.cleanup()
 
 
-def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: str | None) -> unittest.TestSuite:
-    """Run the router tests (builder_tests/test_llm_wiki_router.py) with this file.
-
-    The release gate runs only this file. The router tests come first as one block, so the router
-    module's own setUpModule (temporary HOME, template vault) runs once and is not interleaved with
-    this module's fixtures. loader.loadTestsFromModule applies the same -k patterns.
-    """
-    suite = unittest.TestSuite()
-    suite.addTests(loader.loadTestsFromModule(_router_tests))
-    suite.addTests(tests)
-    return suite
-
-
 def _run(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         arguments,
@@ -206,6 +193,33 @@ def _normalize_legacy_modes(target: Path) -> None:
         path = target / relative
         if path.is_file() and not path.is_symlink():
             path.chmod(int(managed.mode, 8))
+
+
+def _retired_workflow_journal(contract: int) -> dict[str, object]:
+    """Journal of an interrupted migration that touched the retired release-gate workflow."""
+    return {
+        "schema_version": 1,
+        "migration_id": "0123456789abcdef",
+        "target_contract_version": contract,
+        "state": "applying",
+        "entries": [{
+            "path": ".github/workflows/release-gate.yml",
+            "existed": True,
+            "sha256": "a" * 64,
+            "mode": "0644",
+        }],
+        "manifest": {
+            "existed": False,
+            "sha256": None,
+            "mode": None,
+            "backup_state": "not-required",
+            "backup_staged_path": None,
+            "candidate_sha256": "c" * 64,
+            "publication_state": "intent",
+        },
+        "directory_nonce": "b" * 64,
+        "directories": [],
+    }
 
 
 def _copy_legacy_fixture(target: Path) -> None:
@@ -4075,6 +4089,50 @@ class MigrationApplyTest(unittest.TestCase):
         for contract in (2, 3, 4, 5):
             with self.subTest(contract=contract):
                 self._recover_interrupted_journal(contract)
+
+    def test_journal_from_contract_1_to_4_may_list_retired_release_gate_workflow(self):
+        # Contracts 1-4 managed .github/workflows/release-gate.yml. A journal those migrations
+        # left behind must stay recoverable after contract 5 retired the path.
+        for contract in (1, 2, 3, 4):
+            with self.subTest(contract=contract):
+                entries = applying._journal_entries(_retired_workflow_journal(contract))
+                self.assertEqual((".github/workflows/release-gate.yml",), tuple(item["path"] for item in entries))
+
+    def test_journal_from_contract_5_rejects_retired_release_gate_workflow(self):
+        with self.assertRaisesRegex(ValueError, "not a managed file"):
+            applying._journal_entries(_retired_workflow_journal(5))
+
+    def test_journal_without_contract_version_rejects_retired_release_gate_workflow(self):
+        journal = _retired_workflow_journal(4)
+        del journal["target_contract_version"]
+        with self.assertRaisesRegex(ValueError, "not a managed file"):
+            applying._journal_entries(journal)
+
+    def test_recover_restores_retired_release_gate_workflow_from_contract_4_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "vault"
+            relative = Path(".github/workflows/release-gate.yml")
+            original = b"name: release gate\n"
+            interrupted = b"interrupted replacement\n"
+            (target / relative).parent.mkdir(parents=True)
+            (target / relative).write_bytes(interrupted)
+            os.chmod(target / relative, 0o644)
+            migration_id = "0123456789abcdef"
+            journal_root = target / ".vault-builder" / "recovery" / migration_id
+            original_path = journal_root / "originals" / relative
+            original_path.parent.mkdir(parents=True)
+            original_path.write_bytes(original)
+            os.chmod(original_path, 0o644)
+            journal = _retired_workflow_journal(4)
+            journal["entries"][0]["sha256"] = hashlib.sha256(original).hexdigest()
+            journal["entries"][0]["applied_sha256"] = hashlib.sha256(interrupted).hexdigest()
+            journal["entries"][0]["applied_mode"] = "0644"
+            (journal_root / "journal.json").write_text(json.dumps(journal, indent=2, sort_keys=True) + "\n")
+
+            recover_migration(target, migration_id)
+
+            self.assertEqual(original, (target / relative).read_bytes())
+            self.assertFalse(journal_root.exists())
 
     @full_tier_only
     def test_recover_rejects_journal_for_unknown_contract(self):

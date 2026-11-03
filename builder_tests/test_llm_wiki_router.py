@@ -352,9 +352,6 @@ def tearDownModule() -> None:
             os.environ[key] = value
     for tmp in _MODULE_TMP:
         shutil.rmtree(tmp, ignore_errors=True)
-    # discover runs this module twice: on its own and through test_vault_migration.load_tests.
-    # The second setUpModule must not find the removed template first.
-    _MODULE_TMP.clear()
 
 
 def _build_template_vault(target: Path) -> None:

@@ -385,7 +385,7 @@ Current checks:
 - maintenance metrics dashboard for pending reviews, contested claims, stale sources, orphan pages, provenance coverage, deprecated links, and last health report
 - configurable maintenance metric thresholds through `tools/wiki/metrics-policy.json` or `metrics --policy`; a `null` threshold reports the signal as a warning without gating it. The shipped policy gates contested claims that have no review item and reviews pending longer than 14 days, not every pending review.
 - report and generated query-capture draft path confinement under `scratch/reports/` and `scratch/drafts/`
-- release gate wrapper for tests, lint, health, map freshness, metrics thresholds, optional Stenc validation/render checks only when explicitly enabled, and `git diff --check` in a temporary repo copy
+- release gate wrapper with `check`, `unit`, and `full` tiers for tests (`unit` and `full` only), lint, map freshness, metrics thresholds, the session Git check, optional Stenc validation/render checks only when explicitly enabled, and `git diff --check`, run in the vault root with a guard against changed or new files. It does not run `health`.
 
 Intentional limits:
 

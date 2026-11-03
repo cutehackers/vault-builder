@@ -1138,7 +1138,7 @@ Check for:
 - Generated navigation maps that are stale relative to current wiki state.
 - Report paths or generated query-capture draft paths that escape `scratch/reports/` or `scratch/drafts/`.
 
-The full release gate also runs tests, health, `maps build --check`, `metrics --check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` in a temporary repo copy.
+`scripts/release_gate.sh` runs every step in the vault root. Its `check` tier (the default in a vault) runs `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, optional Stenc validation/render checks when `WIKI_ENABLE_STENC=1`, and `git diff --check` (a trailing-whitespace scan outside a Git work tree). The `unit` and `full` tiers also run the tests first. In a Git work tree the gate fails if any step changes a tracked file or creates a new file that is not ignored. The gate does not run `health`. Run it separately when needed.
 
 ### 9.2 Lint Report
 
@@ -1469,7 +1469,7 @@ Body:
 - Line endings become `\n`, trailing spaces and tabs are removed, and the file ends with one `\n`.
 - Known secret patterns (PEM private keys, `Authorization`/`Bearer` values, known token prefixes, values of secret-named keys, URL passwords) become `[REDACTED:<kind>]`. Patterns outside this list can remain.
 
-Archive check (`lint`, `health`; no Git needed, so it also runs in the release gate copy):
+Archive check (`lint`, `health`; no Git needed. The release gate runs it through `lint`):
 
 | Code | Condition |
 |---|---|
