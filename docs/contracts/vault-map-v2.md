@@ -53,6 +53,7 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 `default_write_vault` 규칙:
 
 - `set-default-write`는 프로젝트 `vaults`에 없는 이름을 거부한다.
+- `link`와 `set-role`은 값을 자동으로 정할 수 있다. 세 조건이 모두 맞을 때만 정한다. 프로젝트에 연결된 Vault가 둘 이상이다. `default_write_vault`가 아직 없다. 연결된 Vault 중 role이 `project`인 Vault가 정확히 하나다. 그러면 그 Vault를 기본 저장 Vault로 정하고 한 줄을 출력한다. 이미 있는 값은 바꾸지 않는다. `link --dry-run`은 출력만 하고 파일을 쓰지 않는다.
 - `unlink`로 기본 저장 Vault를 프로젝트에서 빼면 `default_write_vault`도 지운다.
 - llm-wiki router는 이 필드를 무시한다. 쓰기 도구는 여전히 `vault` 인자를 받아야 한다.
 - vault-graph는 값이 문자열이 아니거나 프로젝트 `vaults`에 없으면 그 필드만 무시하고 경고한다. 파일 전체를 버리지 않는다.

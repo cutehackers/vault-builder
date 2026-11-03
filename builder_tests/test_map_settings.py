@@ -159,6 +159,8 @@ class SetRoleTests(_MapCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         expected = json.loads(json.dumps(self.initial))
         expected["vaults"]["a"]["role"] = "project"
+        # r links a and t, and a is now its only role project vault (DefaultWriteFromProjectRoleTests).
+        expected["projects"]["r"]["default_write_vault"] = "a"
         self.assertEqual(expected, self.read_map())
 
     def test_set_role_accepts_a_role_outside_the_documented_values(self) -> None:
@@ -360,6 +362,82 @@ class LinkProjectRoleWarningTests(_MapCase):
         result = self.cli("link", "t", "--repo", str(self.repo))
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertNotIn("session transcripts", result.stdout + result.stderr)
+
+
+class DefaultWriteFromProjectRoleTests(_MapCase):
+    """link and set-role pick the default write vault when exactly one linked vault has role project."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = self.tmp / "w"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, env=self.env())
+        (self.tmp / "vault-p").mkdir()
+        (self.tmp / "vault-q").mkdir()
+        data = self.read_map()
+        data["vaults"]["p"] = {"path": str(self.tmp / "vault-p"), "role": "project"}
+        data["vaults"]["q"] = {"path": str(self.tmp / "vault-q"), "role": "project"}
+        self.write_map(data)
+
+    def _link(self, *names: str) -> subprocess.CompletedProcess[str]:
+        result = None
+        for name in names:
+            result = self.cli("link", name, "--repo", str(self.repo))
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return result
+
+    def test_link_sets_the_only_project_vault_as_default_write(self) -> None:
+        result = self._link("a", "p")
+        self.assertEqual("p", self.read_map()["projects"]["w"]["default_write_vault"])
+        self.assertIn(
+            "link: default write vault for project w: p. Change it with set-default-write --project w --vault <name>.",
+            result.stdout,
+        )
+
+    def test_link_keeps_an_existing_default_write_vault(self) -> None:
+        self._link("a")
+        data = self.read_map()
+        data["projects"]["w"]["default_write_vault"] = "a"
+        self.write_map(data)
+        result = self._link("p")
+        self.assertEqual("a", self.read_map()["projects"]["w"]["default_write_vault"])
+        self.assertNotIn("default write vault", result.stdout)
+
+    def test_link_without_a_project_vault_sets_nothing(self) -> None:
+        self._link("a", "t")
+        self.assertNotIn("default_write_vault", self.read_map()["projects"]["w"])
+
+    def test_link_with_two_project_vaults_sets_nothing(self) -> None:
+        self._link("p", "q")
+        self.assertNotIn("default_write_vault", self.read_map()["projects"]["w"])
+
+    def test_link_with_one_vault_sets_nothing(self) -> None:
+        self._link("p")
+        self.assertNotIn("default_write_vault", self.read_map()["projects"]["w"])
+
+    def test_link_dry_run_does_not_write_the_default(self) -> None:
+        self._link("a")
+        before = self.digest()
+        result = self.cli("link", "p", "--repo", str(self.repo), "--dry-run")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("default write vault for project w: p", result.stdout)
+        self.assertEqual(before, self.digest())
+
+    def test_set_role_project_sets_default_write_for_linked_projects(self) -> None:
+        result = self.cli("set-role", "--vault", "t", "--role", "project")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        projects = self.read_map()["projects"]
+        self.assertEqual("t", projects["r"]["default_write_vault"])
+        self.assertNotIn("default_write_vault", projects["s"])
+        self.assertIn("set-role: default write vault for project r: t.", result.stdout)
+
+    def test_set_role_keeps_an_existing_default_write_vault(self) -> None:
+        data = self.read_map()
+        data["projects"]["r"]["default_write_vault"] = "a"
+        self.write_map(data)
+        result = self.cli("set-role", "--vault", "t", "--role", "project")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("a", self.read_map()["projects"]["r"]["default_write_vault"])
 
 
 class MapSettingsImportTests(unittest.TestCase):

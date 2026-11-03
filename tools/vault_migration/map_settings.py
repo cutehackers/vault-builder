@@ -13,7 +13,7 @@ import os
 import sys
 from collections.abc import Mapping
 
-from tools.vault_migration.linking import _load, _Refused, _write
+from tools.vault_migration.linking import _load, _Refused, _write, default_write_from_project_role
 
 DEFAULT_WRITE_FIELD = "default_write_vault"
 
@@ -70,6 +70,9 @@ def set_role(vault: str, role: str, *, environ: Mapping[str, str] = os.environ) 
             raise _Refused(f"Vault {vault} is not in the link config. Vaults: {names}.")
         vaults[vault]["role"] = value
         print(f"{command}: vault {vault} role: {value}")
+        for project_id, entry in data["projects"].items():
+            if vault in entry["vaults"]:
+                default_write_from_project_role(data, project_id, command)
         _write(path, data, False, command)
         return 0
     except _Refused as exc:
