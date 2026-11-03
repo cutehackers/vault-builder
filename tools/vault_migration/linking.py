@@ -73,6 +73,26 @@ def _write(path: Path, data: dict, dry_run: bool, command: str) -> None:
     print(f"{command}: wrote {path}")
 
 
+def default_write_from_project_role(data: dict, project_id: str, command: str) -> None:
+    """Set the project's default write vault to its only role project vault, when it has none yet.
+
+    Applies only when the project links two or more vaults and exactly one of them has role project.
+    An existing value is never replaced.
+    """
+    entry = data["projects"][project_id]
+    if "default_write_vault" in entry or len(entry["vaults"]) < 2:
+        return
+    vaults = data["vaults"]
+    candidates = [name for name in entry["vaults"] if vaults.get(name, {}).get("role") == _PROJECT_ROLE]
+    if len(candidates) != 1:
+        return
+    entry["default_write_vault"] = candidates[0]
+    print(
+        f"{command}: default write vault for project {project_id}: {candidates[0]}. "
+        f"Change it with set-default-write --project {project_id} --vault <name>."
+    )
+
+
 def link(
     vault: str,
     *,
@@ -124,6 +144,7 @@ def link(
                 entry["remote"] = origin
             action = f"found by {match.stage}"
         print(f"link: project {project_id} ({action}) vaults: {', '.join(entry['vaults'])}")
+        default_write_from_project_role(data, project_id, "link")
         _write(path, data, dry_run, "link")
         if not any(vaults[name].get("role") == _PROJECT_ROLE for name in entry["vaults"] if name in vaults):
             print(
