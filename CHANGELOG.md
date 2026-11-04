@@ -25,15 +25,27 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- 설치 명령 `scripts/install.sh`를 더했다. `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash` 한 줄로 uv 확인, builder checkout, `vault-builder` 명령 파일(`$HOME/.local/bin/vault-builder`), vg 설치, hook을 포함한 Vault 설치, 저장소 연결, MCP 등록, 첫 색인, doctor를 차례로 실행한다. Claude Code가 실행 중이면 `$HOME/.claude.json`을 쓰기 전에 멈춘다. 같은 명령을 다시 실행하면 빠진 것만 채운다.
+- `setup` 명령을 더했다. `install.sh`가 부르는 단계(precheck, vg 설치, hook을 포함한 Vault 설치, 저장소 연결, `vg setup`의 MCP 등록과 첫 색인, doctor)를 builder checkout에서 직접 실행한다. `--vault NAME=PATH`, `--role NAME=ROLE`, `--repo PATH`, `--yes`, `--dry-run`, `--without-vault-graph`를 받는다. vg는 `uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git`로 설치하고, 주소는 `VAULT_GRAPH_REPO`로 바꿀 수 있다.
+- `uninstall --all`을 더했다. `vault-map.json`의 모든 Vault를 uninstall한 뒤 `vault-builder` 명령 파일과 기본 builder checkout을 지운다. 각 Vault의 `raw/`와 `wiki/`는 남는다. `install.sh --uninstall`은 이어서 `vg mcp unregister --agent claude`와 `uv tool uninstall vault-graph`를 실행하고, 남긴 Vault, `$HOME/.vault-graph`, 임베딩 모델 폴더(기본 `$HOME/llm/models`)를 출력한다.
+- 역할 목록(`tools/vault_migration/roles.py`)을 더했다. `personal`, `team`, `project` 세 역할을 알고, 목록에 없는 역할도 그대로 받아 공유 Vault로 다룬다.
+
 ### Changed
+
+- `link`가 Vault 이름을 여러 개 받는다. 이름 없이 실행하면 공유 역할의 Vault를 모두 연결한다.
+- `doctor`의 경로 인자를 뺄 수 있다. 경로 없이 실행하면 `vault-map.json`의 모든 Vault와 공유 항목을 한 번씩 검사한다. hook launcher 항목(SessionStart, PreCompact, SessionEnd), `vault-hooks.json`에 적힌 vg 경로와 `vg --help` 실행, `vault-builder` 명령 파일이 가리키는 checkout도 검사한다.
 
 - vault에 설치되는 workflow 이름을 `.github/workflows/release-gate.yml`에서 `.github/workflows/qa.yml`로 바꿨다. 관리 파일 목록이 바뀌어 contract와 manifest schema를 5로 올렸다. node를 설치하지 않고, setup-python이 설치한 Python을 `PYTHON`으로 gate에 넘긴다.
 - `scripts/release_gate.sh`에 `--tier check|unit|full` 인자를 더했다. `check`는 `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, whitespace 검사만 하고 test를 실행하지 않는다. `unit`은 `full_tier_only` 표시가 없는 test를 더하고, `full`은 test 전부를 더한다. 인자가 없으면 vault는 `check`, builder 저장소는 `unit`을 실행한다. 출력 첫 줄에 `[release-gate] tier: <단계>`를 쓴다.
 - gate는 저장소를 임시 폴더로 복사하지 않고 루트에서 실행하며 report 파일을 쓰지 않는다. Git 작업 트리에서 추적 파일이 바뀌거나 ignore되지 않은 새 파일이 생기면 "Release gate changed tracked output"으로 실패한다.
 - gate에서 `health` 단계를 뺐다. `health` 명령 자체는 그대로다.
 - gate의 test fingerprint 캐시(`llm-wiki-gate-tests.cache`)와 `WIKI_GATE_FULL`을 없앴다. `WIKI_GATE_FULL=1`을 설정해도 오류 없이 무시된다.
-- builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.10과 3.14로 `--tier full`을 실행한다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
+- builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.12 하나로 `--tier full`을 실행한다. 3.12는 vg 설치 Python, vault-graph CI, `qa.yml`과 같은 버전이다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
 - install은 manifest schema가 5가 아닌 기존 vault를 audit 안내와 함께 거부한다. doctor는 schema 5를 기준으로 검사한다.
+- MCP 서버 이름을 `llm-wiki`에서 `vault-wiki`로 바꿨다. `$HOME/.claude.json`의 항목은 `mcpServers.vault-wiki`, 라우터와 vault `tools/wiki/mcp_server.py`가 답하는 `serverInfo.name`은 `vault-wiki`이고, Claude Code의 MCP 도구 이름은 `mcp__llm-wiki__*`에서 `mcp__vault-wiki__*`로 바뀐다. 이 규칙의 "MCP 도구 이름을 바꾸는 경우"에 해당하는 MAJOR 변경이다. 라우터 파일 이름 `llm_wiki_router.py`는 그대로다.
+- install은 이 설정 폴더의 라우터를 실행하는(`args`가 `["-I", <라우터 경로>]`인) `mcpServers.llm-wiki` 항목을 builder 항목으로 보고, 같은 한 번의 쓰기로 지우고 `mcpServers.vault-wiki`를 쓴다. `--dry-run`은 이 이름 변경을 출력한다. 다른 곳을 가리키는 `llm-wiki` 항목은 다른 프로그램의 것이므로 그대로 둔다. 거부는 이제 다른 프로그램의 `vault-wiki` 항목이 있을 때 일어난다. uninstall은 마지막 vault에서 `vault-wiki`와 남은 builder `llm-wiki` 항목을 함께 지우고, doctor는 남은 builder `llm-wiki` 항목을 `Fix: vault-builder setup` 문제로 알린다.
 
 ### Upgrade
 
@@ -59,6 +71,9 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
   ```
 
 - 사람이 고친 `release-gate.yml`도 migration은 건드리지 않는다. 고친 내용이 필요하면 `qa.yml`로 옮긴 뒤 지운다.
+- 이미 contract 5로 설치한 vault는 audit에서 `README.md`, `README-kr.md`, `docs/usage.md`, `tests/test_wiki_tools.py`, `tools/wiki/mcp_server.py`가 `replace`로 나온다. 설치 안내 문서가 새 설치 명령으로 바뀌었고 MCP 서버 이름이 `vault-wiki`로 바뀌었기 때문이다. 사람이 고치지 않은 파일이므로 위와 같은 순서로 apply하면 된다. 고친 파일은 `review-required`로 나온다.
+- 기존 사용자는 Claude Code를 종료하고 설치 명령(`curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash`)을 한 번 실행한 뒤 다시 시작하면 hook, vg 경로 기록, `vault-builder` 명령이 채워진다. 기존 Vault, 저장소 연결, 기본 쓰기 Vault는 그대로다. 소스에서 설치한 vg(`uv tool install -e .`)는 git 주소 설치로 바뀌므로, 개발용 vg를 유지하려면 `--without-vault-graph`를 준다.
+- MCP 서버 이름 변경: 설치 명령, `vault-builder install` 또는 `vault-builder setup`을 다시 실행하면 `$HOME/.claude.json`의 builder `llm-wiki` 항목이 `vault-wiki`로 바뀐다. 권한 허용 규칙(`settings.json`의 `permissions.allow` 등)이나 skill이 `mcp__llm-wiki__...` 도구 이름을 적고 있으면 `mcp__vault-wiki__...`로 직접 고친다. 그 뒤 Claude Code를 다시 시작한다.
 - 옮긴 vault에서 인자 없는 `scripts/release_gate.sh`는 `check` 단계만 실행한다. vault의 `tests/`를 실행하려면 `scripts/release_gate.sh --tier unit`을 쓴다.
 
 ## [2.0.0] - 2026-10-30

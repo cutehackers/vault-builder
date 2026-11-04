@@ -82,10 +82,7 @@ def config_dir():
 
 def link_command(root, vault_names):
     names = ", ".join(sorted(vault_names)) or "none"
-    return (
-        f"run tools/vault_migration/cli.py link <vault> --repo {shlex.quote(str(root))} "
-        f"from the vault-builder checkout (vaults: {names})"
-    )
+    return f"run vault-builder link <vault> --repo {shlex.quote(str(root))} (vaults: {names})"
 
 
 def load_vault_map(map_path):
