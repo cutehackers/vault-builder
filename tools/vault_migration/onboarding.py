@@ -5,7 +5,7 @@ Steps:
 1. Precheck. Writes no file. Parse the options, read vault-map.json, run the install precheck of every vault
    (install --dry-run --with-hooks), check every --repo, check access to the vault-graph repository with
    git ls-remote, and check that Claude Code is not running (decision 5). Any failure stops the run.
-2. Install vg: uv tool install --force git+<VAULT_GRAPH_REPO>. The vg path is <uv tool dir --bin>/vg.
+2. Install vg: uv tool install --force --python 3.12 git+<VAULT_GRAPH_REPO>. The vg path is <uv tool dir --bin>/vg.
 3. install --with-hooks for every vault, in order, with VAULT_GRAPH_BIN set to that vg (decision 6).
 4. One link per repository: the shared vaults and that repository's project vault.
 5. <vg> setup --agent claude --mcp.
@@ -59,6 +59,9 @@ class Tty(Protocol):
 
 
 Run = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+VG_PYTHON = "3.12"
 
 
 def _run(
@@ -578,7 +581,9 @@ def _require_claude_closed(tools: Externals, env: Mapping[str, str], prompter: _
 
 
 def _install_vg(tools: Externals, env: Mapping[str, str], repo: str) -> Path:
-    command = ["uv", "tool", "install", "--force", f"git+{repo}"]
+    # vg needs Python 3.12 or newer, and onnxruntime has no wheels for the newest Python yet. uv would pick
+    # the newest Python on the machine, so the version is pinned (vault-graph CI and docs use 3.12).
+    command = ["uv", "tool", "install", "--force", "--python", VG_PYTHON, f"git+{repo}"]
     result = tools.run(command, env, capture=True)
     if result.returncode != 0:
         tail = "\n".join(((result.stdout or "") + (result.stderr or "")).splitlines()[-20:])

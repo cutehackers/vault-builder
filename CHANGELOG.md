@@ -28,7 +28,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 ### Added
 
 - 설치 명령 `scripts/install.sh`를 더했다. `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash` 한 줄로 uv 확인, builder checkout, `vault-builder` 명령 파일(`$HOME/.local/bin/vault-builder`), vg 설치, hook을 포함한 Vault 설치, 저장소 연결, MCP 등록, 첫 색인, doctor를 차례로 실행한다. Claude Code가 실행 중이면 `$HOME/.claude.json`을 쓰기 전에 멈춘다. 같은 명령을 다시 실행하면 빠진 것만 채운다.
-- `setup` 명령을 더했다. `install.sh`가 부르는 단계(precheck, vg 설치, hook을 포함한 Vault 설치, 저장소 연결, `vg setup`의 MCP 등록과 첫 색인, doctor)를 builder checkout에서 직접 실행한다. `--vault NAME=PATH`, `--role NAME=ROLE`, `--repo PATH`, `--yes`, `--dry-run`, `--without-vault-graph`를 받는다. vg는 `uv tool install --force git+https://github.com/cutehackers/vault-graph.git`로 설치하고, 주소는 `VAULT_GRAPH_REPO`로 바꿀 수 있다.
+- `setup` 명령을 더했다. `install.sh`가 부르는 단계(precheck, vg 설치, hook을 포함한 Vault 설치, 저장소 연결, `vg setup`의 MCP 등록과 첫 색인, doctor)를 builder checkout에서 직접 실행한다. `--vault NAME=PATH`, `--role NAME=ROLE`, `--repo PATH`, `--yes`, `--dry-run`, `--without-vault-graph`를 받는다. vg는 `uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git`로 설치하고, 주소는 `VAULT_GRAPH_REPO`로 바꿀 수 있다.
 - `uninstall --all`을 더했다. `vault-map.json`의 모든 Vault를 uninstall한 뒤 `vault-builder` 명령 파일과 기본 builder checkout을 지운다. 각 Vault의 `raw/`와 `wiki/`는 남는다. `install.sh --uninstall`은 이어서 `vg mcp unregister --agent claude`와 `uv tool uninstall vault-graph`를 실행하고, 남긴 Vault, `$HOME/.vault-graph`, 임베딩 모델 폴더(기본 `$HOME/llm/models`)를 출력한다.
 - 역할 목록(`tools/vault_migration/roles.py`)을 더했다. `personal`, `team`, `project` 세 역할을 알고, 목록에 없는 역할도 그대로 받아 공유 Vault로 다룬다.
 

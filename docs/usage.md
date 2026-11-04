@@ -919,7 +919,7 @@ vault-builder uninstall --all
 설치 명령(1절)이 마지막에 실행하는 명령입니다. 아래 6단계를 차례로 실행하고, 단계마다 `setup: [N/6]` 줄을 출력합니다.
 
 1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 vault마다 install의 `--dry-run` 검사를 실행하고, `git ls-remote`로 vault-graph 저장소에 접근할 수 있는지 확인합니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
-2. `uv tool install --force git+https://github.com/cutehackers/vault-graph.git`로 vg를 설치합니다. 주소는 `VAULT_GRAPH_REPO` 환경 변수로 바꿀 수 있습니다.
+2. `uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git`로 vg를 설치합니다. 주소는 `VAULT_GRAPH_REPO` 환경 변수로 바꿀 수 있습니다.
 3. vault마다 hook을 포함해 install을 실행합니다(`install --with-hooks`). 이때 2단계의 vg 절대 경로를 `vault-hooks.json`에 적습니다. 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다.
 4. 저장소마다 `link`를 한 번 실행해 공유 vault 전부와 그 저장소의 project vault를 연결합니다. 기본 쓰기 vault가 정해지지 않으면 대화 모드에서는 묻고, 그 밖에는 `--default-write` 값을 쓰거나 `vault-builder set-default-write` 명령을 안내합니다.
 5. vg로 `vg setup --agent claude --mcp`를 실행합니다. 모든 vault를 색인하고 `vault-graph` MCP 서버를 등록합니다. 처음 실행할 때는 임베딩 모델을 내려받으므로 오래 걸릴 수 있습니다.

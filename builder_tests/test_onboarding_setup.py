@@ -242,7 +242,7 @@ class FullSetupTests(_SetupCase):
             self.assertTrue(call["with_hooks"])
             self.assertEqual(str(vg), call["environ"]["VAULT_GRAPH_BIN"])
         self.assertIn(
-            ["uv", "tool", "install", "--force", "git+https://github.com/cutehackers/vault-graph.git"], self.fake.calls
+            ["uv", "tool", "install", "--force", "--python", "3.12", "git+https://github.com/cutehackers/vault-graph.git"], self.fake.calls
         )
         self.assertIn([str(vg), "setup", "--agent", "claude", "--mcp"], self.fake.calls)
 
@@ -346,7 +346,7 @@ class FullSetupTests(_SetupCase):
     def test_vault_graph_repo_can_be_changed(self) -> None:
         self.assert_setup("--vault", f"mine={self.tmp / 'mine'}", "--yes", VAULT_GRAPH_REPO="https://example.test/vg.git")
         self.assertIn(["git", "ls-remote", "https://example.test/vg.git", "HEAD"], self.fake.calls)
-        self.assertIn(["uv", "tool", "install", "--force", "git+https://example.test/vg.git"], self.fake.calls)
+        self.assertIn(["uv", "tool", "install", "--force", "--python", "3.12", "git+https://example.test/vg.git"], self.fake.calls)
 
 
 class DefaultWriteTests(_SetupCase):
@@ -472,7 +472,7 @@ class PrecheckTests(_SetupCase):
         result, output = self.setup("--repo", str(self.repo), "--yes")
         self.assertEqual(1, result, output)
         self.assertIn("error: git clone failed", output)
-        self.assertIn("uv tool install --force git+https://github.com/cutehackers/vault-graph.git", output)
+        self.assertIn("uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git", output)
         self.assertFalse(self.vault_map.exists())
 
 
