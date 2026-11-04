@@ -1,5 +1,5 @@
 {
-  "builder_revision": "2.0.0",
+  "builder_revision": "3.0.0",
   "contract_version": 5,
   "managed_files": {
     ".agents/skills/memory-cleanup/SKILL.md": {
