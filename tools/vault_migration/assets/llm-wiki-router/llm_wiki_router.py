@@ -53,8 +53,7 @@ ALWAYS_WRITE_TOOLS = frozenset(
 )
 PATH_ARGUMENTS = ("path", "paths", "source", "target", "draft", "report")
 LINK_HINT = (
-    "To reach another vault from this repository, run tools/vault_migration/cli.py link <vault> "
-    "--repo <repository> from the vault-builder checkout."
+    "To reach another vault from this repository, run vault-builder link <vault> --repo <repository>."
 )
 STALE_TOOLS_HINT = (
     "The tools in this vault may be out of date. Run audit and apply from the vault-builder checkout."

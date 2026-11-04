@@ -1166,7 +1166,7 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
         print(f"Note: {note}", file=stream)
     print(
         "Restart Claude Code, check that /mcp lists one llm-wiki server, then run "
-        f"tools/vault_migration/cli.py doctor {shlex.quote(str(plan.target))} from the vault-builder checkout.",
+        f"vault-builder doctor {shlex.quote(str(plan.target))}.",
         file=stream,
     )
     print("Next:", file=stream)

@@ -26,10 +26,11 @@ if str(ROOT) not in sys.path:
 from tools.vault_migration.applying import apply_plan, recover_migration
 from tools.vault_migration.catalogs import build_catalog, write_catalog
 from tools.vault_migration.versioning import read_version
+from tools.vault_migration import onboarding
 from tools.vault_migration.installing import install
 from tools.vault_migration.linking import link, list_links, unlink
 from tools.vault_migration.map_settings import set_default_write, set_role
-from tools.vault_migration.uninstalling import doctor, uninstall
+from tools.vault_migration.uninstalling import doctor, uninstall, uninstall_all
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.models import MigrationPlan
 from tools.vault_migration.planning import audit_vault, validate_external_output_path
@@ -575,15 +576,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     install.add_argument("--dry-run", action="store_true")
     uninstall_parser = subcommands.add_parser("uninstall")
-    uninstall_parser.add_argument("path")
+    uninstall_target = uninstall_parser.add_mutually_exclusive_group(required=True)
+    uninstall_target.add_argument("path", nargs="?", help="Vault to uninstall.")
+    uninstall_target.add_argument(
+        "--all",
+        action="store_true",
+        help="Uninstall every vault in vault-map.json, then delete the vault-builder command and the default "
+        "builder checkout. raw/ and wiki/ stay.",
+    )
     uninstall_parser.add_argument("--dry-run", action="store_true")
     doctor_parser = subcommands.add_parser("doctor")
-    doctor_parser.add_argument("path")
+    doctor_parser.add_argument(
+        "path", nargs="?", help="Vault to check. Without a path, every vault in vault-map.json is checked."
+    )
     recover = subcommands.add_parser("recover")
     recover.add_argument("--target", required=True)
     recover.add_argument("--migration-id", required=True)
     link_parser = subcommands.add_parser("link")
-    link_parser.add_argument("vault")
+    link_parser.add_argument("vault", nargs="*", help="Vault names to link. Without names, every shared vault is linked.")
     link_parser.add_argument("--repo")
     link_parser.add_argument("--project")
     link_parser.add_argument("--dry-run", action="store_true")
@@ -598,6 +608,32 @@ def _build_parser() -> argparse.ArgumentParser:
     default_write_choice = default_write_parser.add_mutually_exclusive_group(required=True)
     default_write_choice.add_argument("--vault")
     default_write_choice.add_argument("--clear", action="store_true")
+    setup_parser = subcommands.add_parser(
+        "setup",
+        help="Install vg, every vault with hooks, link repositories, register MCP servers, then run doctor.",
+    )
+    setup_parser.add_argument(
+        "--vault", action="append", metavar="NAME=PATH", help="A vault to install. Repeat for more vaults."
+    )
+    setup_parser.add_argument("--role", action="append", metavar="NAME=ROLE", help=onboarding.role_help())
+    setup_parser.add_argument(
+        "--repo", action="append", metavar="PATH", help="A repository to link. Repeat for more repositories."
+    )
+    setup_parser.add_argument(
+        "--project-vault",
+        metavar="NAME=PATH",
+        help="The project vault of the one --repo. Default: $HOME/vaults/<repository folder name>.",
+    )
+    setup_parser.add_argument(
+        "--default-write", metavar="NAME", help="The default write vault when link does not set one."
+    )
+    setup_parser.add_argument("--yes", action="store_true", help="Ask no questions.")
+    setup_parser.add_argument("--dry-run", action="store_true", help="Run only the precheck and show the plan.")
+    setup_parser.add_argument(
+        "--without-vault-graph",
+        action="store_true",
+        help="Install vault-builder only: no vg, no mcpServers.vault-graph, no vg index. Hooks are still installed.",
+    )
     role_parser = subcommands.add_parser("set-role")
     role_parser.add_argument("--vault", required=True)
     role_parser.add_argument("--role", required=True)
@@ -741,13 +777,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "uninstall":
         try:
+            if args.all:
+                return uninstall_all(dry_run=args.dry_run)
             return uninstall(Path(args.path), dry_run=args.dry_run)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             print(f"uninstall: {exc}", file=sys.stderr)
             return 1
     if args.command == "doctor":
         try:
-            return doctor(Path(args.path))
+            return doctor(Path(args.path) if args.path else None)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             print(f"doctor: {exc}", file=sys.stderr)
             return 1
@@ -769,6 +807,12 @@ def main(argv: list[str] | None = None) -> int:
             return list_links(repo=args.repo)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"{args.command}: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "setup":
+        try:
+            return onboarding.setup(onboarding.options_from_args(args))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(f"setup: {exc}", file=sys.stderr)
             return 1
     if args.command in {"set-default-write", "set-role"}:
         try:

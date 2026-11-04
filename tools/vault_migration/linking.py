@@ -10,18 +10,20 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shlex
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 
+from tools.vault_migration import roles
 from tools.vault_migration.installing import _atomic_write, _json_bytes, resolve_user_paths
 
 _ROUTER_PATH = Path(__file__).resolve().parent / "assets" / "llm-wiki-router" / "llm_wiki_router.py"
 _ROUTER_MODULE = "vault_builder_llm_wiki_router"
 _VAULT_MAP_VERSION = 2
-_PROJECT_ROLE = "project"  # session capture saves transcripts only into a vault with this role
+_PROJECT_ROLE = roles.PROJECT_ROLE  # session capture saves transcripts only into a vault with this role
 
 
 def _router() -> ModuleType:
@@ -93,25 +95,49 @@ def default_write_from_project_role(data: dict, project_id: str, command: str) -
     )
 
 
+def _shared_vault_names(vaults: dict) -> list[str]:
+    """The vaults link picks when no name is given: every vault whose role is shared (decision 7)."""
+    return sorted(name for name, entry in vaults.items() if roles.is_shared(entry.get("role", "")))
+
+
+def _project_link_hint(vaults: dict, root: Path) -> str:
+    names = ", ".join(sorted(name for name, entry in vaults.items() if entry.get("role") == _PROJECT_ROLE)) or "none"
+    return (
+        f"Link a {_PROJECT_ROLE} vault by name: vault-builder link <name> --repo {shlex.quote(str(root))} "
+        f"({_PROJECT_ROLE} vaults: {names})"
+    )
+
+
 def link(
-    vault: str,
+    vault_names: Sequence[str] = (),
     *,
     repo: str | None = None,
     project: str | None = None,
     dry_run: bool = False,
     environ: Mapping[str, str] = os.environ,
 ) -> int:
+    """Link the repository to every named vault with one read and one write of the link config.
+
+    Without names, every shared vault is linked and a project vault is left for a link by name.
+    """
     try:
         path, data = _load(environ)
         router = _router()
         vaults = data["vaults"]
-        if vault not in vaults:
-            names = ", ".join(sorted(vaults)) or "none"
-            raise _Refused(f"Vault {vault} is not in the link config. Vaults: {names}.")
+        requested = list(dict.fromkeys([vault_names] if isinstance(vault_names, str) else vault_names))
+        for vault in requested:
+            if vault not in vaults:
+                names = ", ".join(sorted(vaults)) or "none"
+                raise _Refused(f"Vault {vault} is not in the link config. Vaults: {names}.")
         start = _repo(repo)
         root = router.main_worktree_root(start)
         if root is None:
             raise _Refused(f"{start} is not inside a git repository.")
+        by_name = bool(requested)
+        if not by_name:
+            requested = _shared_vault_names(vaults)
+            if not requested:
+                raise _Refused(f"No shared vault is in the link config. {_project_link_hint(vaults, root)}")
         origin = router.origin_url(root)
         projects = data["projects"]
         match = router.find_project(start, data)
@@ -124,7 +150,7 @@ def link(
                     f"Project {project_id} already belongs to another repository ({projects[project_id]['root']}). "
                     "Choose another id with --project."
                 )
-            entry: dict[str, object] = {"root": str(root), "vaults": [vault]}
+            entry: dict[str, object] = {"root": str(root), "vaults": list(requested)}
             if origin is not None:
                 entry["remote"] = origin
             projects[project_id] = entry
@@ -137,16 +163,26 @@ def link(
                     f"Drop --project or use --project {project_id}."
                 )
             entry = projects[project_id]
-            if vault not in entry["vaults"]:
-                entry["vaults"].append(vault)
+            for vault in requested:
+                if vault not in entry["vaults"]:
+                    entry["vaults"].append(vault)
             entry["root"] = str(root)
             if origin is not None:
                 entry["remote"] = origin
             action = f"found by {match.stage}"
         print(f"link: project {project_id} ({action}) vaults: {', '.join(entry['vaults'])}")
+        for vault in requested:
+            role = vaults[vault].get("role", "")
+            if roles.known_role(role) is None:
+                print(f"link: vault {vault} has role {role}, which is not a known role. It is linked as a shared vault.")
         default_write_from_project_role(data, project_id, "link")
         _write(path, data, dry_run, "link")
-        if not any(vaults[name].get("role") == _PROJECT_ROLE for name in entry["vaults"] if name in vaults):
+        has_project_vault = any(
+            vaults[name].get("role") == _PROJECT_ROLE for name in entry["vaults"] if name in vaults
+        )
+        if not has_project_vault and not by_name:
+            print(f"link: {_project_link_hint(vaults, root)}")
+        if not has_project_vault:
             print(
                 f"link: warning: project {project_id} has no vault with role {_PROJECT_ROLE}, so session transcripts "
                 f"will not be saved. Run set-role --vault <name> --role {_PROJECT_ROLE} on the vault meant for them.",
@@ -195,6 +231,14 @@ def unlink(
         return 1
 
 
+def _role_note(role: str) -> str:
+    known = roles.known_role(role)
+    if known is None:
+        return "[not a known role, shared]"
+    scope = "per repository" if known.per_repo else "shared"
+    return f"[{scope}: {known.description}]"
+
+
 def list_links(*, repo: str | None = None, environ: Mapping[str, str] = os.environ) -> int:
     try:
         path, data = _load(environ)
@@ -206,7 +250,7 @@ def list_links(*, repo: str | None = None, environ: Mapping[str, str] = os.envir
     print("Vaults:")
     for name, entry in sorted(data["vaults"].items()):
         exists = "exists" if Path(entry["path"]).expanduser().is_dir() else "missing"
-        print(f"  {name}  role={entry['role']}  path={entry['path']}  ({exists})")
+        print(f"  {name}  role={entry['role']}  path={entry['path']}  ({exists})  {_role_note(entry['role'])}")
     print("Projects:")
     for project_id, entry in sorted(data["projects"].items()):
         remote = entry.get("remote", "-")

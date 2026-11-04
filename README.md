@@ -6,9 +6,70 @@ It keeps raw source material separate from durable knowledge, then uses
 deterministic validation so agent-written drafts become permanent only after
 they pass the vault's quality boundary.
 
-## Simple Setup
+## Install
 
-Install a new vault with one command:
+Quit Claude Code, then run one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
+```
+
+This URL works only after the change that adds `scripts/install.sh` is merged
+into `main`. Until then the command fails with a 404 from GitHub.
+
+The command checks git, curl and Python 3.10 or newer, clones the builder
+checkout into `$HOME/.local/share/vault-builder`, creates the
+`$HOME/.local/bin/vault-builder` command, and runs `vault-builder setup`. Setup
+installs `vg` (Vault Graph), creates your Vaults, installs the Vault hooks,
+links the repository, registers the `llm-wiki` and `vault-graph` MCP servers in
+Claude Code, runs the first index, and ends with `vault-builder doctor`. When
+uv is missing, the command asks before it installs uv. Press Enter at every
+question to get a personal Vault at `$HOME/vault` and, when the current folder
+is a git repository, a project Vault for it at
+`$HOME/vaults/<repository folder name>`. The command stops before it writes
+`$HOME/.claude.json` while Claude Code is running.
+
+When the command finishes:
+
+1. Start Claude Code again.
+2. Run `/mcp` in Claude Code and check that `llm-wiki` and `vault-graph` are
+   listed as connected.
+
+Link another repository later with:
+
+```bash
+vault-builder link --repo /path/to/other-repo
+```
+
+Without a Vault name, `link` links every shared Vault (roles `personal`,
+`team`, and roles not in the known role table). Link a project Vault by name:
+`vault-builder link <name> --repo /path/to/other-repo`. Add a Vault later with
+`vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/app`.
+
+Installing Vault Graph needs SSH read access to
+`github.com/cutehackers/vault-graph`. Without that access, install vault-builder
+only:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
+```
+
+This installs the Vaults, the hooks, the repository links and the `llm-wiki`
+MCP server, without `vg` and the `vault-graph` server. Run the command again
+without `--without-vault-graph` to add Vault Graph later.
+
+Other options go after `bash -s --`, for example
+`--repo /path/to/app --yes` to run without questions. `--help` lists every
+option and environment variable. `--uninstall` removes the builder files of every
+Vault, the hooks, both MCP servers, `vg`, the `vault-builder` command and the
+builder checkout. Each Vault keeps `raw/` and `wiki/`, and `$HOME/.vault-graph`
+stays. See
+[docs/usage.md](docs/usage.md) sections 1 and 17 for details.
+
+## Create a vault folder only
+
+To create only a Vault folder, without `vg`, hooks, repository links or MCP
+servers, use `bootstrap.sh`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash
@@ -17,7 +78,9 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 This downloads `cutehackers/vault-builder` and creates a ready-to-use `vault/`
 folder in the current directory.
 
-After setup, open the vault and work through the bundled agent skills:
+## Use a vault
+
+Open the vault and work through the bundled agent skills:
 
 - `wiki-ingest` for turning raw source material into durable wiki pages.
 - `wiki-update` for revising existing pages from trusted sources.

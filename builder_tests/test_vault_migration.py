@@ -6955,8 +6955,7 @@ class RecallProjectLookupTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("project-memory: "), lines[0])
         self.assertIn(str(repo), lines[0])
         self.assertEqual(
-            f"link: run tools/vault_migration/cli.py link <vault> --repo {repo} "
-            "from the vault-builder checkout (vaults: personal, team)",
+            f"link: run vault-builder link <vault> --repo {repo} (vaults: personal, team)",
             lines[1],
         )
 

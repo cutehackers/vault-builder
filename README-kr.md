@@ -5,9 +5,67 @@ LLM Wiki는 사람과 LLM agent가 함께 쓰는 quality-gated markdown wiki입�
 원본 자료와 durable knowledge를 분리하고, agent가 만든 draft가 vault의 품질
 경계를 통과했을 때만 영구 wiki 지식으로 남도록 결정론적 검증을 사용합니다.
 
-## 간단한 설치
+## 설치
 
-아래 한 줄로 새 vault를 설치합니다.
+Claude Code를 종료한 뒤 아래 명령 한 줄을 실행합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
+```
+
+이 주소는 `scripts/install.sh`를 더한 변경이 `main` branch에 merge된 뒤부터
+동작합니다. 그 전에는 GitHub가 404를 돌려줍니다.
+
+이 명령은 git, curl, Python 3.10 이상이 있는지 확인하고, builder checkout을
+`$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder`
+명령을 만든 뒤 `vault-builder setup`을 실행합니다. setup은 `vg`(Vault Graph)를
+설치하고, Vault를 만들고, Vault hook을 설치하고, 저장소를 연결하고, Claude Code에
+`llm-wiki`와 `vault-graph` MCP 서버를 등록하고, 첫 색인을 만든 뒤
+`vault-builder doctor`로 검사합니다. uv가 없으면 설치할지 먼저 묻습니다. 질문마다
+Enter를 누르면 개인 Vault가 `$HOME/vault`에 생기고, 현재 폴더가 git 저장소이면
+그 저장소의 project Vault가 `$HOME/vaults/<저장소 폴더 이름>`에 생깁니다. Claude
+Code가 실행 중이면 이 명령은 `$HOME/.claude.json`을 쓰기 전에 멈춥니다.
+
+명령이 끝나면 다음을 합니다.
+
+1. Claude Code를 다시 시작합니다.
+2. Claude Code에서 `/mcp`를 실행하고 `llm-wiki`와 `vault-graph`가 연결되어
+   있는지 확인합니다.
+
+다음 저장소는 아래 명령으로 연결합니다.
+
+```bash
+vault-builder link --repo /path/to/other-repo
+```
+
+Vault 이름을 주지 않으면 `link`는 공유 Vault 전부(역할 `personal`, `team`, 알려진
+역할 표에 없는 역할)를 연결합니다. project Vault는 이름으로 연결합니다:
+`vault-builder link <이름> --repo /path/to/other-repo`. 나중에 Vault를 더할 때는
+`vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/app`처럼
+새 Vault만 넘깁니다.
+
+Vault Graph를 설치하려면 `github.com/cutehackers/vault-graph` 저장소의 SSH 읽기
+권한이 필요합니다. 권한이 없으면 vault-builder만 설치합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
+```
+
+이 명령은 `vg`와 `vault-graph` 서버 없이 Vault, hook, 저장소 연결, `llm-wiki` MCP
+서버만 설치합니다. 나중에 같은 명령을 `--without-vault-graph` 없이 다시 실행하면
+Vault Graph가 더해집니다.
+
+다른 옵션은 `bash -s --` 뒤에 붙입니다. 예를 들어 `--repo /path/to/app --yes`를
+붙이면 질문 없이 실행합니다. `--help`는 모든 옵션과 환경 변수를 보여 줍니다.
+`--uninstall`은 모든 Vault의 builder 파일, hook, 두 MCP 서버, `vg`,
+`vault-builder` 명령, builder checkout을 지웁니다. 각 Vault의 `raw/`와 `wiki/`,
+그리고 `$HOME/.vault-graph`는 남습니다. 자세한 내용은
+[docs/usage.md](docs/usage.md) 1절과 17절을 봅니다.
+
+## Vault 폴더만 만들기
+
+`vg`, hook, 저장소 연결, MCP 서버 없이 Vault 폴더만 만들려면 `bootstrap.sh`를
+씁니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash
@@ -16,7 +74,9 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 이 명령은 `cutehackers/vault-builder`를 내려받고, 현재 폴더 아래에 바로 사용할 수
 있는 `vault/` 폴더를 만듭니다.
 
-설치 후에는 vault를 열고 포함된 agent skill을 사용합니다.
+## Vault 사용하기
+
+vault를 열고 포함된 agent skill을 사용합니다.
 
 - `wiki-ingest`: 원본 자료를 durable wiki page로 정리합니다.
 - `wiki-update`: 신뢰할 수 있는 원본을 기준으로 기존 페이지를 갱신합니다.

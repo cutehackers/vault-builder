@@ -6804,8 +6804,8 @@ class UsageDocTests(unittest.TestCase):
     def test_old_server_entries_and_doctor_rewrite_are_gone(self):
         text = self._text()
         self.assertNotIn("llm-wiki-<", text)
-        self.assertNotIn("다시 만듭니다", self._section("### 17.6 install, uninstall, doctor"))
-        self.assertNotIn(".mcp.json", self._section("### 17.6 install, uninstall, doctor"))
+        self.assertNotIn("다시 만듭니다", self._section("### 17.6 setup, install, uninstall, doctor"))
+        self.assertNotIn(".mcp.json", self._section("### 17.6 setup, install, uninstall, doctor"))
         self.assertNotIn("/Users/", text)
 
     def test_mcp_section_describes_one_server_vault_argument_and_read_scope(self):
@@ -6824,8 +6824,11 @@ class UsageDocTests(unittest.TestCase):
 
     def test_link_section_documents_commands_and_project_lookup_order(self):
         section = self._section("### 17.3 저장소 연결하기")
-        for command in ("cli.py link ", "cli.py unlink ", "cli.py list"):
+        for command in ("vault-builder link ", "vault-builder unlink ", "vault-builder list"):
             self.assertIn(command, section)
+        self.assertIn("vault-builder link personal team app --repo", section)
+        self.assertIn("vault-builder link --repo", section)
+        self.assertNotIn("cd /path/to/vault-builder", section)
         self.assertNotIn('"vaults": ["personal"]}', section)
         section = section[section.index("#### project 찾기 순서"):]
         root = section.index("root 경로")
@@ -6835,7 +6838,7 @@ class UsageDocTests(unittest.TestCase):
         self.assertLess(remote, name)
 
     def test_install_section_lists_four_steps_in_order_and_reinstall(self):
-        section = self._section("### 17.6 install, uninstall, doctor")
+        section = self._section("### 17.6 setup, install, uninstall, doctor")
         steps = [
             section.index("1. Claude Code를 모두 종료"),
             section.index("2. 터미널에서"),
@@ -6845,6 +6848,14 @@ class UsageDocTests(unittest.TestCase):
         self.assertEqual(sorted(steps), steps)
         self.assertIn("uninstall한 vault", section)
         self.assertIn("llm_wiki_router.py", section)
+        for phrase in ("vault-builder uninstall --all", "vault-builder doctor", "vault-hooks.json", "`setup`"):
+            self.assertIn(phrase, section)
+
+    def test_quick_start_begins_with_the_install_command(self):
+        section = self._section("## 1. ")
+        install = "curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash"
+        self.assertIn(install, section)
+        self.assertLess(section.index(install), section.index("bootstrap.sh"))
 
     def test_link_config_section_shows_version_2_and_link_command(self):
         section = self._section("### 17.1 설정 폴더와 연결 설정 파일")
@@ -6862,12 +6873,13 @@ class UsageDocTests(unittest.TestCase):
     def test_recall_unlinked_row_mentions_link_line(self):
         section = self._section("### 17.5 요약 불러오기 (/project-memory)")
         row = next(line for line in section.splitlines() if line.startswith("| 연결되지 않은 저장소"))
-        self.assertIn("`link: run tools/vault_migration/cli.py link ", row)
+        self.assertIn("`link: run vault-builder link ", row)
 
     def test_command_summary_lists_link_commands(self):
         section = self._section("## 19. 전체 명령 요약")
-        for command in ("cli.py link ", "cli.py unlink ", "cli.py list"):
+        for command in ("vault-builder link ", "vault-builder unlink ", "vault-builder list", "vault-builder setup"):
             self.assertIn(command, section)
+        self.assertNotIn("tools/vault_migration/cli.py link", section)
 
 
 def _session_frontmatter(session_id: str = "abc-123", part: int = 1, **overrides: object) -> dict:
