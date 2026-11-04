@@ -19,8 +19,6 @@ Claude Code를 모두 종료한 뒤 아래 명령 한 줄로 설치합니다.
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 ```
 
-이 주소는 `scripts/install.sh`를 더한 변경이 `main` branch에 merge된 뒤부터 동작합니다. 그 전에는 GitHub가 404를 돌려줍니다.
-
 이 명령은 git, curl, Python 3.10 이상이 있는지 확인하고, builder checkout을 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder` 명령을 만든 뒤 `vault-builder setup`을 실행합니다. `setup`은 vg(vault-graph) 설치, vault 설치와 hook 설치, 저장소 연결, MCP 서버 등록, 색인, doctor 검사를 차례로 합니다(17.6). uv가 없으면 설치할지 묻습니다. 질문마다 Enter를 누르면 개인 vault `$HOME/vault`와, 현재 폴더가 git 저장소일 때 그 저장소의 project vault `$HOME/vaults/<저장소 폴더 이름>`이 생기고 연결됩니다.
 
 명령이 끝나면 Claude Code를 다시 시작하고, `/mcp` 목록에 `vault-wiki`와 `vault-graph`가 연결되어 있는지 확인합니다. 다음 저장소는 `vault-builder link --repo <경로>` 명령으로 연결합니다(17.3).

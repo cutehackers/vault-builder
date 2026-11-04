@@ -14,9 +14,6 @@ Quit Claude Code, then run one command:
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 ```
 
-This URL works only after the change that adds `scripts/install.sh` is merged
-into `main`. Until then the command fails with a 404 from GitHub.
-
 The command checks git, curl and Python 3.10 or newer, clones the builder
 checkout into `$HOME/.local/share/vault-builder`, creates the
 `$HOME/.local/bin/vault-builder` command, and runs `vault-builder setup`. Setup

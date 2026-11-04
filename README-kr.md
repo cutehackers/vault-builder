@@ -13,9 +13,6 @@ Claude Code를 종료한 뒤 아래 명령 한 줄을 실행합니다.
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 ```
 
-이 주소는 `scripts/install.sh`를 더한 변경이 `main` branch에 merge된 뒤부터
-동작합니다. 그 전에는 GitHub가 404를 돌려줍니다.
-
 이 명령은 git, curl, Python 3.10 이상이 있는지 확인하고, builder checkout을
 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder`
 명령을 만든 뒤 `vault-builder setup`을 실행합니다. setup은 `vg`(Vault Graph)를
