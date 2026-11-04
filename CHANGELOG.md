@@ -69,6 +69,8 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
   ```
 
 - 사람이 고친 `release-gate.yml`도 migration은 건드리지 않는다. 고친 내용이 필요하면 `qa.yml`로 옮긴 뒤 지운다.
+- 이미 contract 5로 설치한 vault는 audit에서 `README.md`, `README-kr.md`, `docs/usage.md`, `tests/test_wiki_tools.py`가 `replace`로 나온다. 설치 안내 문서가 새 설치 명령으로 바뀌었기 때문이다. 사람이 고치지 않은 파일이므로 위와 같은 순서로 apply하면 된다. 고친 파일은 `review-required`로 나온다.
+- 기존 사용자는 Claude Code를 종료하고 설치 명령(`curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash`)을 한 번 실행한 뒤 다시 시작하면 hook, vg 경로 기록, `vault-builder` 명령이 채워진다. 기존 Vault, 저장소 연결, 기본 쓰기 Vault는 그대로다. 소스에서 설치한 vg(`uv tool install -e .`)는 git 주소 설치로 바뀌므로, 개발용 vg를 유지하려면 `--without-vault-graph`를 준다.
 - 옮긴 vault에서 인자 없는 `scripts/release_gate.sh`는 `check` 단계만 실행한다. vault의 `tests/`를 실행하려면 `scripts/release_gate.sh --tier unit`을 쓴다.
 
 ## [2.0.0] - 2026-10-30
