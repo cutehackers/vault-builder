@@ -62,8 +62,8 @@ Other options go after `bash -s --`, for example
 `--repo /path/to/app --yes` to run without questions. `--help` lists every
 option and environment variable. `--uninstall` removes the builder files of every
 Vault, the hooks, both MCP servers, `vg`, the `vault-builder` command and the
-builder checkout. Each Vault keeps `raw/` and `wiki/`, and `$HOME/.vault-graph`
-stays. See
+builder checkout. Each Vault keeps `raw/` and `wiki/`. `$HOME/.vault-graph` and
+the embedding model folder (`$HOME/llm/models`) stay. See
 [docs/usage.md](docs/usage.md) sections 1 and 17 for details.
 
 ## Create a vault folder only

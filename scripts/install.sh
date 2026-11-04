@@ -26,7 +26,8 @@ Usage:
 Options of this script:
   --install-uv      Install uv without asking when it is missing.
   --uninstall       Remove the vaults' outside files, the hooks, both MCP entries, vg, the vault-builder
-                    command and the builder checkout. Vault folders and ~/.vault-graph stay.
+                    command and the builder checkout. Vault folders, ~/.vault-graph and the
+                    embedding model folder (~/llm/models) stay.
 Every other option goes to vault-builder setup (see vault-builder setup --help), for example
 --repo PATH, --vault NAME=PATH, --role NAME=ROLE, --yes, --dry-run, --without-vault-graph.
 
@@ -417,6 +418,15 @@ ${vault_paths}
 EOF
   fi
   echo "  vault-graph data: ${HOME}/.vault-graph"
+  # The embedding model folder is ~/llm/models unless vg embedding use saved another one.
+  local models_dir="${HOME}/llm/models" saved_dir=""
+  local embedding_settings="${HOME}/.vault-graph/configs/embedding.json"
+  if [[ -f "${embedding_settings}" ]] && command -v python3 >/dev/null 2>&1; then
+    saved_dir="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("models_dir") or "")' \
+      "${embedding_settings}" 2>/dev/null || true)"
+    [[ -n "${saved_dir}" ]] && models_dir="${saved_dir}"
+  fi
+  echo "  embedding model folder: ${models_dir}"
 }
 
 main() {

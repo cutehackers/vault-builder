@@ -59,7 +59,7 @@ Vault Graph가 더해집니다.
 붙이면 질문 없이 실행합니다. `--help`는 모든 옵션과 환경 변수를 보여 줍니다.
 `--uninstall`은 모든 Vault의 builder 파일, hook, 두 MCP 서버, `vg`,
 `vault-builder` 명령, builder checkout을 지웁니다. 각 Vault의 `raw/`와 `wiki/`,
-그리고 `$HOME/.vault-graph`는 남습니다. 자세한 내용은
+`$HOME/.vault-graph`, 임베딩 모델 폴더(`$HOME/llm/models`)는 남습니다. 자세한 내용은
 [docs/usage.md](docs/usage.md) 1절과 17절을 봅니다.
 
 ## Vault 폴더만 만들기

@@ -645,6 +645,7 @@ class FullFlowTests(_InstallScriptCase):
             self.assertIn(f"vault: {vault}", result.stdout)
         self.assertTrue(vg_data.is_dir())
         self.assertIn(f"vault-graph data: {vg_data}", result.stdout)
+        self.assertIn(f"embedding model folder: {self.home / 'llm' / 'models'}", result.stdout)
         calls = self.calls()
         unregister = calls.index("vg mcp unregister --agent claude")
         self.assertLess(unregister, calls.index("uv tool uninstall vault-graph"))

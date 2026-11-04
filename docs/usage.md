@@ -1144,7 +1144,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 커밋된 세션 파일 삭제·변경 검사 | `python3 tools/wiki/cli.py sessions git-check` |
 | L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
 | 첫 설치 (vg, vault, hook, 저장소 연결, MCP 등록, 색인) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash` |
-| 설치 명령으로 전부 제거 (vault 폴더와 `$HOME/.vault-graph`는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
+| 설치 명령으로 전부 제거 (vault 폴더, `$HOME/.vault-graph`, 임베딩 모델 폴더 `$HOME/llm/models`는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
 | vault 추가, 빠진 부분 다시 설치 | `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/my-app` |
 | 저장소를 공유 vault 전부에 연결 | `vault-builder link --repo /path/to/my-app` |
 | 저장소를 vault 여러 개에 연결 | `vault-builder link personal team app --repo /path/to/my-app` |
