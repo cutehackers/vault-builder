@@ -90,13 +90,13 @@
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "ba19ab47baf78f4467a85ac2301dbe945e63251805dbb5d26f41b00c0e22b9eb"
+      "sha256": "3f60a377c581c52a50fe86aad9721d39dbe9ff0520660fa03749dd014c036b72"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "b4cda69405f241c1a368d717eb6c514072c511f03e980deda7310e1998d65558"
+      "sha256": "b29c5c4c846e3f76dcecdccf3fe33668f307e1d1e1b0f5be32aa8005fab79b41"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
@@ -132,7 +132,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "88c9fa45f9e4342b6dc1ea80e557f03a151369f517eebfe9bc84c18bf48630c9"
+      "sha256": "4ed8b63396102bf47c3b60e2ba5a8a74e0c8428b95b6a791b5084f5c4095d0f5"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -186,7 +186,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "5ba896400f89a7db30d95992d8353f8630e0f6f69db959a6013fdab4505fca49"
+      "sha256": "d06436282c6f7450f35f16f35604c361650c7eaf0f4e80e0060c23ef629f1ff4"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -360,7 +360,7 @@
       "mode": "0755",
       "path": "tools/wiki/mcp_server.py",
       "policy": "replace-if-unmodified",
-      "sha256": "202930938c8ac24f1d78d74ecd4db2facbae98b922ca49c74d7eb35801cf3417"
+      "sha256": "0df4c5a964f4a96ec7c7945633b88ea5d17da64977ccdd71a323703fd9dbb726"
     },
     "tools/wiki/metrics-policy.json": {
       "mode": "0644",

@@ -5,7 +5,8 @@ list, and never commits. Inside the Vault it deletes managed files whose bytes s
 manifest, except .gitignore, then a .mcp.json of the previous builder form and the manifest.
 Outside the Vault (schema 2 only) it removes the Vault from the vault map (and every project
 whose vault list becomes empty). When no Vault remains it also deletes the vault map, the shared
-files (skill, recall script, router), the mcpServers.llm-wiki server entry, and the folders
+files (skill, recall script, router), the mcpServers.vault-wiki server entry (and an mcpServers.llm-wiki
+entry of ours left from before the rename), and the folders
 those files leave empty. The mcpServers key stays.
 
 With the last Vault it also undoes install --with-hooks: from the Claude Code settings file (hooks.py) it removes only
@@ -54,9 +55,11 @@ from . import hooks as _hooks
 from .catalogs import _safe_relative_path, sha256_file
 from .durability import fsync_directory
 from .installing import (
+    LEGACY_MCP_SERVER_KEY,
     MCP_ENTRY_PREFIX,
     MCP_SERVER_KEY,
     ROOT,
+    SERVER_KEY_PATHS,
     InstallError,
     UserPaths,
     _ASSET_ROOT,
@@ -74,6 +77,7 @@ from .installing import (
     _recall_is_known,
     _same_path,
     choose_interpreter,
+    is_legacy_entry,
     require_python,
     resolve_user_paths,
 )
@@ -123,7 +127,8 @@ def _record_problem(record: Mapping[str, object], user: UserPaths) -> str:
 
     The manifest is tracked by git and editable, so uninstall and doctor accept only the paths
     install resolves from HOME and CLAUDE_CONFIG_DIR: the skill, the recall script, the router,
-    the vault map, and the shared mcpServers.llm-wiki entry in the MCP settings file.
+    the vault map, and the shared mcpServers.vault-wiki entry in the MCP settings file. A record of the
+    previous name mcpServers.llm-wiki is accepted: install renames it on its next run.
     """
     kind, location = str(record["kind"]), str(record["location"])
     if kind == "file":
@@ -139,7 +144,7 @@ def _record_problem(record: Mapping[str, object], user: UserPaths) -> str:
         key_path = str(record["key_path"])
         if key_path.startswith("mcpServers." + MCP_ENTRY_PREFIX):
             return f"The vault was installed by the previous vault-builder version ({key_path}). {_PREVIOUS_VERSION_HINT}"
-        if location != mcp_config or key_path != _SERVER_KEY_PATH or record.get("shared") is not True:
+        if location != mcp_config or key_path not in SERVER_KEY_PATHS or record.get("shared") is not True:
             return (
                 f"Unexpected json-entry record {location} {key_path}: "
                 f"expected {mcp_config} {_SERVER_KEY_PATH} with shared true."
@@ -200,9 +205,9 @@ def _old_mcp_json(path: Path, target: Path) -> bool:
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
     servers = value.get("mcpServers") if isinstance(value, dict) else None
-    if not isinstance(servers, dict) or list(servers) != [MCP_SERVER_KEY]:
+    if not isinstance(servers, dict) or list(servers) != [LEGACY_MCP_SERVER_KEY]:
         return False
-    server = _entry_server(servers[MCP_SERVER_KEY])
+    server = _entry_server(servers[LEGACY_MCP_SERVER_KEY])
     return server is not None and _same_path(server, target / "tools" / "wiki" / "mcp_server.py")
 
 
@@ -393,7 +398,12 @@ def _plan_outside(plan: _UninstallPlan, manifest: VaultManifest, builder_root: P
             action = "remove"
         else:
             action = "keep"
+        if action == "absent" and is_legacy_entry(servers.get(LEGACY_MCP_SERVER_KEY), user.router):
+            plan.entries.append((LEGACY_MCP_SERVER_KEY, "remove"))  # installed before the rename
+            continue
         plan.entries.append((MCP_SERVER_KEY, action))
+        if plan.last_vault and is_legacy_entry(servers.get(LEGACY_MCP_SERVER_KEY), user.router):
+            plan.entries.append((LEGACY_MCP_SERVER_KEY, "remove"))  # left from before the rename
 
     for record in _records(manifest, "file"):
         path = _record_path(home, record)
@@ -927,7 +937,7 @@ def _doctor_recall(report: _DoctorReport, recall: Path, environment: Mapping[str
 def _doctor_mcp_entry(
     report: _DoctorReport, user: UserPaths, environment: Mapping[str, str]
 ) -> dict[str, object] | None:
-    """Check the mcpServers.llm-wiki entry. Return the server entry when it can be started."""
+    """Check the mcpServers.vault-wiki entry. Return the server entry when it can be started."""
     path = user.mcp_config
     try:
         config = _load_json_object(path, "MCP settings file")
@@ -944,6 +954,11 @@ def _doctor_mcp_entry(
             f"MCP settings file {path} has entries from the previous vault-builder version: "
             + ", ".join(f"mcpServers.{key}" for key in old_keys)
             + f". {_PREVIOUS_VERSION_HINT}"
+        )
+    if is_legacy_entry(servers.get(LEGACY_MCP_SERVER_KEY), user.router):
+        report.problem(
+            f"mcpServers.{LEGACY_MCP_SERVER_KEY} in {path} runs this router under the name used before "
+            f"{MCP_SERVER_KEY}; install renames it."
         )
     entry = servers.get(MCP_SERVER_KEY)
     expected_args = ["-I", str(user.router)]

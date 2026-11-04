@@ -614,7 +614,7 @@ class FullFlowTests(_InstallScriptCase):
         self.assertEqual("app", project["default_write_vault"])
         # A-3
         servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("llm-wiki", servers)
+        self.assertIn("vault-wiki", servers)
         self.assertEqual(str(vg), servers["vault-graph"]["command"])
         self.assertTrue(os.access(servers["vault-graph"]["command"], os.X_OK))
         # A-4
@@ -660,7 +660,7 @@ class FullFlowTests(_InstallScriptCase):
         result = self.run_script("--uninstall", pipe=True)
         self.assert_exit(0, result)
         servers = self.read_json(self.claude_json).get("mcpServers", {})
-        self.assertNotIn("llm-wiki", servers)
+        self.assertNotIn("vault-wiki", servers)
         self.assertNotIn("vault-graph", servers)
         if self.settings.exists():
             self.assertNotIn("vault_hooks.py", self.settings.read_text(encoding="utf-8"))

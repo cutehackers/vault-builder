@@ -4023,6 +4023,23 @@ chmod +x "${target}/scripts/release_gate.sh"
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(-32600, responses[0]["error"]["code"])
 
+    def test_mcp_server_initialize_names_the_server_vault_wiki(self):
+        root = Path(__file__).resolve().parents[1]
+        request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+
+        result = subprocess.run(
+            [sys.executable, "tools/wiki/mcp_server.py"],
+            cwd=root,
+            input=json.dumps(request) + "\n",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        responses = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("vault-wiki", responses[0]["result"]["serverInfo"]["name"])
+
     def test_repo_local_stenc_setup_renders_pages_from_content_only(self):
         root = Path(__file__).resolve().parents[1]
         stenc_paths = [
@@ -6370,7 +6387,7 @@ def _shared_json_entry_manifest() -> dict[str, object]:
             {
                 "kind": "json-entry",
                 "location": ".claude.json",
-                "key_path": "mcpServers.llm-wiki",
+                "key_path": "mcpServers.vault-wiki",
                 "sha256": "b" * 64,
                 "shared": True,
             },
@@ -6389,14 +6406,14 @@ class SharedJsonEntryTests(unittest.TestCase):
 
         self.assertEqual(2, manifest["schema_version"])
         entry = next(record for record in manifest["external_records"] if record["kind"] == "json-entry")
-        self.assertEqual("mcpServers.llm-wiki", entry["key_path"])
+        self.assertEqual("mcpServers.vault-wiki", entry["key_path"])
         self.assertIs(True, entry["shared"])
 
     def test_json_entry_key_path_rule_is_unchanged(self):
         from tools.wiki.lib.vault_manifest import validate_manifest
 
         value = _shared_json_entry_manifest()
-        value["external_records"][1]["key_path"] = "other.llm-wiki"  # type: ignore[index]
+        value["external_records"][1]["key_path"] = "other.vault-wiki"  # type: ignore[index]
 
         with self.assertRaisesRegex(ValueError, "key_path"):
             validate_manifest(value)
@@ -6783,7 +6800,7 @@ class UserHomeIsolationTest(unittest.TestCase):
 
 
 class UsageDocTests(unittest.TestCase):
-    """docs/usage.md describes one user-scope llm-wiki server, link commands, and the safe install order."""
+    """docs/usage.md describes one user-scope vault-wiki server, link commands, and the safe install order."""
 
     @staticmethod
     def _text() -> str:
@@ -6808,10 +6825,19 @@ class UsageDocTests(unittest.TestCase):
         self.assertNotIn(".mcp.json", self._section("### 17.6 setup, install, uninstall, doctor"))
         self.assertNotIn("/Users/", text)
 
+    def test_install_guides_name_the_vault_wiki_server(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("README.md", "README-kr.md", "docs/usage.md"):
+            lines = [line for line in (root / name).read_text(encoding="utf-8").splitlines() if "`/mcp`" in line]
+            with self.subTest(file=name):
+                self.assertTrue(lines)
+                self.assertTrue(all("`vault-wiki`" in line for line in lines), lines)
+                self.assertFalse(any("llm-wiki" in line for line in lines), lines)
+
     def test_mcp_section_describes_one_server_vault_argument_and_read_scope(self):
         section = self._section("## 16. MCP 사용하기")
         for phrase in (
-            "`mcpServers.llm-wiki`",
+            "`mcpServers.vault-wiki`",
             "`vault` 인자",
             "닿는 vault",
             "`team`",

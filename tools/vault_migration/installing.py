@@ -1,5 +1,6 @@
 """Install a Vault plus its user-level files: project-memory skill, recall script, router, vault map,
-and the one shared MCP server entry `mcpServers.llm-wiki`. No Vault gets a .mcp.json.
+and the one shared MCP server entry `mcpServers.vault-wiki`. No Vault gets a .mcp.json.
+An entry of ours under the previous name `mcpServers.llm-wiki` is renamed in the same write.
 
 New Vault: precheck, assemble and self-check in a temporary sibling folder, one rename, then the
 changes outside the Vault, then the final manifest. A failure after the rename restores every
@@ -25,6 +26,7 @@ the Claude Code settings file named in hooks.py. Without --with-hooks install do
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -54,7 +56,11 @@ from .planning import audit_vault
 
 ROOT = Path(__file__).resolve().parents[2]
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-MCP_SERVER_KEY = "llm-wiki"
+MCP_SERVER_KEY = "vault-wiki"
+# The name of the shared entry before vault-wiki. Install renames it when its args run this config folder's router.
+LEGACY_MCP_SERVER_KEY = "llm-wiki"
+# Manifest json-entry key paths install writes now or wrote before the rename.
+SERVER_KEY_PATHS = (f"mcpServers.{MCP_SERVER_KEY}", f"mcpServers.{LEGACY_MCP_SERVER_KEY}")
 # Entries named llm-wiki-<name> come from the previous builder version, which install refuses.
 MCP_ENTRY_PREFIX = "llm-wiki-"
 RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
@@ -255,6 +261,7 @@ class _InstallPlan:
     mcp_entry: dict[str, object]
     mcp_entry_action: str
     notes: list[str] = field(default_factory=list)
+    remove_legacy_entry: bool = False  # mcpServers.llm-wiki is ours and goes in the same write
     restore_plan: MigrationPlan | None = None  # set for a Vault without a manifest
     hooks: _HooksPlan | None = None  # set by --with-hooks
 
@@ -367,9 +374,10 @@ def _precheck(
             + ", ".join(f"mcpServers.{key}" for key in old_keys)
             + f". {_PREVIOUS_VERSION_HINT}"
         )
+    remove_legacy = is_legacy_entry(servers.get(LEGACY_MCP_SERVER_KEY), user.router)
     existing_entry = servers.get(MCP_SERVER_KEY)
     if existing_entry is None:
-        entry_action = "create"
+        entry_action = "rename" if remove_legacy else "create"
     elif not _runs_router(existing_entry, user.router):
         raise InstallError(
             f"MCP settings file {user.mcp_config} already has mcpServers.{MCP_SERVER_KEY} for another program "
@@ -381,6 +389,11 @@ def _precheck(
         entry_action = "replace"
         old_command = existing_entry.get("command") if isinstance(existing_entry, dict) else None
         notes.append(f"Replacing mcpServers.{MCP_SERVER_KEY} interpreter {old_command} with {python}.")
+    if remove_legacy:
+        notes.append(
+            f"The server is now named {MCP_SERVER_KEY}, so its tools are mcp__{MCP_SERVER_KEY}__*. Update permission "
+            f"rules and skills that name mcp__{LEGACY_MCP_SERVER_KEY}__ by hand."
+        )
 
     vault_map = _load_json_object(user.vault_map, "Vault map")
     if user.vault_map.exists():
@@ -431,10 +444,17 @@ def _precheck(
 
     skill_asset = (builder_root / _ASSET_ROOT / "SKILL.md").read_bytes()
     router_asset = (builder_root / _ROUTER_ASSET).read_bytes()
+    # A router an earlier install wrote (a vault manifest records its hash) is replaced, so the new server name reaches it.
+    router_hashes = _recorded_hashes(user, user.router, [target, *_vault_paths(vaults)])
     files = [
         _file_plan(user.skill, skill_asset, 0o644, lambda current: current == skill_asset),
         _file_plan(user.recall, _recall_bytes(builder_root, python), 0o755, _recall_is_known(builder_root)),
-        _file_plan(user.router, router_asset, 0o644, lambda current: current == router_asset),
+        _file_plan(
+            user.router,
+            router_asset,
+            0o644,
+            lambda current: current == router_asset or hashlib.sha256(current).hexdigest() in router_hashes,
+        ),
     ]
     for item in files:
         if item.action == "keep":
@@ -464,6 +484,7 @@ def _precheck(
         mcp_entry=entry,
         mcp_entry_action=entry_action,
         notes=notes,
+        remove_legacy_entry=remove_legacy,
         restore_plan=restore_plan,
         hooks=hooks_plan,
     )
@@ -581,7 +602,7 @@ def _require_current_records(target: Path, user: UserPaths) -> None:
                 f"({record['location']} is not under the current config folder). "
                 "Run uninstall with the original HOME and CLAUDE_CONFIG_DIR first."
             )
-        if record["kind"] == "json-entry" and key_path != f"mcpServers.{MCP_SERVER_KEY}":
+        if record["kind"] == "json-entry" and key_path not in SERVER_KEY_PATHS:
             raise InstallError(
                 f"Vault {target} has an unexpected server entry record {key_path}; "
                 f"install records only mcpServers.{MCP_SERVER_KEY}. Run uninstall first."
@@ -597,6 +618,37 @@ def _require_one_vault_name(target: Path, name: str, vaults: dict[str, object], 
                 f"Vault {target} is already registered as vault {other} in {user.vault_map}. "
                 f"Run uninstall first to change its name, or install again with --name {other}."
             )
+
+
+def _vault_paths(vaults: Mapping[str, object]) -> list[Path]:
+    paths = []
+    for value in vaults.values():
+        raw = value.get("path") if isinstance(value, dict) else None
+        if isinstance(raw, str) and os.path.isabs(os.path.expanduser(raw)):
+            paths.append(Path(os.path.expanduser(raw)))
+    return paths
+
+
+def _recorded_hashes(user: UserPaths, path: Path, vaults: list[Path]) -> set[str]:
+    """The sha256 values that the manifests of these vaults record for the outside file path."""
+    location = user.relative(path)
+    hashes: set[str] = set()
+    for vault in vaults:
+        try:
+            manifest = load_manifest(vault)
+        except (OSError, ValueError):
+            continue
+        if manifest is None:
+            continue
+        for record in manifest.external_records:
+            if record["kind"] == "file" and record["location"] == location and isinstance(record.get("sha256"), str):
+                hashes.add(str(record["sha256"]))
+    return hashes
+
+
+def is_legacy_entry(entry: object, router: Path) -> bool:
+    """True when an entry under the previous name is ours: its args are exactly ["-I", <router>]."""
+    return isinstance(entry, dict) and entry.get("args") == ["-I", str(router)]
 
 
 def _runs_router(entry: object, router: Path) -> bool:
@@ -814,6 +866,8 @@ def _install_existing_vault(
             dict(record)
             for record in manifest.external_records
             if (str(record["location"]), str(record.get("key_path", ""))) not in identities
+            # The server entry record moves to the new key path.
+            and not (record["kind"] == "json-entry" and str(record.get("key_path", "")) in SERVER_KEY_PATHS)
         ]
         updated = dataclasses.replace(manifest, external_records=tuple([*kept, *records]))
         _before_write(plan.target / ".vault-builder" / "manifest.json")
@@ -1045,10 +1099,18 @@ def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list
     if plan.vault_map_write:
         changes.write(user.vault_map, _json_bytes(plan.vault_map, indent=2), 0o644)
     records.append({"kind": "config", "location": user.relative(user.vault_map), "shared": True})
-    if plan.mcp_entry_action != "unchanged":
+    if plan.mcp_entry_action != "unchanged" or plan.remove_legacy_entry:
         # Re-read just before writing: Claude Code may have rewritten the file since the precheck.
         config = _load_json_object(user.mcp_config, "MCP settings file")
-        servers = dict(config.get("mcpServers", {}))  # type: ignore[arg-type]
+        current = dict(config.get("mcpServers", {}))  # type: ignore[arg-type]
+        legacy = plan.remove_legacy_entry and is_legacy_entry(current.get(LEGACY_MCP_SERVER_KEY), user.router)
+        servers: dict[str, object] = {}
+        for key, value in current.items():
+            if legacy and key == LEGACY_MCP_SERVER_KEY:
+                if plan.mcp_key not in current:
+                    servers[plan.mcp_key] = plan.mcp_entry  # the renamed entry keeps its place
+                continue
+            servers[key] = value
         servers[plan.mcp_key] = plan.mcp_entry
         config["mcpServers"] = servers
         mode = stat.S_IMODE(user.mcp_config.stat().st_mode) if user.mcp_config.exists() else 0o600
@@ -1121,7 +1183,15 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
     for item in plan.files:
         print(f"  {item.action} {item.path}", file=stream)
     print(f"  {plan.vault_map_action} vault {plan.name} in {plan.user.vault_map}", file=stream)
-    print(f"  {plan.mcp_entry_action} mcpServers.{plan.mcp_key} in {plan.user.mcp_config}", file=stream)
+    if plan.mcp_entry_action == "rename":
+        print(
+            f"  rename mcpServers.{LEGACY_MCP_SERVER_KEY} to mcpServers.{plan.mcp_key} in {plan.user.mcp_config}",
+            file=stream,
+        )
+    else:
+        print(f"  {plan.mcp_entry_action} mcpServers.{plan.mcp_key} in {plan.user.mcp_config}", file=stream)
+        if plan.remove_legacy_entry:
+            print(f"  remove mcpServers.{LEGACY_MCP_SERVER_KEY} from {plan.user.mcp_config}", file=stream)
     if plan.hooks is not None:
         print(f"  {plan.hooks.launcher.action} {plan.hooks.launcher.path}", file=stream)
         if plan.hooks.config_contents is not None:
@@ -1165,7 +1235,7 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
     for note in plan.notes:
         print(f"Note: {note}", file=stream)
     print(
-        "Restart Claude Code, check that /mcp lists one llm-wiki server, then run "
+        f"Restart Claude Code, check that /mcp lists one {MCP_SERVER_KEY} server, then run "
         f"vault-builder doctor {shlex.quote(str(plan.target))}.",
         file=stream,
     )

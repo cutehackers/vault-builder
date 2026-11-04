@@ -25,7 +25,7 @@ STAGE_ROOT = "root"
 STAGE_REMOTE = "remote"
 STAGE_NAME = "name"
 
-SERVER_NAME = "llm-wiki"
+SERVER_NAME = "vault-wiki"
 SERVER_VERSION = "2.0.0"
 PROTOCOL_VERSION = "2024-11-05"
 CLI_TIMEOUT_SECONDS = 120
@@ -959,7 +959,7 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
         outcome = Outcome(_text_result(str(exc), True), vault, "refused")
     milliseconds = int((time.monotonic() - started) * 1000)
     print(
-        f"llm-wiki tool={name if known else 'unknown'} vault={outcome.vault} exit={outcome.exit} ms={milliseconds}",
+        f"{SERVER_NAME} tool={name if known else 'unknown'} vault={outcome.vault} exit={outcome.exit} ms={milliseconds}",
         file=sys.stderr,
         flush=True,
     )

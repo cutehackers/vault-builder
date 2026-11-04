@@ -21,7 +21,7 @@ The command checks git, curl and Python 3.10 or newer, clones the builder
 checkout into `$HOME/.local/share/vault-builder`, creates the
 `$HOME/.local/bin/vault-builder` command, and runs `vault-builder setup`. Setup
 installs `vg` (Vault Graph), creates your Vaults, installs the Vault hooks,
-links the repository, registers the `llm-wiki` and `vault-graph` MCP servers in
+links the repository, registers the `vault-wiki` and `vault-graph` MCP servers in
 Claude Code, runs the first index, and ends with `vault-builder doctor`. When
 uv is missing, the command asks before it installs uv. Press Enter at every
 question to get a personal Vault at `$HOME/vault` and, when the current folder
@@ -32,7 +32,7 @@ is a git repository, a project Vault for it at
 When the command finishes:
 
 1. Start Claude Code again.
-2. Run `/mcp` in Claude Code and check that `llm-wiki` and `vault-graph` are
+2. Run `/mcp` in Claude Code and check that `vault-wiki` and `vault-graph` are
    listed as connected.
 
 Link another repository later with:
@@ -54,7 +54,7 @@ If this computer cannot reach GitHub, install vault-builder only:
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
 ```
 
-This installs the Vaults, the hooks, the repository links and the `llm-wiki`
+This installs the Vaults, the hooks, the repository links and the `vault-wiki`
 MCP server, without `vg` and the `vault-graph` server. Run the command again
 without `--without-vault-graph` to add Vault Graph later.
 

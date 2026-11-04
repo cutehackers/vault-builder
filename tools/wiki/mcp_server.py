@@ -333,7 +333,7 @@ def _handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     request_id = request.get("id")
     try:
         if method == "initialize":
-            return _result(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "llm-wiki", "version": "1.0.0"}})
+            return _result(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "vault-wiki", "version": "1.0.0"}})
         if method == "notifications/initialized":
             return None
         if method == "tools/list":

@@ -328,7 +328,7 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
         )
     for message in failed:
         print(f"{_COMMAND}: {message}", file=sys.stderr)
-    servers = "llm-wiki and vault-graph" if plan.with_vault_graph else "llm-wiki"
+    servers = "vault-wiki and vault-graph" if plan.with_vault_graph else "vault-wiki"
     print("Restart Claude Code (every terminal, IDE and app session) so it loads the new MCP servers and hooks.")
     print(f"Then run /mcp in Claude Code and check that {servers} are listed as connected.")
     print("To link another repository later: vault-builder link --repo <path>")

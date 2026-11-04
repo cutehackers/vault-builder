@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 
 이 명령은 git, curl, Python 3.10 이상이 있는지 확인하고, builder checkout을 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder` 명령을 만든 뒤 `vault-builder setup`을 실행합니다. `setup`은 vg(vault-graph) 설치, vault 설치와 hook 설치, 저장소 연결, MCP 서버 등록, 색인, doctor 검사를 차례로 합니다(17.6). uv가 없으면 설치할지 묻습니다. 질문마다 Enter를 누르면 개인 vault `$HOME/vault`와, 현재 폴더가 git 저장소일 때 그 저장소의 project vault `$HOME/vaults/<저장소 폴더 이름>`이 생기고 연결됩니다.
 
-명령이 끝나면 Claude Code를 다시 시작하고, `/mcp` 목록에 `llm-wiki`와 `vault-graph`가 연결되어 있는지 확인합니다. 다음 저장소는 `vault-builder link --repo <경로>` 명령으로 연결합니다(17.3).
+명령이 끝나면 Claude Code를 다시 시작하고, `/mcp` 목록에 `vault-wiki`와 `vault-graph`가 연결되어 있는지 확인합니다. 다음 저장소는 `vault-builder link --repo <경로>` 명령으로 연결합니다(17.3).
 
 질문 없이 설치하려면 옵션을 `bash -s --` 뒤에 붙입니다.
 
@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --repo /path/to/my-app --yes
 ```
 
-vault-graph는 공개 저장소 `https://github.com/cutehackers/vault-graph`에서 HTTPS로 내려받아 설치합니다. SSH 키는 필요 없습니다. GitHub에 접속할 수 없으면 `--without-vault-graph` 옵션을 붙여 vault-builder만 설치합니다. 이때 vg와 `vault-graph` MCP 서버 없이 vault, hook, 저장소 연결, `llm-wiki` MCP 서버만 설치됩니다. 나중에 같은 명령을 이 옵션 없이 다시 실행하면 vault-graph가 더해집니다. 설치 명령의 다른 옵션과 환경 변수는 `| bash -s -- --help`로 봅니다.
+vault-graph는 공개 저장소 `https://github.com/cutehackers/vault-graph`에서 HTTPS로 내려받아 설치합니다. SSH 키는 필요 없습니다. GitHub에 접속할 수 없으면 `--without-vault-graph` 옵션을 붙여 vault-builder만 설치합니다. 이때 vg와 `vault-graph` MCP 서버 없이 vault, hook, 저장소 연결, `vault-wiki` MCP 서버만 설치됩니다. 나중에 같은 명령을 이 옵션 없이 다시 실행하면 vault-graph가 더해집니다. 설치 명령의 다른 옵션과 환경 변수는 `| bash -s -- --help`로 봅니다.
 
 #### vault 폴더만 만들기
 
@@ -617,7 +617,7 @@ python3 tools/wiki/cli.py metrics --check --policy tools/wiki/metrics-policy.jso
 
 ## 16. MCP 사용하기
 
-install(17.6)은 Claude Code의 user scope MCP 설정 파일에 서버 항목 `mcpServers.llm-wiki` 하나만 등록합니다. 모든 vault가 이 서버 하나를 함께 씁니다. 그래서 어느 저장소 세션에서든 `/mcp` 목록에는 vault 서버 `llm-wiki` 하나만 보입니다. vault 안에 `.mcp.json` 파일은 만들지 않습니다. 설치 명령(1절)과 `vault-builder setup`은 여기에 vault-graph 서버 `vault-graph`도 등록합니다. 이 서버는 vg가 등록하고 관리합니다.
+install(17.6)은 Claude Code의 user scope MCP 설정 파일에 서버 항목 `mcpServers.vault-wiki` 하나만 등록합니다. 모든 vault가 이 서버 하나를 함께 씁니다. 그래서 어느 저장소 세션에서든 `/mcp` 목록에는 vault 서버 `vault-wiki` 하나만 보이고, 도구 이름은 `mcp__vault-wiki__<도구>` 형태입니다. vault 안에 `.mcp.json` 파일은 만들지 않습니다. 설치 명령(1절)과 `vault-builder setup`은 여기에 vault-graph 서버 `vault-graph`도 등록합니다. 이 서버는 vg가 등록하고 관리합니다.
 
 서버 항목은 `<설정 폴더>/vault-builder/llm_wiki_router.py` 라우터를 실행합니다. 라우터는 도구 호출을 받을 때마다 대상 vault를 정하고, 그 vault 폴더에서 그 vault의 `tools/wiki/cli.py`를 실행합니다. 그래서 각 vault는 자기 tools 버전으로 검사받습니다. 라우터는 호출 사이에 아무것도 기억하지 않고, 호출마다 연결 설정(17.1)을 다시 읽습니다. 따라서 `link` 명령(17.3)으로 연결을 바꾸면 Claude Code를 다시 시작하지 않아도 다음 호출부터 적용됩니다.
 
@@ -895,7 +895,7 @@ setup, install, uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` �
 
 1. Claude Code를 모두 종료합니다. 터미널의 `claude` 세션과 IDE 안의 Claude Code도 포함합니다.
 2. 터미널에서 setup, install 또는 uninstall 명령을 실행합니다.
-3. Claude Code를 다시 시작합니다. install 뒤라면 `/mcp` 목록에서 vault 서버가 `llm-wiki` 하나인지 확인합니다. setup 뒤라면 `vault-graph`도 있는지 확인합니다.
+3. Claude Code를 다시 시작합니다. install 뒤라면 `/mcp` 목록에서 vault 서버가 `vault-wiki` 하나인지 확인합니다. setup 뒤라면 `vault-graph`도 있는지 확인합니다.
 4. doctor 명령을 실행합니다. setup은 마지막 단계에서 doctor를 직접 실행합니다.
 
 ```bash
@@ -940,9 +940,10 @@ vault-builder uninstall --all
 - 불러오기 skill, recall 스크립트, 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
 - 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 `--role` 값(없으면 `personal`)으로 더합니다. 저장소 연결은 `link` 명령(17.3)으로 합니다.
 - `--with-hooks` 옵션을 주면 `<설정 폴더>/settings.json`의 `hooks.SessionStart`, `hooks.PreCompact`, `hooks.SessionEnd`에 launcher `<설정 폴더>/vault-builder/vault_hooks.py`를 실행하는 항목을 하나씩 더합니다. 그리고 `<설정 폴더>/vault-builder/vault-hooks.json`에 vg 절대 경로를 적습니다. vg는 환경 변수 `VAULT_GRAPH_BIN` 값, 없으면 `PATH`에서 찾습니다. vg를 찾지 못하면 vg 경로 없이 설치하고 한 줄로 알립니다. install 명령의 기본값은 hook 없음이고, `setup`은 항상 이 옵션을 붙여 install을 실행합니다.
-- MCP 설정 파일의 `mcpServers` 객체 아래에 서버 항목 `llm-wiki` 하나를 둡니다. 값은 `{"command": <interpreter>, "args": ["-I", <라우터 경로>]}` 형태입니다. 모든 vault가 이 항목 하나를 함께 쓰므로, 두 번째 vault부터는 항목이 이미 같으면 MCP 설정 파일을 다시 쓰지 않습니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다.
+- MCP 설정 파일의 `mcpServers` 객체 아래에 서버 항목 `vault-wiki` 하나를 둡니다. 값은 `{"command": <interpreter>, "args": ["-I", <라우터 경로>]}` 형태입니다. 모든 vault가 이 항목 하나를 함께 쓰므로, 두 번째 vault부터는 항목이 이미 같으면 MCP 설정 파일을 다시 쓰지 않습니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다.
 - interpreter 경로는 install을 실행한 Python과 같은 파일을 가리키는 경로 가운데 patch version(`3.12.4` 같은 형태)이 없는 경로를 고릅니다. 그런 경로가 없으면 실행한 경로를 그대로 쓰고, Python을 올리면 install을 다시 실행하라는 알림을 출력합니다. 서버 항목과 recall 스크립트의 `PYTHON=` 줄에 같은 경로를 씁니다.
-- 이미 있는 `llm-wiki` 항목이 이 설정 폴더의 라우터를 가리키지 않으면 다른 프로그램의 항목으로 보고 아무것도 쓰지 않고 거부합니다.
+- 이미 있는 `vault-wiki` 항목이 이 설정 폴더의 라우터를 가리키지 않으면 다른 프로그램의 항목으로 보고 아무것도 쓰지 않고 거부합니다.
+- 이전 이름의 서버 항목 `llm-wiki`가 있고 `args` 값이 `["-I", <이 설정 폴더의 라우터 경로>]`이면 builder가 만든 항목입니다. install은 같은 한 번의 쓰기로 이 항목을 지우고 `vault-wiki` 항목을 씁니다. `--dry-run`은 이 이름 변경을 출력합니다. `args` 값이 다른 `llm-wiki` 항목은 다른 프로그램의 것으로 보고 그대로 둡니다. 이름이 바뀌면 도구 이름도 `mcp__llm-wiki__<도구>`에서 `mcp__vault-wiki__<도구>`로 바뀝니다. 권한 허용 규칙이나 skill에 옛 도구 이름이 있으면 직접 고치고, Claude Code를 다시 시작합니다.
 - 이전 버전 builder가 만든 MCP 등록(vault 이름이 붙은 서버 항목이나 vault 안의 MCP 설정 파일)이 있으면 고치지 않고 거부합니다. 이전 버전 builder로 uninstall한 뒤 이 버전으로 install합니다.
 - `--name` 옵션이 없으면 대상 폴더 이름을 vault 이름으로 씁니다. 폴더 이름이 `^[A-Za-z0-9][A-Za-z0-9_.-]*$` 형식이 아니면 거부하고 `--name` 옵션을 요구합니다.
 - `CLAUDE_CONFIG_DIR` 폴더는 `$HOME` 안에 있어야 합니다. vault 밖 기록은 `$HOME` 기준 상대 경로로만 적기 때문입니다.
@@ -954,7 +955,7 @@ vault-builder uninstall --all
 - vault 안에서는 기록된 hash와 같은 managed 파일과 manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
 - `raw/`, `wiki/`, `scratch/`, `.git` 폴더와 manifest에 없는 파일은 어떤 경우에도 지우지 않습니다. commit도 하지 않습니다.
 - 다른 vault가 남으면 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 빼고, `vaults` 목록이 빈 project 항목을 지웁니다. 서버 항목, 라우터, skill, recall 스크립트는 그대로 둡니다.
-- 마지막 vault이면 서버 항목, 라우터, 불러오기 skill, recall 스크립트, 연결 설정을 지우고, 비게 된 `<설정 폴더>/vault-builder/` 폴더와 `<설정 폴더>/skills/project-memory/` 폴더를 지웁니다. `mcpServers` key는 비어도 남깁니다. hook도 이때 지웁니다. `settings.json`에서는 launcher를 실행하는 hook 항목만 빼고, launcher 파일과 `vault-hooks.json`은 install이 쓴 내용과 같을 때만 지웁니다.
+- 마지막 vault이면 서버 항목, 라우터, 불러오기 skill, recall 스크립트, 연결 설정을 지우고, 비게 된 `<설정 폴더>/vault-builder/` 폴더와 `<설정 폴더>/skills/project-memory/` 폴더를 지웁니다. builder가 만든 이전 이름의 `llm-wiki` 항목이 남아 있으면 함께 지웁니다. `mcpServers` key는 비어도 남깁니다. hook도 이때 지웁니다. `settings.json`에서는 launcher를 실행하는 hook 항목만 빼고, launcher 파일과 `vault-hooks.json`은 install이 쓴 내용과 같을 때만 지웁니다.
 - 공유 파일은 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. 서버 항목은 `command` 값이 다른 interpreter여도 `args` 값이 `["-I", <라우터 경로>]`이면 같은 형태로 보고, recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
 - 이전 버전 builder로 설치한 vault이면 아무것도 쓰지 않고 거부합니다. 이전 버전의 uninstall을 사용합니다.
 - vault 밖 변경이 중간에 실패하면 모두 되돌리고 vault 안은 건드리지 않습니다.
@@ -962,7 +963,7 @@ vault-builder uninstall --all
 
 `uninstall --all [--dry-run]`
 
-- 연결 설정의 vault마다 차례로 위 `uninstall`을 실행합니다. 그래서 마지막 vault에서 공유 파일, 서버 항목 `llm-wiki`, hook이 지워집니다. 각 vault의 `raw/`, `wiki/`는 남습니다.
+- 연결 설정의 vault마다 차례로 위 `uninstall`을 실행합니다. 그래서 마지막 vault에서 공유 파일, 서버 항목 `vault-wiki`, hook이 지워집니다. 각 vault의 `raw/`, `wiki/`는 남습니다.
 - 한 vault가 실패하면 그 vault와 오류를 출력하고 멈춥니다. 남은 vault, `vault-builder` 명령, builder checkout은 그대로 둡니다.
 - 모든 vault를 지운 뒤 `$HOME/.local/bin/vault-builder` 파일을 지웁니다. 설치 명령이 쓴 표시 줄이 없는 파일은 사용자 파일로 보고 지우지 않습니다.
 - 마지막으로 그 파일에 적힌 builder checkout을 지웁니다. 기본 위치 `$HOME/.local/share/vault-builder`의 checkout만 지우고, `VAULT_BUILDER_HOME`으로 고른 checkout이나 다른 위치의 checkout은 남깁니다.
@@ -974,7 +975,8 @@ vault-builder uninstall --all
 
 manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(실행 권한, `PYTHON=` 줄의 interpreter, git 밖 폴더에서의 실행 결과), 연결 설정, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 사용자가 고친 managed 파일도 문제로 셉니다. MCP 등록은 아래를 검사합니다.
 
-- 서버 항목 `llm-wiki`가 있고 `args` 값이 `["-I", <라우터 경로>]`인지
+- 서버 항목 `vault-wiki`가 있고 `args` 값이 `["-I", <라우터 경로>]`인지
+- builder가 만든 이전 이름의 서버 항목 `llm-wiki`가 남아 있지 않은지. 남아 있으면 `vault-builder setup`으로 이름을 바꿉니다.
 - 라우터 파일이 있고 내용이 builder 원본이나 기록된 hash와 같은지
 - 서버 항목의 `command` 값이 Python 3.10 이상으로 실행되는지
 - 서버 항목의 `command`와 `args` 값으로 라우터를 실제로 시작해 30초 안에 `initialize`와 `tools/list` 요청에 응답하고, 도구 24개를 모두 돌려주는지

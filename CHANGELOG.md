@@ -44,6 +44,8 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 - gate의 test fingerprint 캐시(`llm-wiki-gate-tests.cache`)와 `WIKI_GATE_FULL`을 없앴다. `WIKI_GATE_FULL=1`을 설정해도 오류 없이 무시된다.
 - builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.10과 3.14로 `--tier full`을 실행한다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
 - install은 manifest schema가 5가 아닌 기존 vault를 audit 안내와 함께 거부한다. doctor는 schema 5를 기준으로 검사한다.
+- MCP 서버 이름을 `llm-wiki`에서 `vault-wiki`로 바꿨다. `$HOME/.claude.json`의 항목은 `mcpServers.vault-wiki`, 라우터와 vault `tools/wiki/mcp_server.py`가 답하는 `serverInfo.name`은 `vault-wiki`이고, Claude Code의 MCP 도구 이름은 `mcp__llm-wiki__*`에서 `mcp__vault-wiki__*`로 바뀐다. 이 규칙의 "MCP 도구 이름을 바꾸는 경우"에 해당하는 MAJOR 변경이다. 라우터 파일 이름 `llm_wiki_router.py`는 그대로다.
+- install은 이 설정 폴더의 라우터를 실행하는(`args`가 `["-I", <라우터 경로>]`인) `mcpServers.llm-wiki` 항목을 builder 항목으로 보고, 같은 한 번의 쓰기로 지우고 `mcpServers.vault-wiki`를 쓴다. `--dry-run`은 이 이름 변경을 출력한다. 다른 곳을 가리키는 `llm-wiki` 항목은 다른 프로그램의 것이므로 그대로 둔다. 거부는 이제 다른 프로그램의 `vault-wiki` 항목이 있을 때 일어난다. uninstall은 마지막 vault에서 `vault-wiki`와 남은 builder `llm-wiki` 항목을 함께 지우고, doctor는 남은 builder `llm-wiki` 항목을 `Fix: vault-builder setup` 문제로 알린다.
 
 ### Upgrade
 
@@ -69,8 +71,9 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
   ```
 
 - 사람이 고친 `release-gate.yml`도 migration은 건드리지 않는다. 고친 내용이 필요하면 `qa.yml`로 옮긴 뒤 지운다.
-- 이미 contract 5로 설치한 vault는 audit에서 `README.md`, `README-kr.md`, `docs/usage.md`, `tests/test_wiki_tools.py`가 `replace`로 나온다. 설치 안내 문서가 새 설치 명령으로 바뀌었기 때문이다. 사람이 고치지 않은 파일이므로 위와 같은 순서로 apply하면 된다. 고친 파일은 `review-required`로 나온다.
+- 이미 contract 5로 설치한 vault는 audit에서 `README.md`, `README-kr.md`, `docs/usage.md`, `tests/test_wiki_tools.py`, `tools/wiki/mcp_server.py`가 `replace`로 나온다. 설치 안내 문서가 새 설치 명령으로 바뀌었고 MCP 서버 이름이 `vault-wiki`로 바뀌었기 때문이다. 사람이 고치지 않은 파일이므로 위와 같은 순서로 apply하면 된다. 고친 파일은 `review-required`로 나온다.
 - 기존 사용자는 Claude Code를 종료하고 설치 명령(`curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash`)을 한 번 실행한 뒤 다시 시작하면 hook, vg 경로 기록, `vault-builder` 명령이 채워진다. 기존 Vault, 저장소 연결, 기본 쓰기 Vault는 그대로다. 소스에서 설치한 vg(`uv tool install -e .`)는 git 주소 설치로 바뀌므로, 개발용 vg를 유지하려면 `--without-vault-graph`를 준다.
+- MCP 서버 이름 변경: 설치 명령, `vault-builder install` 또는 `vault-builder setup`을 다시 실행하면 `$HOME/.claude.json`의 builder `llm-wiki` 항목이 `vault-wiki`로 바뀐다. 권한 허용 규칙(`settings.json`의 `permissions.allow` 등)이나 skill이 `mcp__llm-wiki__...` 도구 이름을 적고 있으면 `mcp__vault-wiki__...`로 직접 고친다. 그 뒤 Claude Code를 다시 시작한다.
 - 옮긴 vault에서 인자 없는 `scripts/release_gate.sh`는 `check` 단계만 실행한다. vault의 `tests/`를 실행하려면 `scripts/release_gate.sh --tier unit`을 쓴다.
 
 ## [2.0.0] - 2026-10-30

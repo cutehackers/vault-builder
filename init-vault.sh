@@ -12,7 +12,7 @@ usage() {
 Usage: ./init-vault.sh [--with-stenc] [--name NAME] [target-dir]
 
 Create a ready-to-use LLM Wiki vault and register it for Claude Code
-(project-memory skill, vault map, and the user MCP entry llm-wiki-NAME).
+(project-memory skill, vault map, and the user MCP entry vault-wiki).
 
 Options:
   --with-stenc  Include optional Stenc fixed-format spec/plan docs and tools.

@@ -304,7 +304,7 @@ class FindProjectTests(unittest.TestCase):
 _SAVED_ENVIRONMENT: dict[str, str | None] = {}
 _MODULE_TMP: list[Path] = []
 
-LOG_LINE = r"^llm-wiki tool=\S+ vault=\S+ exit=\S+ ms=\d+$"
+LOG_LINE = r"^vault-wiki tool=\S+ vault=\S+ exit=\S+ ms=\d+$"
 VALID_DRAFT = {
     "version": 1,
     "operation": "upsert-page",
@@ -499,7 +499,7 @@ class RouterProtocolTests(RouterCase):
         responses, _ = self.run_process(self.fixed_requests(), self.tmp)
         self.assertEqual([response["id"] for response in responses], [1, 2, 3, 4])
         initialize, tools, discover, unknown = (response.get("result") for response in responses)
-        self.assertEqual(initialize["serverInfo"]["name"], "llm-wiki")
+        self.assertEqual(initialize["serverInfo"]["name"], "vault-wiki")
         self.assertEqual(len(tools["tools"]), 24)
         self.assertEqual(discover["serverInfo"], initialize["serverInfo"])
         self.assertEqual(discover["capabilities"], initialize["capabilities"])

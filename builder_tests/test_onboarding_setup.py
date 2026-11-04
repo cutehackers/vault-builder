@@ -255,7 +255,7 @@ class FullSetupTests(_SetupCase):
         self.assertEqual("app", self.project()["default_write_vault"])
         # A-3
         servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("llm-wiki", servers)
+        self.assertIn("vault-wiki", servers)
         self.assertEqual(str(vg), servers["vault-graph"]["command"])
         # A-4
         hooks = self.read_json(self.settings)["hooks"]
@@ -267,7 +267,7 @@ class FullSetupTests(_SetupCase):
         self.assertIn("Doctor found no problems", output)
         tail = output.splitlines()[-4:]
         self.assertTrue(any("Restart Claude Code" in line for line in tail), output)
-        self.assertTrue(any("/mcp" in line and "llm-wiki" in line and "vault-graph" in line for line in tail), output)
+        self.assertTrue(any("/mcp" in line and "vault-wiki" in line and "vault-graph" in line for line in tail), output)
         self.assertTrue(any("vault-builder link --repo <path>" in line for line in tail), output)
 
     def test_the_session_start_hook_runs_vg_without_the_uv_folder_on_path(self) -> None:
@@ -527,7 +527,7 @@ class WithoutVaultGraphTests(_SetupCase):
         self.assertEqual([], [call for call in self.fake.calls if call[0] in {"uv", "git"} or "setup" in call])
         self.assertFalse(self.uv_bin.exists())
         servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("llm-wiki", servers)
+        self.assertIn("vault-wiki", servers)
         self.assertNotIn("vault-graph", servers)
         self.assertEqual(set(EVENTS), set(self.read_json(self.settings)["hooks"]))
         self.assertFalse(self.hooks_config.exists())

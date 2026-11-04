@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder`
 명령을 만든 뒤 `vault-builder setup`을 실행합니다. setup은 `vg`(Vault Graph)를
 설치하고, Vault를 만들고, Vault hook을 설치하고, 저장소를 연결하고, Claude Code에
-`llm-wiki`와 `vault-graph` MCP 서버를 등록하고, 첫 색인을 만든 뒤
+`vault-wiki`와 `vault-graph` MCP 서버를 등록하고, 첫 색인을 만든 뒤
 `vault-builder doctor`로 검사합니다. uv가 없으면 설치할지 먼저 묻습니다. 질문마다
 Enter를 누르면 개인 Vault가 `$HOME/vault`에 생기고, 현재 폴더가 git 저장소이면
 그 저장소의 project Vault가 `$HOME/vaults/<저장소 폴더 이름>`에 생깁니다. Claude
@@ -29,7 +29,7 @@ Code가 실행 중이면 이 명령은 `$HOME/.claude.json`을 쓰기 전에 멈
 명령이 끝나면 다음을 합니다.
 
 1. Claude Code를 다시 시작합니다.
-2. Claude Code에서 `/mcp`를 실행하고 `llm-wiki`와 `vault-graph`가 연결되어
+2. Claude Code에서 `/mcp`를 실행하고 `vault-wiki`와 `vault-graph`가 연결되어
    있는지 확인합니다.
 
 다음 저장소는 아래 명령으로 연결합니다.
@@ -52,7 +52,7 @@ vault-builder만 설치합니다.
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
 ```
 
-이 명령은 `vg`와 `vault-graph` 서버 없이 Vault, hook, 저장소 연결, `llm-wiki` MCP
+이 명령은 `vg`와 `vault-graph` 서버 없이 Vault, hook, 저장소 연결, `vault-wiki` MCP
 서버만 설치합니다. 나중에 같은 명령을 `--without-vault-graph` 없이 다시 실행하면
 Vault Graph가 더해집니다.
 

@@ -108,7 +108,7 @@ class EveryVaultTests(_UninstallAllCase):
         self.assertFalse((self.config / "vault-builder").exists())
         self.assertNotIn("vault_hooks.py", settings.read_text(encoding="utf-8"))
         claude = json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
-        self.assertNotIn("llm-wiki", claude.get("mcpServers", {}))
+        self.assertNotIn("vault-wiki", claude.get("mcpServers", {}))
         self.assertIn(f"Uninstalled {first}", output)
         self.assertIn(f"Uninstalled {second}", output)
 
