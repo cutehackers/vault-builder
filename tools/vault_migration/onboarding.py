@@ -39,7 +39,7 @@ from typing import Protocol
 from tools.vault_migration import installing, linking, map_settings, roles, uninstalling
 
 ROOT = Path(__file__).resolve().parents[2]
-VAULT_GRAPH_REPO = "ssh://git@github.com/cutehackers/vault-graph.git"
+VAULT_GRAPH_REPO = "https://github.com/cutehackers/vault-graph.git"
 PERSONAL_NAME = "personal"
 LS_REMOTE_TIMEOUT_S = 60.0
 EXIT_FAILED = 1
@@ -559,7 +559,7 @@ def _check_vault_graph_access(tools: Externals, env: Mapping[str, str], repo: st
     raise _Stop(
         f"cannot reach the vault-graph repository {repo}"
         + (f" ({detail[-1]})" if detail else "")
-        + ". Check your SSH key with: ssh -T git@github.com. "
+        + ". Check that this computer can reach GitHub over HTTPS (open https://github.com/cutehackers/vault-graph). "
         "Without access, install vault-builder only: run the same command with --without-vault-graph."
     )
 

@@ -242,7 +242,7 @@ class FullSetupTests(_SetupCase):
             self.assertTrue(call["with_hooks"])
             self.assertEqual(str(vg), call["environ"]["VAULT_GRAPH_BIN"])
         self.assertIn(
-            ["uv", "tool", "install", "--force", "git+ssh://git@github.com/cutehackers/vault-graph.git"], self.fake.calls
+            ["uv", "tool", "install", "--force", "git+https://github.com/cutehackers/vault-graph.git"], self.fake.calls
         )
         self.assertIn([str(vg), "setup", "--agent", "claude", "--mcp"], self.fake.calls)
 
@@ -322,7 +322,7 @@ class FullSetupTests(_SetupCase):
         self.assertEqual("team", self.vaults()["team"]["role"])
         self.assertEqual(["personal", "app", "team"], self.project()["vaults"])
         self.assertEqual(before, {path: path.read_bytes() for path in before})
-        self.assertIn(["git", "ls-remote", "ssh://git@github.com/cutehackers/vault-graph.git", "HEAD"], self.fake.calls)
+        self.assertIn(["git", "ls-remote", "https://github.com/cutehackers/vault-graph.git", "HEAD"], self.fake.calls)
 
     def test_a_failed_vg_setup_still_runs_doctor_and_exits_1(self) -> None:
         self.fake.vg_setup_code = 1
@@ -396,7 +396,8 @@ class PrecheckTests(_SetupCase):
         self.fake.ls_remote_code = 128
         output = self.assert_nothing_written("--repo", str(self.repo), "--yes")
         self.assertIn("cannot reach the vault-graph repository", output)
-        self.assertIn("ssh -T git@github.com", output)
+        self.assertIn("https://github.com/cutehackers/vault-graph", output)
+        self.assertNotIn("ssh -T", output)
         self.assertIn("--without-vault-graph", output)
         self.assertFalse((self.home / "vault").exists())
 
@@ -471,7 +472,7 @@ class PrecheckTests(_SetupCase):
         result, output = self.setup("--repo", str(self.repo), "--yes")
         self.assertEqual(1, result, output)
         self.assertIn("error: git clone failed", output)
-        self.assertIn("uv tool install --force git+ssh://git@github.com/cutehackers/vault-graph.git", output)
+        self.assertIn("uv tool install --force git+https://github.com/cutehackers/vault-graph.git", output)
         self.assertFalse(self.vault_map.exists())
 
 

@@ -44,8 +44,9 @@ Vault 이름을 주지 않으면 `link`는 공유 Vault 전부(역할 `personal`
 `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/app`처럼
 새 Vault만 넘깁니다.
 
-Vault Graph를 설치하려면 `github.com/cutehackers/vault-graph` 저장소의 SSH 읽기
-권한이 필요합니다. 권한이 없으면 vault-builder만 설치합니다.
+Vault Graph는 공개 저장소 `https://github.com/cutehackers/vault-graph`에서 HTTPS로
+내려받아 설치합니다. SSH 키는 필요 없습니다. 이 컴퓨터에서 GitHub에 접속할 수 없으면
+vault-builder만 설치합니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph

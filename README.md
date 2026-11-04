@@ -46,9 +46,9 @@ Without a Vault name, `link` links every shared Vault (roles `personal`,
 `vault-builder link <name> --repo /path/to/other-repo`. Add a Vault later with
 `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/app`.
 
-Installing Vault Graph needs SSH read access to
-`github.com/cutehackers/vault-graph`. Without that access, install vault-builder
-only:
+Installing Vault Graph downloads it from the public repository
+`https://github.com/cutehackers/vault-graph` over HTTPS. No SSH key is needed.
+If this computer cannot reach GitHub, install vault-builder only:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
