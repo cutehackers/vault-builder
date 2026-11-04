@@ -25,7 +25,17 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- 설치 명령 `scripts/install.sh`를 더했다. `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash` 한 줄로 uv 확인, builder checkout, `vault-builder` 명령 파일(`$HOME/.local/bin/vault-builder`), vg 설치, hook을 포함한 Vault 설치, 저장소 연결, MCP 등록, 첫 색인, doctor를 차례로 실행한다. Claude Code가 실행 중이면 `$HOME/.claude.json`을 쓰기 전에 멈춘다. 같은 명령을 다시 실행하면 빠진 것만 채운다.
+- `setup` 명령을 더했다. `install.sh`가 부르는 단계(precheck, vg 설치, hook을 포함한 Vault 설치, 저장소 연결, `vg setup`의 MCP 등록과 첫 색인, doctor)를 builder checkout에서 직접 실행한다. `--vault NAME=PATH`, `--role NAME=ROLE`, `--repo PATH`, `--yes`, `--dry-run`, `--without-vault-graph`를 받는다. vg는 `uv tool install --force git+https://github.com/cutehackers/vault-graph.git`로 설치하고, 주소는 `VAULT_GRAPH_REPO`로 바꿀 수 있다.
+- `uninstall --all`을 더했다. `vault-map.json`의 모든 Vault를 uninstall한 뒤 `vault-builder` 명령 파일과 기본 builder checkout을 지운다. 각 Vault의 `raw/`와 `wiki/`는 남는다. `install.sh --uninstall`은 이어서 `vg mcp unregister --agent claude`와 `uv tool uninstall vault-graph`를 실행하고, 남긴 Vault, `$HOME/.vault-graph`, 임베딩 모델 폴더(기본 `$HOME/llm/models`)를 출력한다.
+- 역할 목록(`tools/vault_migration/roles.py`)을 더했다. `personal`, `team`, `project` 세 역할을 알고, 목록에 없는 역할도 그대로 받아 공유 Vault로 다룬다.
+
 ### Changed
+
+- `link`가 Vault 이름을 여러 개 받는다. 이름 없이 실행하면 공유 역할의 Vault를 모두 연결한다.
+- `doctor`의 경로 인자를 뺄 수 있다. 경로 없이 실행하면 `vault-map.json`의 모든 Vault와 공유 항목을 한 번씩 검사한다. hook launcher 항목(SessionStart, PreCompact, SessionEnd), `vault-hooks.json`에 적힌 vg 경로와 `vg --help` 실행, `vault-builder` 명령 파일이 가리키는 checkout도 검사한다.
 
 - vault에 설치되는 workflow 이름을 `.github/workflows/release-gate.yml`에서 `.github/workflows/qa.yml`로 바꿨다. 관리 파일 목록이 바뀌어 contract와 manifest schema를 5로 올렸다. node를 설치하지 않고, setup-python이 설치한 Python을 `PYTHON`으로 gate에 넘긴다.
 - `scripts/release_gate.sh`에 `--tier check|unit|full` 인자를 더했다. `check`는 `lint`, `maps build --check`, `metrics --check`, `sessions git-check`, whitespace 검사만 하고 test를 실행하지 않는다. `unit`은 `full_tier_only` 표시가 없는 test를 더하고, `full`은 test 전부를 더한다. 인자가 없으면 vault는 `check`, builder 저장소는 `unit`을 실행한다. 출력 첫 줄에 `[release-gate] tier: <단계>`를 쓴다.
