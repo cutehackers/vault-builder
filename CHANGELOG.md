@@ -42,7 +42,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 - gate는 저장소를 임시 폴더로 복사하지 않고 루트에서 실행하며 report 파일을 쓰지 않는다. Git 작업 트리에서 추적 파일이 바뀌거나 ignore되지 않은 새 파일이 생기면 "Release gate changed tracked output"으로 실패한다.
 - gate에서 `health` 단계를 뺐다. `health` 명령 자체는 그대로다.
 - gate의 test fingerprint 캐시(`llm-wiki-gate-tests.cache`)와 `WIKI_GATE_FULL`을 없앴다. `WIKI_GATE_FULL=1`을 설정해도 오류 없이 무시된다.
-- builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.10과 3.14로 `--tier full`을 실행한다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
+- builder 저장소에 `.github/workflows/qa-full.yml`을 더했다. tag push, 수동 실행, 설치·migration·gate·contract·workflow 파일을 바꾼 PR에서 Python 3.12 하나로 `--tier full`을 실행한다. 3.12는 vg 설치 Python, vault-graph CI, `qa.yml`과 같은 버전이다. 이 파일은 vault에 설치되지 않는다. builder는 `.github` 폴더 전체 대신 `qa.yml` 한 파일만 vault에 복사한다.
 - install은 manifest schema가 5가 아닌 기존 vault를 audit 안내와 함께 거부한다. doctor는 schema 5를 기준으로 검사한다.
 - MCP 서버 이름을 `llm-wiki`에서 `vault-wiki`로 바꿨다. `$HOME/.claude.json`의 항목은 `mcpServers.vault-wiki`, 라우터와 vault `tools/wiki/mcp_server.py`가 답하는 `serverInfo.name`은 `vault-wiki`이고, Claude Code의 MCP 도구 이름은 `mcp__llm-wiki__*`에서 `mcp__vault-wiki__*`로 바뀐다. 이 규칙의 "MCP 도구 이름을 바꾸는 경우"에 해당하는 MAJOR 변경이다. 라우터 파일 이름 `llm_wiki_router.py`는 그대로다.
 - install은 이 설정 폴더의 라우터를 실행하는(`args`가 `["-I", <라우터 경로>]`인) `mcpServers.llm-wiki` 항목을 builder 항목으로 보고, 같은 한 번의 쓰기로 지우고 `mcpServers.vault-wiki`를 쓴다. `--dry-run`은 이 이름 변경을 출력한다. 다른 곳을 가리키는 `llm-wiki` 항목은 다른 프로그램의 것이므로 그대로 둔다. 거부는 이제 다른 프로그램의 `vault-wiki` 항목이 있을 때 일어난다. uninstall은 마지막 vault에서 `vault-wiki`와 남은 builder `llm-wiki` 항목을 함께 지우고, doctor는 남은 builder `llm-wiki` 항목을 `Fix: vault-builder setup` 문제로 알린다.
