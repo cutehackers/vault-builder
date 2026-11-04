@@ -186,7 +186,8 @@ repo_url() {
 is_builder_checkout() {
   local dir="$1" top
   [[ -d "${dir}" && ! -L "${dir}" ]] || return 1
-  [[ -f "${dir}/tools/vault_migration/cli.py" && -f "${dir}/tools/vault_migration/builder_command.py" ]] || return 1
+  # cli.py only: a checkout from before builder_command.py existed is still a builder checkout (spec 4.9).
+  [[ -f "${dir}/tools/vault_migration/cli.py" ]] || return 1
   top="$(git -C "${dir}" rev-parse --show-toplevel 2>/dev/null)" || return 1
   [[ "$(cd "${top}" && pwd -P)" == "$(cd "${dir}" && pwd -P)" ]]
 }
@@ -213,6 +214,11 @@ prepare_checkout() {
       echo "Builder checkout: ${CHECKOUT} (updated)"
     else
       echo "warning: git pull --ff-only failed in ${CHECKOUT}; using that checkout as it is." >&2
+    fi
+    if [[ ! -f "${CHECKOUT}/tools/vault_migration/builder_command.py" ]]; then
+      echo "${CHECKOUT} is older than this install command and could not be updated. Nothing was installed." >&2
+      echo "Update it, then run the install command again: git -C ${CHECKOUT} pull --ff-only" >&2
+      exit 1
     fi
     return 0
   fi
@@ -388,7 +394,12 @@ run_uninstall() {
   fi
 
   # 3. uv tool uninstall vault-graph.
-  if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^vault-graph '; then
+  # Read the whole list first: grep -q in a pipe can close it early, and pipefail would then read SIGPIPE as "not installed".
+  local tools=""
+  if command -v uv >/dev/null 2>&1; then
+    tools="$(uv tool list 2>/dev/null || true)"
+  fi
+  if [[ $'\n'"${tools}" == *$'\n'"vault-graph "* ]]; then
     if ! uv tool uninstall vault-graph; then
       echo "uv tool uninstall vault-graph failed." >&2
       exit 1

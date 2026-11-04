@@ -297,7 +297,11 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
     failed: list[str] = []
     # Step 5: vg setup.
     if vg is not None:
-        _step(5, "vg setup --agent claude --mcp (indexes every vault; the first run downloads a model)")
+        _step(
+            5,
+            "vg setup --agent claude --mcp (indexes every vault; the first run downloads the e5-small "
+            "embedding model, about 135 MB, and can take several minutes. Do not stop it.)",
+        )
         result = tools.run([str(vg), "setup", "--agent", "claude", "--mcp"], env, capture=False)
         if result.returncode != 0:
             failed.append(

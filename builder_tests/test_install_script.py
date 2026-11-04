@@ -456,6 +456,35 @@ class CheckoutTests(_InstallScriptCase):
         self.assertIn(str(self.checkout), warnings[0])
         self.assertIn("setup: dry run, the precheck passed", result.stdout)
 
+    def _old_checkout(self) -> Path:
+        """A checkout made before builder_command.py existed, whose origin has the newer commit to pull."""
+        git_env = self._git_env(self.home)
+        upstream = self.tmp / "upstream"
+        _git("clone", "-q", str(self.source), str(upstream), env=git_env)
+        _git("rm", "-q", "tools/vault_migration/builder_command.py", cwd=upstream, env=git_env)
+        _git("commit", "-q", "-m", "old", cwd=upstream, env=git_env)
+        self.checkout.parent.mkdir(parents=True, exist_ok=True)
+        _git("clone", "-q", str(upstream), str(self.checkout), env=git_env)
+        _git("revert", "--no-edit", "HEAD", cwd=upstream, env=git_env)
+        return upstream
+
+    def test_an_old_checkout_without_builder_command_is_updated_and_used(self) -> None:
+        """spec 4.9: an existing checkout from before this change is pulled, then used."""
+        self._old_checkout()
+        result = self.quick()
+        self.assert_exit(0, result)
+        self.assertTrue((self.checkout / "tools" / "vault_migration" / "builder_command.py").is_file())
+        self.assertEqual(self.expected_command(), self.command.read_bytes())
+
+    def test_an_old_checkout_that_cannot_be_updated_stops_with_exit_1(self) -> None:
+        self._old_checkout()
+        _git("-C", str(self.checkout), "remote", "set-url", "origin", str(self.tmp / "gone"))
+        result = self.quick()
+        self.assert_exit(1, result)
+        self.assertIn("is older than this install command", result.stderr)
+        self.assertIn("git -C", result.stderr)
+        self.assertFalse(self.command.exists())
+
     def test_a_rerun_with_the_same_content_leaves_the_file_alone(self) -> None:
         self.assert_exit(0, self.quick())
         before = self.command.stat()
