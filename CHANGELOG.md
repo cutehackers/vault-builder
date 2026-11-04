@@ -25,6 +25,14 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-04
+
+설치 명령 하나(`scripts/install.sh`, `vault-builder setup`)로 vg, Vault, hook, 저장소 연결, MCP 등록, 첫 색인을 끝낸다. 공유 MCP 서버 이름을 `llm-wiki`에서 `vault-wiki`로 바꿔 MCP 도구 이름이 `mcp__vault-wiki__*`가 되었으므로 MAJOR로 올렸다. contract와 manifest schema는 5다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 3.0.0 | 5 | 5 | 2 |
+
 ### Added
 
 - 설치 명령 `scripts/install.sh`를 더했다. `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash` 한 줄로 uv 확인, builder checkout, `vault-builder` 명령 파일(`$HOME/.local/bin/vault-builder`), vg 설치, hook을 포함한 Vault 설치, 저장소 연결, MCP 등록, 첫 색인, doctor를 차례로 실행한다. Claude Code가 실행 중이면 `$HOME/.claude.json`을 쓰기 전에 멈춘다. 같은 명령을 다시 실행하면 빠진 것만 채운다.
