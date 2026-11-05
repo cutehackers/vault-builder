@@ -601,9 +601,14 @@ def _review_problem(
             "    A vault-builder file differs from every version vault-builder shipped. Copy it outside the vault "
             "if you want to keep your changes, then put back the vault-builder version:"
         )
-        for action in shown:
-            if _review_kind(action, managed) == "managed":
-                lines.append(f"      cp {_quote(builder_root / action.path)} {_quote(path / action.path)}")
+        for action in sorted(blocking, key=lambda item: item.path):
+            if _review_kind(action, managed) != "managed":
+                continue
+            target = path / action.path
+            if action.action == "invalid":
+                # A folder or a symlink in place of the file: move it away so cp writes a plain file there.
+                lines.append(f"      mv {_quote(target)} {_quote(target.with_name(target.name + '.old'))}")
+            lines.append(f"      cp {_quote(builder_root / action.path)} {_quote(target)}")
     if "manifest" in kinds:
         lines.append(
             "    The manifest was written by a newer vault-builder. Update vault-builder with "

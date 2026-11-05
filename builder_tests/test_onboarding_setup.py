@@ -593,7 +593,7 @@ class CliTests(unittest.TestCase):
 class UpgradeResolutionTests(_SetupCase):
     def _follow_the_cp_lines(self, output: str) -> None:
         for line in output.splitlines():
-            if line.strip().startswith("cp "):
+            if line.strip().startswith(("cp ", "mv ")):
                 subprocess.run(line.strip(), shell=True, check=True)
 
     def test_following_the_guidance_for_an_edited_file_lets_the_next_run_finish(self) -> None:
@@ -613,6 +613,23 @@ class UpgradeResolutionTests(_SetupCase):
         for name, contents in expected.items():
             self.assertEqual(contents, (vault / name).read_bytes(), name)
         self.assertIn("Doctor found no problems", output)
+
+    def test_a_folder_in_place_of_a_managed_file_is_moved_away_first(self) -> None:
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        readme = self.home / "vault" / "README.md"
+        expected = readme.read_bytes()
+        readme.unlink()
+        readme.mkdir()
+        (readme / "note.md").write_text("mine\n", encoding="utf-8")
+        result, output = self.setup("--repo", str(self.repo), "--yes")
+        self.assertEqual(1, result, output)
+        self.assertIn(f"mv {readme} {readme}.old", output)
+
+        self._follow_the_cp_lines(output)
+        self.assert_setup("--repo", str(self.repo), "--yes")
+
+        self.assertEqual(expected, readme.read_bytes())
+        self.assertEqual("mine\n", (self.home / "vault" / "README.md.old" / "note.md").read_text(encoding="utf-8"))
 
     def test_a_wiki_page_that_breaks_the_source_rules_is_not_deleted_but_fixed(self) -> None:
         self.assert_setup("--repo", str(self.repo), "--yes")
