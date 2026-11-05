@@ -478,9 +478,11 @@ class UpgradeTests(_SetupCase):
         output = self.assert_setup("--repo", str(self.repo), "--yes", code=1)
 
         self.assertIn("Nothing was written", output)
-        self.assertIn("then delete it from the vault. setup puts back the vault-builder version", output)
+        self.assertIn("then put back the vault-builder version", output)
+        self.assertIn(f"cp {ROOT / 'README.md'} {self.app / 'README.md'}", output)
+        self.assertNotIn("delete", output)
         self.assertIn("audit failed: Vault topology is missing required file: AGENTS.md", output)
-        self.assertIn(f"git -C {self.personal} checkout -- <path>", output)
+        self.assertIn(f"cp {ROOT / 'AGENTS.md'} {self.personal / 'AGENTS.md'}", output)
         self.assertIn("review-required README.md", output)
         self.assertIn(f"vault personal ({self.personal})", output)
         self.assertIn(f"vault app ({self.app})", output)
@@ -589,17 +591,27 @@ class CliTests(unittest.TestCase):
 
 
 class UpgradeResolutionTests(_SetupCase):
-    def test_deleting_an_edited_file_lets_the_next_run_upgrade(self) -> None:
-        self.assert_setup("--repo", str(self.repo), "--yes")
-        readme = self.home / "vault" / "README.md"
-        expected = readme.read_bytes()
-        readme.write_text("my own readme\n", encoding="utf-8")
-        self.assert_setup("--repo", str(self.repo), "--yes", code=1)
+    def _follow_the_cp_lines(self, output: str) -> None:
+        for line in output.splitlines():
+            if line.strip().startswith("cp "):
+                subprocess.run(line.strip(), shell=True, check=True)
 
-        readme.unlink()
+    def test_following_the_guidance_for_an_edited_file_lets_the_next_run_finish(self) -> None:
+        """README.md and AGENTS.md (a required topology file that audit cannot recreate) both recover."""
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        vault = self.home / "vault"
+        expected = {name: (vault / name).read_bytes() for name in ("README.md", "AGENTS.md")}
+        for name in expected:
+            with (vault / name).open("a", encoding="utf-8") as stream:
+                stream.write("\nmy own rule\n")
+        result, output = self.setup("--repo", str(self.repo), "--yes")
+        self.assertEqual(1, result, output)
+
+        self._follow_the_cp_lines(output)
         output = self.assert_setup("--repo", str(self.repo), "--yes")
 
-        self.assertEqual(expected, readme.read_bytes())
+        for name, contents in expected.items():
+            self.assertEqual(contents, (vault / name).read_bytes(), name)
         self.assertIn("Doctor found no problems", output)
 
     def test_a_wiki_page_that_breaks_the_source_rules_is_not_deleted_but_fixed(self) -> None:
@@ -614,7 +626,7 @@ class UpgradeResolutionTests(_SetupCase):
         self.assertIn("review-required wiki/concepts/x.md", output)
         self.assertIn("A wiki page breaks the source page rules", output)
         self.assertIn("tools/wiki/cli.py lint", output)
-        self.assertNotIn("delete it from the vault", output)
+        self.assertNotIn("cp ", output)
         self.assertEqual(before, _snapshot(self.home))
 
     def test_a_manifest_from_a_newer_builder_asks_for_an_update(self) -> None:
@@ -628,7 +640,7 @@ class UpgradeResolutionTests(_SetupCase):
 
         self.assertEqual(1, result, output)
         self.assertIn("a newer vault-builder (contract 99) manages this vault", output)
-        self.assertNotIn("delete it from the vault", output)
+        self.assertNotIn("cp ", output)
 
 
 if __name__ == "__main__":
