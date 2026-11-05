@@ -27,7 +27,7 @@ rewrites recall.sh and the server entry, so the first Vault's recorded hashes ca
 doctor reports problems and exits 1 when it finds any. It writes no file. Each problem line ends with
 one fix command. Without a path it checks every vault in the vault map and the shared items once. It
 starts the server entry and checks the initialize and tools/list answers, and it checks the hook
-entries, the launcher, the recorded vg (vg --help), mcpServers.vault-graph and the vault-builder command.
+entries, the launcher, the recorded vg (vg --help) and the vault-builder command.
 """
 from __future__ import annotations
 
@@ -694,7 +694,6 @@ def _checkout_kept_reason(checkout: Path, home: Path, environment: Mapping[str, 
 # doctor.
 
 _SETUP = "vault-builder setup"
-_VAULT_GRAPH_KEY = "vault-graph"
 _VG_HELP_TIMEOUT_SECONDS: float = 10
 
 
@@ -769,7 +768,6 @@ def doctor(
         _doctor_claude_mcp_list(report, MCP_SERVER_KEY, user.mcp_config, environment)
     _doctor_git(report)
     _doctor_hooks(report, user, builder_root, environment)
-    _doctor_vault_graph_entry(report, user, environment)
     _doctor_builder_command(report, user, builder_root)
 
     if target is not None:
@@ -1149,8 +1147,7 @@ def _doctor_hooks(report: _DoctorReport, user: UserPaths, builder_root: Path, en
 
 def _doctor_hooks_vg(report: _DoctorReport, config_path: Path, environment: Mapping[str, str]) -> None:
     without_vg = (
-        f"{config_path} records no vg path, so the hooks use recall.sh and direct capture "
-        f"(an install without vault-graph). To use vault-graph, run {_SETUP}."
+        f"{config_path} records no vg path, so the hooks use recall.sh and direct capture."
     )
     if not config_path.exists():
         report.note(without_vg)
@@ -1199,29 +1196,6 @@ def _doctor_vg_help(report: _DoctorReport, vg: str, environment: Mapping[str, st
         first_error = next((line for line in stderr.splitlines() if line.strip()), "")
         suffix = f" First stderr line: {first_error}" if first_error else ""
         report.problem(f"{vg} --help exited {process.returncode}.{suffix}")
-
-
-def _doctor_vault_graph_entry(report: _DoctorReport, user: UserPaths, environment: Mapping[str, str]) -> None:
-    """Spec 4.7 item 5. A missing entry is a note: vault-builder works without vault-graph."""
-    path = user.mcp_config
-    try:
-        config = _load_json_object(path, "MCP settings file")
-    except InstallError:
-        return  # _doctor_mcp_entry reported it
-    servers = config.get("mcpServers", {})
-    if not isinstance(servers, dict):
-        return  # _doctor_mcp_entry reported it
-    key_path = f"mcpServers.{_VAULT_GRAPH_KEY}"
-    entry = servers.get(_VAULT_GRAPH_KEY)
-    if entry is None:
-        report.note(f"{key_path} is not in {path}: vault-graph is not set up. To add it, run {_SETUP}.")
-        return
-    command = entry.get("command") if isinstance(entry, dict) else None
-    found: str | None = None
-    if isinstance(command, str) and command:
-        found = command if os.path.isabs(command) else shutil.which(command, path=environment.get("PATH"))
-    if found is None or not (Path(found).is_file() and os.access(found, os.X_OK)):
-        report.problem(f"{key_path} command {command!r} in {path} is not an executable file.")
 
 
 def _doctor_builder_command(report: _DoctorReport, user: UserPaths, builder_root: Path) -> None:

@@ -3,8 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 #
-# Checks git, curl and Python 3.10 or newer, handles a missing uv (decision 4), clones or updates the
-# builder checkout, writes the vault-builder command file, then runs `vault-builder setup` with the
+# Checks git and Python 3.10 or newer, clones or updates the builder checkout, writes the vault-builder command file, then runs `vault-builder setup` with the
 # arguments this script does not use itself. --uninstall removes everything again.
 #
 # The whole script is one function called on the last line, so `curl | bash` reads all of it before
@@ -13,7 +12,6 @@ set -euo pipefail
 
 REPO="${VAULT_BUILDER_REPO:-cutehackers/vault-builder}"
 REF="${VAULT_BUILDER_REF:-main}"
-UV_INSTALL_COMMAND="curl -LsSf https://astral.sh/uv/install.sh | sh"
 INTERACTIVE=0
 
 usage() {
@@ -24,12 +22,10 @@ Usage:
   curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --uninstall
 
 Options of this script:
-  --install-uv      Install uv without asking when it is missing.
-  --uninstall       Remove the vaults' outside files, the hooks, both MCP entries, vg, the vault-builder
-                    command and the builder checkout. Vault folders, ~/.vault-graph and the
-                    embedding model folder (~/llm/models) stay.
+  --uninstall       Remove the vaults' outside files, the hooks, the vault-wiki MCP entry, the vault-builder
+                    command and the builder checkout. Vault folders stay.
 Every other option goes to vault-builder setup (see vault-builder setup --help), for example
---repo PATH, --vault NAME=PATH, --role NAME=ROLE, --yes, --dry-run, --without-vault-graph.
+--repo PATH, --vault NAME=PATH, --role NAME=ROLE, --yes, --dry-run.
 
 Environment:
   VAULT_BUILDER_REPO=owner/repo    Builder repository: owner/repo on GitHub, a git URL or a local path.
@@ -132,47 +128,6 @@ ask_tty() {
     return 1
   fi
   printf '%s' "${answer}"
-}
-
-install_uv() {
-  echo "Installing uv: ${UV_INSTALL_COMMAND}"
-  if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
-    echo "The uv installer failed. Run it yourself to see why: ${UV_INSTALL_COMMAND}" >&2
-    exit 1
-  fi
-  hash -r
-  if ! command -v uv >/dev/null 2>&1; then
-    echo "uv was installed but is not on PATH. Open a new terminal, then run this command again." >&2
-    exit 1
-  fi
-}
-
-# Decision 4.
-ensure_uv() {
-  local install_uv_flag="$1" answer
-  if command -v uv >/dev/null 2>&1; then
-    return 0
-  fi
-  if [[ "${install_uv_flag}" -eq 1 ]]; then
-    install_uv
-    return 0
-  fi
-  if [[ "${INTERACTIVE}" -eq 1 ]]; then
-    printf 'uv is not installed. vault-builder setup uses it to install vault-graph.\n' >/dev/tty
-    printf 'The uv install command is: %s\n' "${UV_INSTALL_COMMAND}" >/dev/tty
-    answer="$(ask_tty "Install uv now? [Y/n]")" || answer="n"
-    case "${answer}" in
-      ""|y|Y|yes|YES|Yes)
-        install_uv
-        return 0
-        ;;
-    esac
-    echo "uv is required. Install it with: ${UV_INSTALL_COMMAND}" >&2
-    exit 1
-  fi
-  echo "uv is required. Install it with: ${UV_INSTALL_COMMAND}" >&2
-  echo "Or run this command again with --install-uv to install uv automatically." >&2
-  exit 1
 }
 
 repo_url() {
@@ -347,7 +302,7 @@ has_marker() {
 # Spec 4.8.
 run_uninstall() {
   local command_file="${HOME}/.local/bin/vault-builder" default_checkout="${HOME}/.local/share/vault-builder"
-  local marker="" vault_paths="" have_checkout=0 vg="" uv_bin="" line
+  local marker="" vault_paths="" have_checkout=0 line
   require_claude_closed
   CHECKOUT="$(checkout_path)"
   if is_builder_checkout "${CHECKOUT}"; then
@@ -356,7 +311,7 @@ run_uninstall() {
     vault_paths="$(checkout_python vaults)"
   fi
 
-  # 1. vault-builder uninstall --all. A failure stops here: the vg MCP entry and vg stay.
+  # 1. vault-builder uninstall --all. A failure stops here: the command file and the checkout stay.
   local status=0
   if has_marker "${command_file}" "${marker}"; then
     "${command_file}" uninstall --all || status=$?
@@ -370,45 +325,12 @@ run_uninstall() {
     echo "Note: no vault-builder checkout and no ${command_file}; skipped vault-builder uninstall --all."
   fi
   if [[ "${status}" -ne 0 ]]; then
-    echo "vault-builder uninstall --all failed (exit ${status}); stopped before vg mcp unregister and uv tool uninstall vault-graph." >&2
+    echo "vault-builder uninstall --all failed (exit ${status}); stopped before deleting the command file and the checkout." >&2
     echo "Fix the error above, then run this command again." >&2
     exit 1
   fi
 
-  # 2. vg mcp unregister --agent claude.
-  if command -v uv >/dev/null 2>&1; then
-    uv_bin="$(uv tool dir --bin 2>/dev/null || true)"
-  fi
-  if [[ -n "${uv_bin}" && -x "${uv_bin}/vg" ]]; then
-    vg="${uv_bin}/vg"
-  elif command -v vg >/dev/null 2>&1; then
-    vg="$(command -v vg)"
-  fi
-  if [[ -n "${vg}" ]]; then
-    if ! "${vg}" mcp unregister --agent claude; then
-      echo "${vg} mcp unregister --agent claude failed; stopped before uv tool uninstall vault-graph." >&2
-      exit 1
-    fi
-  else
-    echo "Note: vg was not found; skipped vg mcp unregister --agent claude."
-  fi
-
-  # 3. uv tool uninstall vault-graph.
-  # Read the whole list first: grep -q in a pipe can close it early, and pipefail would then read SIGPIPE as "not installed".
-  local tools=""
-  if command -v uv >/dev/null 2>&1; then
-    tools="$(uv tool list 2>/dev/null || true)"
-  fi
-  if [[ $'\n'"${tools}" == *$'\n'"vault-graph "* ]]; then
-    if ! uv tool uninstall vault-graph; then
-      echo "uv tool uninstall vault-graph failed." >&2
-      exit 1
-    fi
-  else
-    echo "Note: vault-graph is not installed with uv; skipped uv tool uninstall vault-graph."
-  fi
-
-  # 4. What uninstall --all left: a marked command file and the default checkout.
+  # 2. What uninstall --all left: a marked command file and the default checkout.
   if has_marker "${command_file}" "${marker}"; then
     rm -f "${command_file}"
     echo "Deleted ${command_file}"
@@ -418,44 +340,32 @@ run_uninstall() {
     echo "Deleted ${CHECKOUT}"
   fi
 
-  # 5. What stays.
-  echo
-  echo "Kept (delete them yourself if you no longer need them):"
+  # 3. What stays.
   if [[ -n "${vault_paths}" ]]; then
+    echo
+    echo "Kept (delete them yourself if you no longer need them):"
     while IFS= read -r line; do
       [[ -n "${line}" ]] && echo "  vault: ${line}"
     done <<EOF
 ${vault_paths}
 EOF
   fi
-  echo "  vault-graph data: ${HOME}/.vault-graph"
-  # The embedding model folder is ~/llm/models unless vg embedding use saved another one.
-  local models_dir="${HOME}/llm/models" saved_dir=""
-  local embedding_settings="${HOME}/.vault-graph/configs/embedding.json"
-  if [[ -f "${embedding_settings}" ]] && command -v python3 >/dev/null 2>&1; then
-    saved_dir="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("models_dir") or "")' \
-      "${embedding_settings}" 2>/dev/null || true)"
-    [[ -n "${saved_dir}" ]] && models_dir="${saved_dir}"
-  fi
-  echo "  embedding model folder: ${models_dir}"
 }
 
 main() {
-  local install_uv_flag=0 uninstall=0 yes=0 without_vault_graph=0 arg
+  local uninstall=0 yes=0 arg
   local setup_args=()
   for arg in "$@"; do
     case "${arg}" in
-      --install-uv) install_uv_flag=1 ;;
       --uninstall) uninstall=1 ;;
       -h|--help)
         usage
         return 0
         ;;
       *)
-        case "${arg}" in
-          --yes) yes=1 ;;
-          --without-vault-graph) without_vault_graph=1 ;;
-        esac
+        if [[ "${arg}" == "--yes" ]]; then
+          yes=1
+        fi
         setup_args+=("${arg}")
         ;;
     esac
@@ -485,10 +395,7 @@ main() {
     return 0
   fi
 
-  check_tools git curl
-  if [[ "${without_vault_graph}" -eq 0 ]]; then
-    ensure_uv "${install_uv_flag}"
-  fi
+  check_tools git
   prepare_checkout
   write_command_file
 

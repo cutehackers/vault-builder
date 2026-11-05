@@ -1,10 +1,10 @@
-"""scripts/install.sh: tool checks, uv, the builder checkout, the vault-builder command file and --uninstall.
+"""scripts/install.sh: tool checks, the builder checkout, the vault-builder command file and --uninstall.
 
-Spec 4.3, 4.8, decisions 2, 4, 5, 10, 13, A-1, A-7, A-18, A-19, A-23, A-27, A-33. Every test runs install.sh
-with a temporary HOME and a stub PATH (fake uv, vg, curl and pgrep in front of /usr/bin:/bin). The builder
-repository is a local git copy of this working tree and VAULT_GRAPH_REPO is a local bare repository, so no
-test reaches the network or reads or writes the real HOME. Each run starts a new session, so it has no
-/dev/tty and runs in non-interactive mode; the interactive uv question runs under a pseudo-terminal.
+Spec 4.3, 4.8, decisions 2, 5, 10, 13, A-1, A-7, A-19, A-23, A-27, A-33. Every test runs install.sh with a
+temporary HOME and a stub PATH (a fake pgrep in front of /usr/bin:/bin). The builder repository is a local git
+copy of this working tree, so no test reaches the network or reads or writes the real HOME. Each run starts a
+new session, so it has no /dev/tty and runs in non-interactive mode. install.sh installs no other tool: a test
+gives a fake vg through VAULT_GRAPH_BIN only to check that the hooks record a vg the caller names.
 """
 
 from __future__ import annotations
@@ -12,14 +12,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import pty
 import re
-import select
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -29,25 +26,11 @@ from tools.vault_migration import builder_command
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install.sh"
 BASH = shutil.which("bash", path="/usr/bin:/bin") or "/bin/bash"
-UV_INSTALL_COMMAND = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 EVENTS = ("SessionStart", "PreCompact", "SessionEnd")
 EXPORT_LINE = 'export PATH="$HOME/.local/bin:$PATH"'
 
-FAKE_UV = """#!/bin/sh
-echo "uv $*" >> "{log}"
-bin="$HOME/.local/bin"
-case "$1 $2" in
-  "tool install") mkdir -p "$bin"; cp "{vg}" "$bin/vg"; chmod 755 "$bin/vg"; echo "Installed 1 executable: vg"; exit 0 ;;
-  "tool dir") echo "$bin"; exit 0 ;;
-  "tool list") if [ -x "$bin/vg" ]; then printf 'vault-graph v0.0.0\\n- vg\\n'; fi; exit 0 ;;
-  "tool uninstall") rm -f "$bin/vg"; echo "Uninstalled 1 executable: vg"; exit 0 ;;
-esac
-exit 2
-"""
-
 FAKE_VG = """#!{python} -I
-import json, os, sys
-from pathlib import Path
+import sys
 args = sys.argv[1:]
 with open({log!r}, "a", encoding="utf-8") as log:
     log.write("vg " + " ".join(args) + "\\n")
@@ -57,29 +40,7 @@ if args[:1] == ["hook"]:
     sys.stdin.read()
     print("VG-HOOK " + args[1])
     raise SystemExit(0)
-config = Path(os.environ["HOME"]) / ".claude.json"
-data = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {{}}
-servers = data.setdefault("mcpServers", {{}})
-if args == ["setup", "--agent", "claude", "--mcp"]:
-    servers["vault-graph"] = {{"command": os.path.abspath(sys.argv[0]), "args": ["mcp", "serve"]}}
-elif args == ["mcp", "unregister", "--agent", "claude"]:
-    if servers.pop("vault-graph", None) is None:
-        print("changed: False")
-        raise SystemExit(0)
-else:
-    raise SystemExit(2)
-config.write_text(json.dumps(data, indent=2) + "\\n", encoding="utf-8")
-"""
-
-FAKE_CURL = """#!/bin/sh
-echo "curl $*" >> "{log}"
-for arg in "$@"; do
-  if [ "$arg" = "https://astral.sh/uv/install.sh" ]; then
-    printf 'mkdir -p "$HOME/.local/bin" && cp "{uv}" "$HOME/.local/bin/uv" && chmod 755 "$HOME/.local/bin/uv"\\n'
-    exit 0
-  fi
-done
-exit 22
+raise SystemExit(2)
 """
 
 FAKE_PGREP = """#!/bin/sh
@@ -126,7 +87,6 @@ class _InstallScriptCase(unittest.TestCase):
     """One builder source repository for the class, a fresh HOME and stub folder for each test."""
 
     source: Path
-    graph_repo: Path
     _class_tmp: tempfile.TemporaryDirectory
 
     @classmethod
@@ -151,8 +111,6 @@ class _InstallScriptCase(unittest.TestCase):
         _git("add", "OTHER-REF", cwd=cls.source, env=git_env)
         _git("commit", "-q", "-m", "other", cwd=cls.source, env=git_env)
         _git("checkout", "-q", "main", cwd=cls.source, env=git_env)
-        cls.graph_repo = base / "vault-graph.git"
-        _git("init", "-q", "--bare", str(cls.graph_repo), env=git_env)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -181,14 +139,11 @@ class _InstallScriptCase(unittest.TestCase):
         self.claude_flag = self.tmp / "claude-running"
         self.stub = self.tmp / "stub"
         self.stub.mkdir()
-        self.sources = self.tmp / "stub-sources"  # files the fakes copy; never on PATH
+        self.sources = self.tmp / "stub-sources"  # files the tests name; never on PATH
         self.sources.mkdir()
         self.python = _write(self.stub / "python3", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
-        fake_vg = _write(self.sources / "vg", FAKE_VG.format(python=sys.executable, log=str(self.log)))
-        self.fake_uv = _write(self.sources / "uv", FAKE_UV.format(log=self.log, vg=fake_vg))
-        _write(self.stub / "curl", FAKE_CURL.format(log=self.log, uv=self.fake_uv))
+        self.fake_vg = _write(self.sources / "vg", FAKE_VG.format(python=sys.executable, log=str(self.log)))
         _write(self.stub / "pgrep", FAKE_PGREP.format(flag=self.claude_flag))
-        shutil.copy2(self.fake_uv, self.stub / "uv")
         self.app = self.tmp / "app"
         self.app.mkdir()
         _git("init", "-q", str(self.app), env=self._git_env(self.tmp))
@@ -237,7 +192,6 @@ class _InstallScriptCase(unittest.TestCase):
             "LANG": "C.UTF-8",
             "GIT_CONFIG_NOSYSTEM": "1",
             "VAULT_BUILDER_REPO": str(self.source),
-            "VAULT_GRAPH_REPO": str(self.graph_repo),
         }
         environment.update(extra)
         return environment
@@ -269,8 +223,8 @@ class _InstallScriptCase(unittest.TestCase):
         self.assertEqual(code, result.returncode, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
     def quick(self, *extra: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        """A run that writes only the checkout and the command file: setup --dry-run without vault-graph."""
-        return self.run_script("--yes", "--dry-run", "--without-vault-graph", *extra, env=env)
+        """A run that writes only the checkout and the command file: setup --dry-run."""
+        return self.run_script("--yes", "--dry-run", *extra, env=env)
 
     def expected_command(self, checkout: Path | None = None) -> bytes:
         return builder_command.command_text(checkout or self.checkout, str(self.python)).encode("utf-8")
@@ -278,7 +232,7 @@ class _InstallScriptCase(unittest.TestCase):
 
 class ToolCheckTests(_InstallScriptCase):
     def minimal_path(self, *tools: str) -> str:
-        """A PATH folder with only the named tools (real git, stub curl, the test Python as python3)."""
+        """A PATH folder with only the named tools (real git, the test Python as python3)."""
         folder = self.tmp / "minimal"
         folder.mkdir(exist_ok=True)
         for tool in tools:
@@ -296,21 +250,14 @@ class ToolCheckTests(_InstallScriptCase):
         self.assertIn("Nothing was written.", result.stderr)
 
     def test_missing_git_stops_with_exit_1_and_writes_nothing(self) -> None:
-        env = self.env(PATH=self.minimal_path("curl", "python3"))
+        env = self.env(PATH=self.minimal_path("python3"))
         env.pop("PYTHON")
         result = self.run_script("--yes", env=env)
         self.assert_stopped_without_writing(result)
         self.assertIn("Missing required command: git", result.stderr)
 
-    def test_missing_curl_stops_with_exit_1_and_writes_nothing(self) -> None:
-        env = self.env(PATH=self.minimal_path("git", "python3"))
-        env.pop("PYTHON")
-        result = self.run_script("--yes", env=env)
-        self.assert_stopped_without_writing(result)
-        self.assertIn("Missing required command: curl", result.stderr)
-
     def test_python_older_than_3_10_stops_with_exit_1_and_writes_nothing(self) -> None:
-        path = self.minimal_path("git", "curl")
+        path = self.minimal_path("git")
         _write(Path(path) / "python3", OLD_PYTHON)
         env = self.env(PATH=path)
         env.pop("PYTHON")
@@ -324,8 +271,7 @@ class ToolCheckTests(_InstallScriptCase):
         env.pop("PYTHON")
         result = self.run_script("--yes", env=env)
         self.assert_stopped_without_writing(result)
-        for name in ("git", "curl"):
-            self.assertIn(f"Missing required command: {name}", result.stderr)
+        self.assertIn("Missing required command: git", result.stderr)
         self.assertIn("Python 3.10 or newer is required", result.stderr)
 
     def test_choose_python_is_the_bootstrap_rule(self) -> None:
@@ -341,79 +287,6 @@ class ToolCheckTests(_InstallScriptCase):
         for line in text.splitlines():
             if re.search(r"\bread -r\b", line) and not line.lstrip().startswith("while "):
                 self.assertIn("</dev/tty", line, line)
-
-
-@unittest.skipIf(shutil.which("uv", path="/usr/bin:/bin"), "uv is installed in /usr/bin or /bin")
-class MissingUvTests(_InstallScriptCase):
-    def setUp(self) -> None:
-        super().setUp()
-        (self.stub / "uv").unlink()
-
-    def test_non_interactive_prints_the_install_command_and_exits_1(self) -> None:
-        result = self.run_script("--repo", str(self.app), "--yes")
-        self.assert_exit(1, result)
-        self.assertIn(f"Install it with: {UV_INSTALL_COMMAND}", result.stderr)
-        self.assertIn("--install-uv", result.stderr)
-        self.assertEqual({}, _snapshot(self.home))
-        self.assertNotIn("curl", "\n".join(self.calls()))
-
-    def test_install_uv_installs_without_asking(self) -> None:
-        result = self.run_script("--repo", str(self.app), "--yes", "--dry-run", "--install-uv")
-        self.assert_exit(0, result)
-        self.assertTrue((self.home / ".local" / "bin" / "uv").is_file())
-        self.assertIn("curl -LsSf https://astral.sh/uv/install.sh", self.calls())
-
-    def test_without_vault_graph_needs_no_uv(self) -> None:
-        result = self.quick()
-        self.assert_exit(0, result)
-        self.assertFalse((self.home / ".local" / "bin" / "uv").exists())
-
-    def run_pty(self, args: list[str], answer: str) -> tuple[int, str]:
-        """Run install.sh with a controlling terminal and answer the uv question."""
-        env = self.env()
-        pid, fd = pty.fork()
-        if pid == 0:  # pragma: no cover - the child process
-            try:
-                os.chdir(self.tmp)
-                os.execve(BASH, [BASH, str(SCRIPT), *args], env)
-            finally:
-                os._exit(127)
-        output = b""
-        answered = False
-        deadline = time.monotonic() + 120
-        try:
-            while time.monotonic() < deadline:
-                ready, _, _ = select.select([fd], [], [], 1)
-                if not ready:
-                    continue
-                try:
-                    data = os.read(fd, 4096)
-                except OSError:
-                    break
-                if not data:
-                    break
-                output += data
-                if not answered and b"Install uv now? [Y/n]" in output:
-                    os.write(fd, answer.encode() + b"\n")
-                    answered = True
-        finally:
-            os.close(fd)
-        _, status = os.waitpid(pid, 0)
-        self.assertTrue(answered, output.decode(errors="replace"))
-        return os.waitstatus_to_exitcode(status), output.decode(errors="replace")
-
-    def test_interactive_asks_and_no_stops_with_exit_1(self) -> None:
-        code, output = self.run_pty(["--repo", str(self.app), "--dry-run"], "n")
-        self.assertEqual(1, code, output)
-        self.assertIn(UV_INSTALL_COMMAND, output)
-        self.assertFalse((self.home / ".local" / "bin" / "uv").exists())
-        self.assertFalse(self.checkout.exists())
-
-    def test_interactive_enter_installs_uv_and_continues(self) -> None:
-        code, output = self.run_pty(["--repo", str(self.app), "--dry-run"], "")
-        self.assertEqual(0, code, output)
-        self.assertTrue((self.home / ".local" / "bin" / "uv").is_file())
-        self.assertIn("dry run, the precheck passed", output)
 
 
 class CheckoutTests(_InstallScriptCase):
@@ -535,7 +408,7 @@ class PathHintTests(_InstallScriptCase):
         """A-27: a zsh user runs the README line; the hint names ~/.zshrc."""
         zsh = shutil.which("zsh")
         assert zsh is not None
-        command = f"cat {SCRIPT} | {BASH} -s -- --yes --dry-run --without-vault-graph"
+        command = f"cat {SCRIPT} | {BASH} -s -- --yes --dry-run"
         result = subprocess.run(
             [zsh, "-f", "-c", command],
             env=self.env(SHELL=zsh),
@@ -563,7 +436,6 @@ class ClaudeRunningTests(_InstallScriptCase):
         self.assert_exit(3, result)
         self.assertEqual(before, self.claude_json.read_bytes())
         self.assertFalse(self.vault_map.exists())
-        self.assertNotIn("uv tool install", "\n".join(self.calls()))
 
     def test_uninstall_exits_3_before_removing_anything(self) -> None:
         self.assert_exit(0, self.quick())
@@ -576,16 +448,13 @@ class ClaudeRunningTests(_InstallScriptCase):
 
 
 class UninstallStopTests(_InstallScriptCase):
-    def test_a_failed_uninstall_all_stops_before_the_vg_steps(self) -> None:
+    def test_a_failed_uninstall_all_keeps_the_command_file(self) -> None:
         self.assert_exit(0, self.quick())
         self.vault_map.parent.mkdir(parents=True)
         self.vault_map.write_text("not json\n", encoding="utf-8")
         result = self.run_script("--uninstall")
         self.assert_exit(1, result)
-        self.assertIn("stopped before vg mcp unregister", result.stderr)
-        calls = "\n".join(self.calls())
-        self.assertNotIn("vg mcp unregister", calls)
-        self.assertNotIn("uv tool uninstall", calls)
+        self.assertIn("stopped before deleting the command file and the checkout", result.stderr)
         self.assertEqual(self.expected_command(), self.command.read_bytes())
 
     def test_uninstall_rejects_setup_options(self) -> None:
@@ -594,17 +463,16 @@ class UninstallStopTests(_InstallScriptCase):
 
 
 class FullFlowTests(_InstallScriptCase):
-    def install(self) -> subprocess.CompletedProcess[str]:
+    def install(self, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         """A-7: the README line in non-interactive mode, with no /dev/tty."""
-        result = self.run_script("--repo", str(self.app), "--yes", pipe=True)
+        result = self.run_script("--repo", str(self.app), "--yes", pipe=True, env=env)
         self.assert_exit(0, result)
         return result
 
     @full_tier_only
     def test_one_line_installs_everything(self) -> None:
-        """A-1 and A-7: A-2 to A-6 hold after one run of the install command."""
-        self.install()
-        vg = self.home / ".local" / "bin" / "vg"
+        """A-1 and A-7: A-2 to A-6 hold after one run of the install command. No other tool is installed."""
+        result = self.install()
         # A-2
         data = self.read_json(self.vault_map)
         roles = {name: entry["role"] for name, entry in data["vaults"].items()}
@@ -614,29 +482,16 @@ class FullFlowTests(_InstallScriptCase):
         self.assertEqual("app", project["default_write_vault"])
         # A-3
         servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("vault-wiki", servers)
-        self.assertEqual(str(vg), servers["vault-graph"]["command"])
-        self.assertTrue(os.access(servers["vault-graph"]["command"], os.X_OK))
+        self.assertEqual(["vault-wiki"], list(servers))
         # A-4
         hooks = self.read_json(self.settings)["hooks"]
         for event in EVENTS:
             self.assertEqual(1, len(hooks[event]), event)
             self.assertIn("vault_hooks.py", hooks[event][0]["hooks"][0]["command"])
-        self.assertEqual(str(vg), self.read_json(self.hooks_config)["vg"])
-        # A-5: the uv tool folder is not on PATH.
-        launcher = self.home / ".claude" / "vault-builder" / "vault_hooks.py"
-        session = subprocess.run(
-            [sys.executable, "-I", str(launcher), "session-start"],
-            input=json.dumps({"cwd": str(self.app), "hook_event_name": "SessionStart"}),
-            env=self.env(PATH="/usr/bin:/bin"),
-            cwd=self.app,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        self.assertEqual(0, session.returncode, session.stderr)
-        self.assertIn("VG-HOOK session-start", session.stdout)
+        self.assertFalse(self.hooks_config.exists())
+        self.assertEqual([], self.calls())
+        for text in ("uv tool", "vg setup", "vault-graph:"):
+            self.assertNotIn(text, result.stdout + result.stderr)
         # A-6
         doctor = subprocess.run(
             [str(self.command), "doctor"],
@@ -652,42 +507,54 @@ class FullFlowTests(_InstallScriptCase):
         self.assertEqual(0, doctor.returncode, doctor.stdout + doctor.stderr)
 
     @full_tier_only
-    def test_uninstall_removes_everything_but_the_vaults_and_vg_data(self) -> None:
+    def test_the_hooks_record_a_vg_the_caller_names(self) -> None:
+        """A-5: a caller that installed vg passes it in VAULT_GRAPH_BIN. The hooks run it without PATH."""
+        vg = self.fake_vg
+        self.install(env=self.env(VAULT_GRAPH_BIN=str(vg)))
+        self.assertEqual(str(vg), self.read_json(self.hooks_config)["vg"])
+        launcher = self.home / ".claude" / "vault-builder" / "vault_hooks.py"
+        session = subprocess.run(
+            [sys.executable, "-I", str(launcher), "session-start"],
+            input=json.dumps({"cwd": str(self.app), "hook_event_name": "SessionStart"}),
+            env=self.env(PATH="/usr/bin:/bin"),
+            cwd=self.app,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(0, session.returncode, session.stderr)
+        self.assertIn("VG-HOOK session-start", session.stdout)
+        doctor = subprocess.run(
+            [str(self.command), "doctor"],
+            env=self.env(),
+            cwd=self.tmp,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            start_new_session=True,
+            check=False,
+        )
+        self.assertEqual(0, doctor.returncode, doctor.stdout + doctor.stderr)
+
+    @full_tier_only
+    def test_uninstall_removes_everything_but_the_vaults(self) -> None:
         """A-23 and A-33 (removal part)."""
         self.install()
-        vg_data = self.home / ".vault-graph"
-        vg_data.mkdir()
         result = self.run_script("--uninstall", pipe=True)
         self.assert_exit(0, result)
         servers = self.read_json(self.claude_json).get("mcpServers", {})
         self.assertNotIn("vault-wiki", servers)
-        self.assertNotIn("vault-graph", servers)
         if self.settings.exists():
             self.assertNotIn("vault_hooks.py", self.settings.read_text(encoding="utf-8"))
         self.assertFalse(self.vault_map.exists())
         self.assertFalse(self.command.exists())
         self.assertFalse(self.checkout.exists())
-        self.assertFalse((self.home / ".local" / "bin" / "vg").exists())
         for vault in (self.home / "vault", self.home / "vaults" / "app"):
             self.assertTrue((vault / "raw").is_dir(), vault)
             self.assertTrue((vault / "wiki").is_dir(), vault)
             self.assertIn(f"vault: {vault}", result.stdout)
-        self.assertTrue(vg_data.is_dir())
-        self.assertIn(f"vault-graph data: {vg_data}", result.stdout)
-        self.assertIn(f"embedding model folder: {self.home / 'llm' / 'models'}", result.stdout)
-        calls = self.calls()
-        unregister = calls.index("vg mcp unregister --agent claude")
-        self.assertLess(unregister, calls.index("uv tool uninstall vault-graph"))
-
-    @full_tier_only
-    def test_no_access_to_vault_graph_writes_no_setup_file(self) -> None:
-        """A-18."""
-        result = self.run_script(
-            "--repo", str(self.app), "--yes", env=self.env(VAULT_GRAPH_REPO=str(self.tmp / "no-such-repo"))
-        )
-        self.assert_exit(1, result)
-        for path in (self.vault_map, self.claude_json, self.settings, self.home / "vault", self.home / "vaults"):
-            self.assertFalse(path.exists(), path)
 
 
 if __name__ == "__main__":

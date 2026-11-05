@@ -247,14 +247,14 @@ class HookTests(_DoctorCase):
         self.assertEqual(1, code, output)
         self.assert_one_problem(output, "--help", "0.5 seconds")
 
-    def test_without_vault_graph_exits_zero_with_a_note(self) -> None:
+    def test_without_a_recorded_vg_exits_zero_with_a_note(self) -> None:
         self.install()  # no vg on PATH: install records no vg path
 
         code, output = self.doctor()
 
         self.assertEqual(0, code, output)
         self.assertTrue(any("recall.sh" in line for line in self.notes(output)), output)
-        self.assertTrue(any("mcpServers.vault-graph" in line for line in self.notes(output)), output)
+        self.assertFalse(any("mcpServers.vault-graph" in line for line in self.notes(output)), output)
 
     def test_without_hooks_exits_zero_with_a_note(self) -> None:
         self.install(with_hooks=False)
@@ -275,31 +275,18 @@ class HookTests(_DoctorCase):
         self.assert_one_problem(output, str(self.settings), fix=f"python3 -m json.tool {self.settings}")
 
 
-class VaultGraphEntryTests(_DoctorCase):
-    def set_entry(self, entry: object) -> None:
-        config = json.loads(self.claude_json.read_text(encoding="utf-8"))
-        config["mcpServers"]["vault-graph"] = entry
-        self.write_json(self.claude_json, config)
-
-    def test_an_executable_command_is_not_reported(self) -> None:
-        vg = self.fake_vg()
+class OtherMcpEntryTests(_DoctorCase):
+    def test_an_entry_of_another_tool_is_not_checked(self) -> None:
+        """doctor checks only what vault-builder installs. Another tool's server entry is that tool's job."""
         self.install()
-        self.set_entry({"command": str(vg), "args": ["mcp", "serve"]})
+        config = json.loads(self.claude_json.read_text(encoding="utf-8"))
+        config["mcpServers"]["vault-graph"] = {"command": str(self.tmp / "gone" / "vg"), "args": []}
+        self.write_json(self.claude_json, config)
 
         code, output = self.doctor()
 
         self.assertEqual(0, code, output)
         self.assertFalse(any("mcpServers.vault-graph" in line for line in output.splitlines()), output)
-
-    def test_a_command_that_does_not_run_is_a_problem(self) -> None:
-        self.fake_vg()
-        self.install()
-        self.set_entry({"command": str(self.tmp / "gone" / "vg"), "args": []})
-
-        code, output = self.doctor()
-
-        self.assertEqual(1, code, output)
-        self.assert_one_problem(output, "mcpServers.vault-graph")
 
 
 class CommandFileTests(_DoctorCase):
