@@ -633,4 +633,3 @@ class UpgradeResolutionTests(_SetupCase):
 
 if __name__ == "__main__":
     unittest.main()
-
