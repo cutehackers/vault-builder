@@ -174,6 +174,31 @@ class InstallWithHooksTests(_HooksCase):
         self.assertIn("vg was not found", output)
         self.assertTrue(self.settings.is_file())
 
+    def test_a_removed_vg_record_is_deleted_when_no_vg_is_found(self) -> None:
+        """After a tool removes its vg, running install again leaves no stale vg record for doctor to report."""
+        vg = self.fake_vg()
+        self.install()
+        config = self.config / "vault-builder" / "vault-hooks.json"
+        self.assertTrue(config.is_file())
+        vg.unlink()
+
+        self.install()
+
+        self.assertFalse(config.exists())
+
+    def test_a_vg_record_that_still_runs_is_kept_when_vg_is_not_on_path(self) -> None:
+        chosen = self.tmp / "elsewhere" / "vg"
+        chosen.parent.mkdir()
+        chosen.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        chosen.chmod(0o755)
+        self.install(VAULT_GRAPH_BIN=str(chosen))
+        config = self.config / "vault-builder" / "vault-hooks.json"
+        before = config.read_bytes()
+
+        self.install()
+
+        self.assertEqual(before, config.read_bytes())
+
     def test_keeps_other_hook_entries_and_settings(self) -> None:
         other_start = {"matcher": "startup", "hooks": [{"type": "command", "command": "other-tool start"}]}
         other_tool = {"matcher": "Bash", "hooks": [{"type": "command", "command": "lint-bash"}]}
