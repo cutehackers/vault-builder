@@ -478,6 +478,7 @@ class UpgradeTests(_SetupCase):
         output = self.assert_setup("--repo", str(self.repo), "--yes", code=1)
 
         self.assertIn("Nothing was written", output)
+        self.assertIn("delete it from the vault, then run this command again", output)
         self.assertIn("review-required README.md", output)
         self.assertIn(f"vault personal ({self.personal})", output)
         self.assertIn(f"vault app ({self.app})", output)
@@ -577,3 +578,18 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UpgradeResolutionTests(_SetupCase):
+    def test_deleting_an_edited_file_lets_the_next_run_upgrade(self) -> None:
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        readme = self.home / "vault" / "README.md"
+        expected = readme.read_bytes()
+        readme.write_text("my own readme\n", encoding="utf-8")
+        self.assert_setup("--repo", str(self.repo), "--yes", code=1)
+
+        readme.unlink()
+        output = self.assert_setup("--repo", str(self.repo), "--yes")
+
+        self.assertEqual(expected, readme.read_bytes())
+        self.assertIn("Doctor found no problems", output)

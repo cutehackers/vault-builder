@@ -543,7 +543,7 @@ def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Up
         if review:
             shown = review[:_SHOWN_REVIEW_PATHS]
             more = len(review) - len(shown)
-            lines = [f"vault {vault.name} ({vault.path}): {len(review)} paths need your review:"]
+            lines = [f"vault {vault.name} ({vault.path}): {len(review)} paths:"]
             lines += [f"    {item}" for item in shown]
             if more:
                 lines.append(f"    ... and {more} more")
@@ -555,10 +555,11 @@ def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Up
             upgrades[vault.name] = _Upgrade(vault, migration, manifest.schema_version)
     if problems:
         raise _Stop(
-            "these vaults need a person's decision before setup can upgrade them. Nothing was written.\n"
+            "these vaults have files that differ from every version vault-builder shipped, so setup cannot "
+            "upgrade them. Nothing was written.\n"
             + "\n".join(f"  {problem}" for problem in problems)
-            + "\n  For each path, keep your edit or take the builder's file, then apply the plan with "
-            "vault-builder apply --target <vault> --plan <plan.json> and run this command again."
+            + "\n  For each path: copy the file somewhere else if you want to keep your changes, delete it from the "
+            "vault, then run this command again. setup puts back the vault-builder version."
         )
     return upgrades
 
