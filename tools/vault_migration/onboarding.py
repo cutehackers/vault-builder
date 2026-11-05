@@ -45,7 +45,7 @@ from tools.vault_migration.applying import apply_plan
 from tools.vault_migration.catalogs import load_catalog
 from tools.vault_migration.manifests import load_manifest
 from tools.vault_migration.models import MigrationAction, MigrationPlan
-from tools.vault_migration.planning import _CURRENT_CATALOG_PATH, audit_vault
+from tools.vault_migration.planning import _CURRENT_CATALOG_PATH, _REQUIRED_TOPOLOGY, audit_vault
 from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -542,14 +542,11 @@ def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Up
         try:
             migration = audit_vault(builder_root, vault.path)
         except ValueError as exc:
-            problems.append(
-                f"{where}: audit failed: {exc} When a file was deleted by mistake, restore it from git: "
-                f"git -C {_quote(vault.path)} checkout -- <path>"
-            )
+            problems.append(_audit_failure(where, vault.path, exc, managed, builder_root))
             continue
         blocking = [action for action in migration.actions if action.action in _REVIEW_ACTIONS]
         if blocking:
-            problems.append(_review_problem(where, vault.path, blocking, managed))
+            problems.append(_review_problem(where, vault.path, blocking, managed, builder_root))
             continue
         pending = any(action.action in _UPGRADE_ACTIONS for action in migration.actions)
         if pending or manifest.schema_version != MANIFEST_SCHEMA_VERSION:
@@ -561,6 +558,16 @@ def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Up
             + "\n  Fix them, then run this command again."
         )
     return upgrades
+
+
+def _audit_failure(where: str, path: Path, error: ValueError, managed: set[str], builder_root: Path) -> str:
+    """A vault-builder file that audit needs is missing: name the copy that puts it back."""
+    lines = [f"{where}: audit failed: {error}"]
+    missing = [relative for relative in _REQUIRED_TOPOLOGY if relative in managed and not (path / relative).is_file()]
+    if missing:
+        lines.append("    Put back the vault-builder version:")
+        lines += [f"      cp {_quote(builder_root / relative)} {_quote(path / relative)}" for relative in missing]
+    return "\n".join(lines)
 
 
 def _manifest_problem(where: str, path: Path, error: ValueError, current_contract: int) -> str:
@@ -578,7 +585,9 @@ def _manifest_problem(where: str, path: Path, error: ValueError, current_contrac
     return f"{where}: its .vault-builder/manifest.json is not valid: {error} Restore it from git: git -C {_quote(path)} checkout -- .vault-builder/manifest.json"
 
 
-def _review_problem(where: str, path: Path, blocking: Sequence[MigrationAction], managed: set[str]) -> str:
+def _review_problem(
+    where: str, path: Path, blocking: Sequence[MigrationAction], managed: set[str], builder_root: Path
+) -> str:
     """One block per vault: each path with the audit reason, then what to do for each kind of path."""
     lines = [f"{where}:"]
     shown = sorted(blocking, key=lambda action: action.path)[:_SHOWN_REVIEW_PATHS]
@@ -590,9 +599,11 @@ def _review_problem(where: str, path: Path, blocking: Sequence[MigrationAction],
     if "managed" in kinds:
         lines.append(
             "    A vault-builder file differs from every version vault-builder shipped. Copy it outside the vault "
-            "if you want to keep your changes, then delete it from the vault. setup puts back the vault-builder "
-            "version."
+            "if you want to keep your changes, then put back the vault-builder version:"
         )
+        for action in shown:
+            if _review_kind(action, managed) == "managed":
+                lines.append(f"      cp {_quote(builder_root / action.path)} {_quote(path / action.path)}")
     if "manifest" in kinds:
         lines.append(
             "    The manifest was written by a newer vault-builder. Update vault-builder with "
