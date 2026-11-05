@@ -170,6 +170,21 @@ def hooks_config_bytes(vg: Path) -> bytes:
     return settings_bytes({"version": HOOKS_CONFIG_VERSION, "vg": str(vg)})
 
 
+def recorded_vg_is_gone(config_path: Path) -> bool:
+    """True when config_path has the form install writes and its vg is not an executable file any more.
+
+    install deletes such a file when it finds no vg, so a removed vg leaves no stale record behind.
+    """
+    try:
+        contents = config_path.read_bytes()
+    except OSError:
+        return False
+    if not is_hooks_config(contents):
+        return False
+    value = json.loads(contents.decode("utf-8")).get("vg")
+    return isinstance(value, str) and not _executable(Path(value))
+
+
 def is_hooks_config(contents: bytes) -> bool:
     """True when the file has the form install writes, so uninstall may delete it."""
     try:

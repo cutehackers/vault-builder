@@ -38,6 +38,7 @@ vault-builder는 vault-graph 없이 설치되고 동작한다. vault-graph를 �
 ### Changed
 
 - `setup`은 환경 변수를 그대로 install에 넘긴다. 그래서 `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 hook이 그 vg를 쓰도록 `vault-hooks.json`에 적는다. vg를 설치하는 도구가 이 값을 넣고 setup을 실행하면 된다. vg가 없으면 hook은 recall 스크립트와 직접 세션 수집을 쓴다.
+- `install --with-hooks`가 vg를 찾지 못했고 `vault-hooks.json`에 적힌 vg가 더 이상 실행 파일이 아니면 그 파일을 지운다. 그래서 vg를 지운 뒤 `vault-builder setup`을 다시 실행하면 doctor가 지워진 vg를 문제로 알리지 않는다. 아직 실행되는 vg 경로는 그대로 둔다.
 
 ### Upgrade
 

@@ -242,6 +242,7 @@ class _HooksPlan:
     config_contents: bytes | None  # None when vg was not found or the file already has these bytes
     settings_path: Path
     settings_action: str  # create | update | unchanged
+    config_delete: bool = False  # True when no vg was found and the recorded vg no longer runs
 
 
 @dataclass
@@ -514,11 +515,13 @@ def _hooks_precheck(
         notes.append(f"Kept existing file with unknown content (not replaced): {launcher}")
     vg = _hooks.find_vg(environ)
     config_contents: bytes | None = None
+    config_delete = False
     if vg is None:
         notes.append(
             "vg was not found (VAULT_GRAPH_BIN or PATH), so no vg path was recorded. The hooks use recall.sh "
             "and direct capture until vg is on PATH or install --with-hooks runs again with vg available."
         )
+        config_delete = _hooks.recorded_vg_is_gone(config_path)
     else:
         wanted = _hooks.hooks_config_bytes(vg)
         if not config_path.exists() or config_path.read_bytes() != wanted:
@@ -529,6 +532,7 @@ def _hooks_precheck(
         config_contents=config_contents,
         settings_path=settings_path,
         settings_action=settings_action,
+        config_delete=config_delete,
     )
 
 
@@ -1136,6 +1140,8 @@ def _apply_hooks(hooks_plan: _HooksPlan, python: str, changes: _OutsideChanges) 
         changes.write(launcher.path, launcher.contents, launcher.mode)
     if hooks_plan.config_contents is not None:
         changes.write(hooks_plan.config_path, hooks_plan.config_contents, 0o644)
+    elif hooks_plan.config_delete:
+        changes.delete(hooks_plan.config_path)
     if hooks_plan.settings_action == "unchanged":
         return
     # Re-read just before writing: Claude Code may have rewritten the file since the precheck.
@@ -1196,6 +1202,8 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
         print(f"  {plan.hooks.launcher.action} {plan.hooks.launcher.path}", file=stream)
         if plan.hooks.config_contents is not None:
             print(f"  write vg path to {plan.hooks.config_path}", file=stream)
+        elif plan.hooks.config_delete:
+            print(f"  delete {plan.hooks.config_path}: its vg is no longer an executable file", file=stream)
         print(
             f"  {plan.hooks.settings_action} hooks SessionStart, PreCompact, SessionEnd in {plan.hooks.settings_path}",
             file=stream,
