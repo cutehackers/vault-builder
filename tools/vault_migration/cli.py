@@ -627,7 +627,7 @@ def _build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument(
         "--default-write", metavar="NAME", help="The default write vault when link does not set one."
     )
-    setup_parser.add_argument("--yes", action="store_true", help="Ask no questions.")
+    setup_parser.add_argument("--yes", action="store_true", help="Ask no questions. Vaults that need an upgrade are upgraded without asking.")
     setup_parser.add_argument("--dry-run", action="store_true", help="Run only the precheck and show the plan.")
     role_parser = subcommands.add_parser("set-role")
     role_parser.add_argument("--vault", required=True)

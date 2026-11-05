@@ -283,8 +283,15 @@ def install(
     environ: Mapping[str, str] | None = None,
     python: str | None = None,
     out: TextIO | None = None,
+    upgrade_pending: bool = False,
 ) -> int:
-    """Install or register a Vault. Raise InstallError after restoring the prior state."""
+    """Install or register a Vault. Raise InstallError after restoring the prior state.
+
+    upgrade_pending (dry run only): setup applies this vault's audit plan before the real install, so the precheck
+    skips the manifest schema and audit checks and runs every other check.
+    """
+    if upgrade_pending and not dry_run:
+        raise ValueError("upgrade_pending is only for a dry run.")
     stream = out if out is not None else sys.stdout
     require_python(tuple(sys.version_info))
     environment = os.environ if environ is None else environ
@@ -302,6 +309,7 @@ def install(
         builder_root=builder_root,
         environ=environment,
         python=python,
+        upgrade_pending=upgrade_pending,
     )
     plan.notes[:0] = notes
     if dry_run:
@@ -330,6 +338,7 @@ def _precheck(
     builder_root: Path,
     environ: Mapping[str, str],
     python: str,
+    upgrade_pending: bool = False,
 ) -> _InstallPlan:
     """role None keeps an existing vault's role and gives a new vault entry the role personal."""
     if not os.path.isabs(python):
@@ -340,7 +349,7 @@ def _precheck(
             raise InstallError("--role must be a non-empty string, for example personal, project, or team.")
     user = resolve_user_paths(environ)
     target = _absolute_target(target)
-    state, empty_dir = _target_state(target, builder_root)
+    state, empty_dir = _target_state(target, builder_root, upgrade_pending=upgrade_pending)
     new_vault = state == "new"
     vault_name = _vault_name(target, name)
     if state == "existing":
@@ -464,7 +473,7 @@ def _precheck(
     hooks_plan = _hooks_precheck(user, builder_root, environ, python, notes) if with_hooks else None
 
     restore_plan = None
-    if state == "existing":
+    if state == "existing" and not upgrade_pending:
         _require_audit_clean(builder_root, target)
     elif state == "restore":
         restore_plan = _restore_audit(builder_root, target)
@@ -545,7 +554,7 @@ def _absolute_target(target: Path) -> Path:
     return absolute.parent.resolve() / absolute.name
 
 
-def _target_state(target: Path, builder_root: Path) -> tuple[str, bool]:
+def _target_state(target: Path, builder_root: Path, *, upgrade_pending: bool = False) -> tuple[str, bool]:
     """Return (state, target_is_empty_directory). state is new, existing, or restore (no manifest)."""
     if _same_path(target, builder_root) or _is_within(target, builder_root):
         raise InstallError(f"Target must be outside the builder checkout: {target}")
@@ -560,10 +569,10 @@ def _target_state(target: Path, builder_root: Path) -> tuple[str, bool]:
     except ValueError as exc:
         raise InstallError(f"Target has an invalid Vault builder manifest: {target}. {exc}") from exc
     if manifest is not None:
-        if manifest.schema_version != MANIFEST_SCHEMA_VERSION:
+        if manifest.schema_version != MANIFEST_SCHEMA_VERSION and not upgrade_pending:
             raise InstallError(
                 f"Target manifest is schema version {manifest.schema_version}. Run vault-builder setup, which "
-                "upgrades it, or audit and apply it yourself: "
+                "upgrades it when no file needs review, or audit and apply it yourself: "
                 f"vault-builder audit --target {shlex.quote(str(target))} --plan-out <plan.json>"
             )
         return "existing", False
@@ -756,7 +765,7 @@ def _require_audit_clean(builder_root: Path, target: Path) -> None:
         shown = "; ".join(pending[:5]) + ("; ..." if len(pending) > 5 else "")
         raise InstallError(
             f"Existing vault needs migration first ({len(pending)} actions: {shown}). Run vault-builder setup, "
-            "which upgrades it, or run "
+            "which upgrades it when no file needs review, or run "
             f"vault-builder audit --target {shlex.quote(str(target))} --plan-out <plan.json>, "
             "then apply, then install again."
         )

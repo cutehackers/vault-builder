@@ -36,7 +36,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 ### Changed
 
 - `setup`이 예전 vault를 업그레이드한다. 사전 검사에서 manifest가 있는 vault마다 audit을 실행하고, manifest schema가 예전 것이거나 `create`, `replace` 항목이 있는 vault를 계획에 출력한 뒤 2단계에서 apply하고 install한다. 그래서 이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 끝난다. wiki 페이지와 raw source는 바뀌지 않는다.
-- 어느 vault든 audit에 `review-required`나 `invalid` 항목이 있으면 `setup`은 그 경로를 모든 vault에 걸쳐 한 번에 출력하고 아무것도 쓰지 않고 멈춘다. `--dry-run`도 같은 이유로 exit 1을 낸다. 안내문은 고친 파일을 vault 밖에 복사해 두고 지운 뒤 다시 실행하라고 알린다. 그러면 다음 실행이 vault-builder 버전을 다시 넣는다.
+- 어느 vault든 audit에 `review-required`나 `invalid` 항목이 있으면 `setup`은 그 경로를 모든 vault에 걸쳐 한 번에 출력하고 아무것도 쓰지 않고 멈춘다. `--dry-run`도 같은 이유로 exit 1을 낸다. 경로마다 audit 이유와 고치는 방법을 출력한다. 바뀐 관리 파일은 vault 밖에 복사해 두고 지운 뒤 다시 실행하면 vault-builder 버전이 다시 들어간다. source 규칙을 어긴 위키 페이지는 고치라고, 더 새 builder의 manifest는 vault-builder를 업데이트하라고 안내한다. 업그레이드할 vault도 쓰기 전에 install 사전 검사(schema와 audit 검사 제외)를 받는다.
 - install이 schema가 예전 것이거나 migration이 필요한 vault를 거부할 때 `vault-builder setup`과 `vault-builder audit` 명령을 안내한다.
 
 ### Upgrade
