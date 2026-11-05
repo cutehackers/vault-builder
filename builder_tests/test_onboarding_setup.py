@@ -1,8 +1,8 @@
 """vault-builder setup (spec 4.3, 4.4, 4.6 and the setup rows of 6).
 
 Every test runs with a temporary HOME and without CLAUDE_CONFIG_DIR, so the real ~/.claude and ~/.claude.json
-are never read or written. uv, vg, git ls-remote, the Claude Code process check and /dev/tty are fakes
-(FakeExternals): no test runs the real uv or vg or reaches the network.
+are never read or written. The Claude Code process check and /dev/tty are fakes (FakeExternals). setup installs
+no other tool: a test names a fake vg through VAULT_GRAPH_BIN only to check that the hooks record it.
 """
 
 from __future__ import annotations
@@ -64,43 +64,13 @@ class FakeTty:
 
 
 class FakeExternals:
-    """The external tools setup calls. events records the order of every external call."""
+    """The external checks setup makes. events records their order."""
 
     def __init__(self, case: "_SetupCase") -> None:
         self.case = case
         self.events: list[str] = []
-        self.calls: list[list[str]] = []
-        self.ls_remote_code = 0
-        self.uv_install_code = 0
         self.claude: list[bool] = []
         self.tty: FakeTty | None = None
-        self.vg_setup_code = 0
-
-    def run(
-        self, argv: Sequence[str], env: Mapping[str, str], *, capture: bool, timeout: float | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        argv = list(argv)
-        self.calls.append(argv)
-        if argv[:2] == ["git", "ls-remote"]:
-            self.events.append("ls-remote")
-            return subprocess.CompletedProcess(argv, self.ls_remote_code, "", "Permission denied (publickey).\n")
-        if argv[:3] == ["uv", "tool", "install"]:
-            self.events.append("uv-install")
-            if self.uv_install_code == 0:
-                self.case.uv_bin.mkdir(exist_ok=True)
-                vg = self.case.uv_bin / "vg"
-                vg.write_text(FAKE_VG, encoding="utf-8")
-                vg.chmod(0o755)
-                return subprocess.CompletedProcess(argv, 0, "Installed 1 executable: vg\n", "")
-            return subprocess.CompletedProcess(argv, self.uv_install_code, "", "error: git clone failed\n")
-        if argv[:4] == ["uv", "tool", "dir", "--bin"]:
-            self.events.append("uv-dir")
-            return subprocess.CompletedProcess(argv, 0, f"{self.case.uv_bin}\n", "")
-        if argv[1:] == ["setup", "--agent", "claude", "--mcp"]:
-            self.events.append("vg-setup")
-            self.case.register_vault_graph(argv[0])
-            return subprocess.CompletedProcess(argv, self.vg_setup_code, "", "")
-        raise AssertionError(f"unexpected external command: {argv}")
 
     def claude_running(self, env: Mapping[str, str]) -> bool:
         self.events.append("claude-check")
@@ -110,7 +80,7 @@ class FakeExternals:
         return self.tty
 
     def externals(self) -> onboarding.Externals:
-        return onboarding.Externals(run=self.run, claude_running=self.claude_running, open_tty=self.open_tty)
+        return onboarding.Externals(claude_running=self.claude_running, open_tty=self.open_tty)
 
 
 class _SetupCase(unittest.TestCase):
@@ -122,12 +92,15 @@ class _SetupCase(unittest.TestCase):
         self.home.mkdir()
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
-        self.uv_bin = self.tmp / "uv-bin"
+        self.vg = self.tmp / "vg-bin" / "vg"
+        self.vg.parent.mkdir()
+        self.vg.write_text(FAKE_VG, encoding="utf-8")
+        self.vg.chmod(0o755)
         self.config = self.home / ".claude"
         patched = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         patched.start()
         self.addCleanup(patched.stop)
-        for key in ("CLAUDE_CONFIG_DIR", "VAULT_GRAPH_BIN", "VAULT_GRAPH_REPO"):
+        for key in ("CLAUDE_CONFIG_DIR", "VAULT_GRAPH_BIN"):
             os.environ.pop(key, None)
         self.repo = self.tmp / "app"
         self.repo.mkdir()
@@ -138,7 +111,7 @@ class _SetupCase(unittest.TestCase):
         environment = {
             key: value
             for key, value in os.environ.items()
-            if key not in {"CLAUDE_CONFIG_DIR", "VAULT_GRAPH_BIN", "VAULT_GRAPH_REPO"}
+            if key not in {"CLAUDE_CONFIG_DIR", "VAULT_GRAPH_BIN"}
         }
         environment["HOME"] = str(self.home)
         environment["PATH"] = os.pathsep.join([str(self.bin), "/usr/bin", "/bin"])
@@ -164,15 +137,6 @@ class _SetupCase(unittest.TestCase):
     def read_json(self, path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def register_vault_graph(self, vg: str) -> None:
-        """What `vg setup --agent claude --mcp` does to $HOME/.claude.json: write mcpServers.vault-graph."""
-        data = self.read_json(self.claude_json) if self.claude_json.exists() else {}
-        wanted = {"command": vg, "args": ["mcp", "serve"]}
-        if data.get("mcpServers", {}).get("vault-graph") == wanted:
-            return
-        data.setdefault("mcpServers", {})["vault-graph"] = wanted
-        self.claude_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
     def setup(self, *arguments: str, cwd: Path | None = None, **extra: str) -> tuple[int, str]:
         parsed = cli._build_parser().parse_args(["setup", *arguments])
         options = onboarding.options_from_args(parsed)
@@ -197,7 +161,7 @@ class _SetupCase(unittest.TestCase):
 
 class FullSetupTests(_SetupCase):
     def test_one_run_installs_links_registers_and_checks(self) -> None:
-        """A-2, A-3, A-4 and the step order: precheck, vg, install with hooks, link, vg setup, doctor."""
+        """A-2, A-3, A-4 and the step order: precheck, install with hooks, link, doctor. No other tool."""
         events = self.fake.events
         real_install, real_link, real_doctor = installing.install, linking.link, uninstalling.doctor
         installs: list[dict] = []
@@ -224,27 +188,11 @@ class FullSetupTests(_SetupCase):
             output = self.assert_setup("--repo", str(self.repo), "--yes")
 
         self.assertEqual(
-            [
-                "ls-remote",
-                "claude-check",
-                "uv-install",
-                "uv-dir",
-                "install:personal",
-                "install:app",
-                "link:personal,app",
-                "vg-setup",
-                "doctor:None",
-            ],
-            events,
+            ["claude-check", "install:personal", "install:app", "link:personal,app", "doctor:None"], events
         )
-        vg = self.uv_bin / "vg"
         for call in installs:
             self.assertTrue(call["with_hooks"])
-            self.assertEqual(str(vg), call["environ"]["VAULT_GRAPH_BIN"])
-        self.assertIn(
-            ["uv", "tool", "install", "--force", "--python", "3.12", "git+https://github.com/cutehackers/vault-graph.git"], self.fake.calls
-        )
-        self.assertIn([str(vg), "setup", "--agent", "claude", "--mcp"], self.fake.calls)
+            self.assertNotIn("VAULT_GRAPH_BIN", call["environ"])
 
         # A-2
         vaults = self.vaults()
@@ -254,25 +202,28 @@ class FullSetupTests(_SetupCase):
         self.assertEqual(["personal", "app"], self.project()["vaults"])
         self.assertEqual("app", self.project()["default_write_vault"])
         # A-3
-        servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("vault-wiki", servers)
-        self.assertEqual(str(vg), servers["vault-graph"]["command"])
+        self.assertEqual(["vault-wiki"], list(self.read_json(self.claude_json)["mcpServers"]))
         # A-4
         hooks = self.read_json(self.settings)["hooks"]
         for event in EVENTS:
             self.assertEqual(1, len(hooks[event]), event)
             self.assertIn("vault_hooks.py", hooks[event][0]["hooks"][0]["command"])
-        self.assertEqual(str(vg), self.read_json(self.hooks_config)["vg"])
+        self.assertFalse(self.hooks_config.exists())
+        self.assertIn("recall.sh", output)
+        for text in ("uv tool", "vg setup", "vault-graph:"):
+            self.assertNotIn(text, output)
         # last lines
         self.assertIn("Doctor found no problems", output)
         tail = output.splitlines()[-4:]
         self.assertTrue(any("Restart Claude Code" in line for line in tail), output)
-        self.assertTrue(any("/mcp" in line and "vault-wiki" in line and "vault-graph" in line for line in tail), output)
+        self.assertTrue(any("/mcp" in line and "vault-wiki" in line for line in tail), output)
         self.assertTrue(any("vault-builder link --repo <path>" in line for line in tail), output)
 
-    def test_the_session_start_hook_runs_vg_without_the_uv_folder_on_path(self) -> None:
-        """A-5: the recorded vg path makes the launcher run vg hook session-start."""
-        self.assert_setup("--repo", str(self.repo), "--yes")
+    def test_the_hooks_record_a_vg_the_caller_names(self) -> None:
+        """A-5: a caller that installed vg names it in VAULT_GRAPH_BIN. The launcher runs it without PATH."""
+        output = self.assert_setup("--repo", str(self.repo), "--yes", VAULT_GRAPH_BIN=str(self.vg))
+        self.assertEqual(str(self.vg), self.read_json(self.hooks_config)["vg"])
+        self.assertIn("Doctor found no problems", output)
         launcher = self.config / "vault-builder" / "vault_hooks.py"
         env = self.env()
         env["PATH"] = "/usr/bin:/bin"
@@ -292,7 +243,7 @@ class FullSetupTests(_SetupCase):
     def test_a_second_run_changes_no_byte(self) -> None:
         """A-21."""
         self.assert_setup("--repo", str(self.repo), "--yes")
-        files = (self.vault_map, self.claude_json, self.settings, self.hooks_config)
+        files = (self.vault_map, self.claude_json, self.settings)
         before = {path: path.read_bytes() for path in files}
         output = self.assert_setup("--repo", str(self.repo), "--yes")
         self.assertEqual(before, {path: path.read_bytes() for path in files})
@@ -316,20 +267,12 @@ class FullSetupTests(_SetupCase):
     def test_a_next_vault_is_added_with_the_same_command(self) -> None:
         """A-22: a later run adds a team vault, links it, and leaves the hook and MCP entries alone."""
         self.assert_setup("--repo", str(self.repo), "--yes")
-        before = {path: path.read_bytes() for path in (self.claude_json, self.settings, self.hooks_config)}
+        before = {path: path.read_bytes() for path in (self.claude_json, self.settings)}
         team = self.tmp / "team-vault"
         self.assert_setup("--vault", f"team={team}", "--role", "team=team", "--repo", str(self.repo), "--yes")
         self.assertEqual("team", self.vaults()["team"]["role"])
         self.assertEqual(["personal", "app", "team"], self.project()["vaults"])
         self.assertEqual(before, {path: path.read_bytes() for path in before})
-        self.assertIn(["git", "ls-remote", "https://github.com/cutehackers/vault-graph.git", "HEAD"], self.fake.calls)
-
-    def test_a_failed_vg_setup_still_runs_doctor_and_exits_1(self) -> None:
-        self.fake.vg_setup_code = 1
-        result, output = self.setup("--repo", str(self.repo), "--yes")
-        self.assertEqual(1, result, output)
-        self.assertIn("Doctor found", output)
-        self.assertIn("setup --vault-id <id>", output)
 
     def test_a_role_option_keeps_or_sets_roles(self) -> None:
         """No --role: a new vault is personal and a registered vault keeps its role."""
@@ -342,12 +285,6 @@ class FullSetupTests(_SetupCase):
         )
         self.assert_setup("--vault", f"mine={mine}", "--yes")
         self.assertEqual("team", self.vaults()["mine"]["role"])
-
-    def test_vault_graph_repo_can_be_changed(self) -> None:
-        self.assert_setup("--vault", f"mine={self.tmp / 'mine'}", "--yes", VAULT_GRAPH_REPO="https://example.test/vg.git")
-        self.assertIn(["git", "ls-remote", "https://example.test/vg.git", "HEAD"], self.fake.calls)
-        self.assertIn(["uv", "tool", "install", "--force", "--python", "3.12", "git+https://example.test/vg.git"], self.fake.calls)
-
 
 class DefaultWriteTests(_SetupCase):
     def link_personal_and_team(self) -> None:
@@ -388,18 +325,7 @@ class PrecheckTests(_SetupCase):
         result, output = self.setup(*arguments)
         self.assertEqual(code, result, output)
         self.assertEqual(before, _snapshot(self.home))
-        self.assertNotIn("uv-install", self.fake.events)
         return output
-
-    def test_no_vault_graph_access_writes_nothing(self) -> None:
-        """A-18 setup part."""
-        self.fake.ls_remote_code = 128
-        output = self.assert_nothing_written("--repo", str(self.repo), "--yes")
-        self.assertIn("cannot reach the vault-graph repository", output)
-        self.assertIn("https://github.com/cutehackers/vault-graph", output)
-        self.assertNotIn("ssh -T", output)
-        self.assertIn("--without-vault-graph", output)
-        self.assertFalse((self.home / "vault").exists())
 
     def test_claude_code_running_exits_3_without_writing(self) -> None:
         """A-19."""
@@ -467,15 +393,6 @@ class PrecheckTests(_SetupCase):
         self.assertIn(str(self.home / "vaults" / "app"), output)
         self.assertIn("dry run", output)
 
-    def test_a_failed_uv_install_stops_before_install(self) -> None:
-        self.fake.uv_install_code = 1
-        result, output = self.setup("--repo", str(self.repo), "--yes")
-        self.assertEqual(1, result, output)
-        self.assertIn("error: git clone failed", output)
-        self.assertIn("uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git", output)
-        self.assertFalse(self.vault_map.exists())
-
-
 class RecoveryTests(_SetupCase):
     def test_a_failed_second_install_finishes_on_the_next_run(self) -> None:
         """A-20."""
@@ -520,42 +437,19 @@ class RecoveryTests(_SetupCase):
         self.assertIn("Doctor found no problems", output)
 
 
-class WithoutVaultGraphTests(_SetupCase):
-    def test_vault_builder_only_then_add_vault_graph(self) -> None:
-        """A-31, A-32."""
-        output = self.assert_setup("--repo", str(self.repo), "--yes", "--without-vault-graph")
-        self.assertEqual([], [call for call in self.fake.calls if call[0] in {"uv", "git"} or "setup" in call])
-        self.assertFalse(self.uv_bin.exists())
-        servers = self.read_json(self.claude_json)["mcpServers"]
-        self.assertIn("vault-wiki", servers)
-        self.assertNotIn("vault-graph", servers)
-        self.assertEqual(set(EVENTS), set(self.read_json(self.settings)["hooks"]))
-        self.assertFalse(self.hooks_config.exists())
-        self.assertEqual(["personal", "app"], self.project()["vaults"])
-        self.assertIn("recall.sh", output)
-        self.assertIn("Doctor found no problems", output)
-        mcp_line = [line for line in output.splitlines() if "/mcp" in line][-1]
-        self.assertNotIn("vault-graph", mcp_line)
-
-        self.assert_setup("--repo", str(self.repo), "--yes")
-        vg = str(self.uv_bin / "vg")
-        self.assertEqual(vg, self.read_json(self.hooks_config)["vg"])
-        self.assertEqual(vg, self.read_json(self.claude_json)["mcpServers"]["vault-graph"]["command"])
-
-
 class InteractiveTests(_SetupCase):
     def test_enter_on_every_question_gives_the_baseline_result(self) -> None:
         """Questions 1 to 5 and their defaults (spec 4.4); the Claude Code check waits for Enter."""
         self.fake.claude = [True, False]
-        # personal path, repo, project vault, more vaults, vault-graph, proceed, wait for Claude Code
-        self.fake.tty = FakeTty([""] * 7)
+        # personal path, repo, project vault, more vaults, proceed, wait for Claude Code
+        self.fake.tty = FakeTty([""] * 6)
         self.assert_setup(cwd=self.repo)
         text = self.fake.tty.text
         self.assertIn(f"Personal vault path [{self.home / 'vault'}]", text)
         self.assertIn(f"Repository to link [{self.repo}]", text)
         self.assertIn(f"Create project vault app at {self.home / 'vaults' / 'app'}? [Y/n]", text)
         self.assertIn("Add another vault? [y/N]", text)
-        self.assertIn("Also install vault-graph", text)
+        self.assertNotIn("vault-graph", text)
         self.assertIn("Proceed? [Y/n]", text)
         self.assertIn("Quit every Claude Code", text)
         self.assertEqual({"personal": "personal", "app": "project"}, {k: v["role"] for k, v in self.vaults().items()})
@@ -563,14 +457,14 @@ class InteractiveTests(_SetupCase):
 
     def test_registered_vaults_are_listed_instead_of_question_1(self) -> None:
         self.assert_setup("--vault", f"mine={self.tmp / 'mine'}", "--yes")
-        self.fake.tty = FakeTty(["", "", "", "", ""])  # repo (skip), more vaults, vault-graph, proceed
+        self.fake.tty = FakeTty(["", ""])  # repo (skip), more vaults
         self.assert_setup("--dry-run", cwd=self.tmp)
         self.assertNotIn("Personal vault path", self.fake.tty.text)
         self.assertIn("Registered vaults:", self.fake.tty.text)
         self.assertIn("mine", self.fake.tty.text)
 
     def test_answer_no_stops_without_writing(self) -> None:
-        self.fake.tty = FakeTty(["", "", "", "", "", "n"])
+        self.fake.tty = FakeTty(["", "", "", "", "n"])  # personal, repo, project vault, more vaults, proceed
         before = _snapshot(self.home)
         result, _output = self.setup(cwd=self.repo)
         self.assertEqual(1, result)
@@ -580,7 +474,7 @@ class InteractiveTests(_SetupCase):
         """A-13: one line in roles.py is enough."""
         added = roles.Role("client", "one client's shared notes", per_repo=False)
         with mock.patch.object(roles, "ROLES", (*roles.ROLES, added)):
-            self.fake.tty = FakeTty(["", "", "y", str(self.tmp / "c"), "c", "client", "", "", ""])
+            self.fake.tty = FakeTty(["", "", "y", str(self.tmp / "c"), "c", "client", ""])
             self.assert_setup("--dry-run", cwd=self.tmp)
             help_out = io.StringIO()
             with contextlib.redirect_stdout(help_out):
@@ -599,7 +493,7 @@ class CliTests(unittest.TestCase):
             [
                 "setup", "--vault", "a=/x", "--vault", "b=/y", "--role", "a=team", "--role", "b=client",
                 "--repo", "/r1", "--repo", "/r2", "--project-vault", "p=/p", "--default-write", "a",
-                "--yes", "--dry-run", "--without-vault-graph",
+                "--yes", "--dry-run",
             ]
         )
         options = onboarding.options_from_args(parsed)
@@ -608,7 +502,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(("/r1", "/r2"), options.repos)
         self.assertEqual("p=/p", options.project_vault)
         self.assertEqual("a", options.default_write)
-        self.assertTrue(options.yes and options.dry_run and options.without_vault_graph)
+        self.assertTrue(options.yes and options.dry_run)
 
     def test_install_keeps_hooks_off_by_default(self) -> None:
         """A-26."""

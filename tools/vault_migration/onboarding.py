@@ -3,15 +3,14 @@
 Steps:
 
 1. Precheck. Writes no file. Parse the options, read vault-map.json, run the install precheck of every vault
-   (install --dry-run --with-hooks), check every --repo, check access to the vault-graph repository with
-   git ls-remote, and check that Claude Code is not running (decision 5). Any failure stops the run.
-2. Install vg: uv tool install --force --python 3.12 git+<VAULT_GRAPH_REPO>. The vg path is <uv tool dir --bin>/vg.
-3. install --with-hooks for every vault, in order, with VAULT_GRAPH_BIN set to that vg (decision 6).
-4. One link per repository: the shared vaults and that repository's project vault.
-5. <vg> setup --agent claude --mcp.
-6. doctor without a path.
+   (install --dry-run --with-hooks), check every --repo, and check that Claude Code is not running (decision 5).
+   Any failure stops the run.
+2. install --with-hooks for every vault, in order. The environment is passed on unchanged, so install records
+   a vg found through VAULT_GRAPH_BIN or PATH and records nothing when there is none (installing.py).
+3. One link per repository: the shared vaults and that repository's project vault.
+4. doctor without a path.
 
---without-vault-graph skips steps 2 and 5 and the git ls-remote check (spec 4.3). The hooks are still installed.
+setup installs only vault-builder files and settings. It installs no other tool.
 
 The vaults of a run are every vault in vault-map.json (install runs only the outside-vault steps for them),
 then the new ones: a personal vault at $HOME/vault when the map has no vault and no new vault is personal,
@@ -19,8 +18,8 @@ the --vault vaults, and a project vault for each repository that is not linked y
 ($HOME/vaults/<repository folder name>, decision 11). Running the same command again changes nothing.
 
 Interactive mode: a terminal (/dev/tty) and no --yes. Questions 1 to 4 are asked only when no --vault, --repo
-or --project-vault is given. The external tools (uv, vg, git ls-remote, the Claude Code process check and
-/dev/tty) are reached only through Externals, so tests replace them.
+or --project-vault is given. The Claude Code process check and /dev/tty are reached only through Externals, so
+tests replace them.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from __future__ import annotations
 import argparse
 import io
 import os
-import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -39,9 +37,7 @@ from typing import Protocol
 from tools.vault_migration import installing, linking, map_settings, roles, uninstalling
 
 ROOT = Path(__file__).resolve().parents[2]
-VAULT_GRAPH_REPO = "https://github.com/cutehackers/vault-graph.git"
 PERSONAL_NAME = "personal"
-LS_REMOTE_TIMEOUT_S = 60.0
 EXIT_FAILED = 1
 EXIT_MISSING_OPTION = 2
 EXIT_CLAUDE_RUNNING = 3
@@ -56,12 +52,6 @@ class Tty(Protocol):
     def flush(self) -> None: ...
 
     def readline(self) -> str: ...
-
-
-Run = Callable[..., "subprocess.CompletedProcess[str]"]
-
-
-VG_PYTHON = "3.12"
 
 
 def _run(
@@ -93,7 +83,6 @@ def _open_tty() -> Tty | None:
 
 @dataclass(frozen=True)
 class Externals:
-    run: Run = _run
     claude_running: Callable[[Mapping[str, str]], bool] = _claude_running
     open_tty: Callable[[], Tty | None] = _open_tty
 
@@ -107,7 +96,6 @@ class SetupOptions:
     default_write: str | None = None
     yes: bool = False
     dry_run: bool = False
-    without_vault_graph: bool = False
     create_project_vault: bool = True  # False when the interactive answer to question 3 is no
 
 
@@ -120,7 +108,6 @@ def options_from_args(args: argparse.Namespace) -> SetupOptions:
         default_write=args.default_write,
         yes=args.yes,
         dry_run=args.dry_run,
-        without_vault_graph=args.without_vault_graph,
     )
 
 
@@ -167,7 +154,6 @@ class _Repo:
 class _Plan:
     vaults: list[_Vault]
     repos: list[_Repo]
-    with_vault_graph: bool
 
     def names(self) -> list[str]:
         return [vault.name for vault in self.vaults]
@@ -254,11 +240,8 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
         plan_options = _ask(prompter, options, data, env, cwd)
     plan = _build_plan(plan_options, data, user.home)
     _print_plan(plan, options.dry_run)
-    vault_graph_repo = env.get("VAULT_GRAPH_REPO") or VAULT_GRAPH_REPO
     for vault in plan.vaults:
         _precheck_vault(vault, env, builder_root)
-    if plan.with_vault_graph:
-        _check_vault_graph_access(tools, env, vault_graph_repo)
     if options.dry_run:
         if tools.claude_running(env):
             print(f"{_COMMAND}: note: Claude Code is running. Quit it before the real run.")
@@ -268,24 +251,13 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
         raise _Stop("Stopped before any change.")
     _require_claude_closed(tools, env, prompter)
 
-    # Step 2: vg.
-    install_env = {key: value for key, value in env.items() if key != "VAULT_GRAPH_BIN"}
-    vg: Path | None = None
-    if plan.with_vault_graph:
-        _step(2, f"install vg from {vault_graph_repo}")
-        vg = _install_vg(tools, env, vault_graph_repo)
-        install_env["VAULT_GRAPH_BIN"] = str(vg)
-        print(f"{_COMMAND}: vg: {vg}")
-    else:
-        _step(2, "skipped (--without-vault-graph)")
-
-    # Step 3: install every vault with hooks, in plan order.
-    _step(3, "install vaults with hooks")
+    # Step 2: install every vault with hooks, in plan order.
+    _step(2, "install vaults with hooks")
     for vault in plan.vaults:
-        _install_vault(vault, install_env, builder_root)
+        _install_vault(vault, env, builder_root)
 
-    # Step 4: one link per repository, then the default write vault.
-    _step(4, "link repositories")
+    # Step 3: one link per repository, then the default write vault.
+    _step(3, "link repositories")
     for repo in plan.repos:
         names = plan.link_names(repo)
         if not names:
@@ -298,24 +270,8 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
     _default_write(plan, options.default_write, env, prompter)
 
     failed: list[str] = []
-    # Step 5: vg setup.
-    if vg is not None:
-        _step(
-            5,
-            "vg setup --agent claude --mcp (indexes every vault; the first run downloads the e5-small "
-            "embedding model, about 135 MB, and can take several minutes. Do not stop it.)",
-        )
-        result = tools.run([str(vg), "setup", "--agent", "claude", "--mcp"], env, capture=False)
-        if result.returncode != 0:
-            failed.append(
-                f"vg setup exited {result.returncode}. Run {shlex.quote(str(vg))} setup --vault-id <id> for the vault "
-                "named in its setup_failed: line, then run vault-builder setup again."
-            )
-    else:
-        _step(5, "skipped (--without-vault-graph)")
-
-    # Step 6: doctor.
-    _step(6, "doctor")
+    # Step 4: doctor.
+    _step(4, "doctor")
     try:
         doctor_code = uninstalling.doctor(None, builder_root=builder_root, environ=env, out=sys.stdout)
     except _INSTALL_ERRORS as exc:
@@ -324,22 +280,16 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
     if doctor_code != 0:
         failed.append("doctor found problems. Run the fix command on each Problem line above.")
 
-    if not plan.with_vault_graph:
-        print(
-            f"{_COMMAND}: vault-graph was not installed. The hooks use recall.sh and direct session capture. "
-            "To add vault-graph, run the same command without --without-vault-graph."
-        )
     for message in failed:
         print(f"{_COMMAND}: {message}", file=sys.stderr)
-    servers = "vault-wiki and vault-graph" if plan.with_vault_graph else "vault-wiki"
-    print("Restart Claude Code (every terminal, IDE and app session) so it loads the new MCP servers and hooks.")
-    print(f"Then run /mcp in Claude Code and check that {servers} are listed as connected.")
+    print("Restart Claude Code (every terminal, IDE and app session) so it loads the new MCP server and hooks.")
+    print("Then run /mcp in Claude Code and check that vault-wiki is listed as connected.")
     print("To link another repository later: vault-builder link --repo <path>")
     return EXIT_FAILED if failed else 0
 
 
 def _step(number: int, text: str) -> None:
-    print(f"{_COMMAND}: [{number}/6] {text}")
+    print(f"{_COMMAND}: [{number}/4] {text}")
 
 
 def _read_map(path: Path, env: Mapping[str, str]) -> dict:
@@ -353,7 +303,7 @@ def _read_map(path: Path, env: Mapping[str, str]) -> dict:
 
 
 def _ask(prompter: _Prompter, options: SetupOptions, data: dict, env: Mapping[str, str], cwd: Path) -> SetupOptions:
-    """Questions 1 to 4 of spec 4.4 and the vault-graph question of spec 4.3. Returns options with the answers."""
+    """Questions 1 to 4 of spec 4.4. Returns options with the answers."""
     home = Path(env["HOME"])
     vaults: list[str] = []
     roles_given: list[str] = list(options.roles)
@@ -397,11 +347,6 @@ def _ask(prompter: _Prompter, options: SetupOptions, data: dict, env: Mapping[st
         role = prompter.ask(f"Role [{installing._DEFAULT_ROLE}]", installing._DEFAULT_ROLE)
         vaults.append(f"{name}={path}")
         roles_given.append(f"{name}={role}")
-    with_vault_graph = not options.without_vault_graph
-    if with_vault_graph:
-        with_vault_graph = prompter.confirm(
-            "Also install vault-graph (search across vaults and recall at session start)?", True
-        )
     return SetupOptions(
         vaults=tuple(vaults),
         roles=tuple(roles_given),
@@ -410,7 +355,6 @@ def _ask(prompter: _Prompter, options: SetupOptions, data: dict, env: Mapping[st
         default_write=options.default_write,
         yes=options.yes,
         dry_run=options.dry_run,
-        without_vault_graph=not with_vault_graph,
         create_project_vault=create_project_vault,
     )
 
@@ -495,7 +439,7 @@ def _build_plan(options: SetupOptions, data: dict, home: Path) -> _Plan:
                 repo.project_vaults.append(name)
         repos.append(repo)
 
-    plan = _Plan([*vaults.values(), *new], repos, not options.without_vault_graph)
+    plan = _Plan([*vaults.values(), *new], repos)
     names = plan.names()
     for name in given_roles:
         if name not in names:
@@ -537,7 +481,6 @@ def _print_plan(plan: _Plan, dry_run: bool) -> None:
             print(f"    role {vault.final_role} is not a known role; it is linked as a shared vault.")
     for repo in plan.repos:
         print(f"  repository {repo.root}: link {', '.join(plan.link_names(repo)) or 'nothing'}")
-    print(f"  vault-graph: {'install' if plan.with_vault_graph else 'skipped (--without-vault-graph)'}")
 
 
 def _install_kwargs(vault: _Vault, env: Mapping[str, str], builder_root: Path) -> dict[str, object]:
@@ -557,20 +500,6 @@ def _precheck_vault(vault: _Vault, env: Mapping[str, str], builder_root: Path) -
         raise _Stop(f"vault {vault.name} ({vault.path}): {exc}") from None
 
 
-def _check_vault_graph_access(tools: Externals, env: Mapping[str, str], repo: str) -> None:
-    git_env = {**env, "GIT_TERMINAL_PROMPT": "0"}
-    result = tools.run(["git", "ls-remote", repo, "HEAD"], git_env, capture=True, timeout=LS_REMOTE_TIMEOUT_S)
-    if result.returncode == 0:
-        return
-    detail = (result.stderr or result.stdout or "").strip().splitlines()
-    raise _Stop(
-        f"cannot reach the vault-graph repository {repo}"
-        + (f" ({detail[-1]})" if detail else "")
-        + ". Check that this computer can reach GitHub over HTTPS (open https://github.com/cutehackers/vault-graph). "
-        "Without access, install vault-builder only: run the same command with --without-vault-graph."
-    )
-
-
 def _require_claude_closed(tools: Externals, env: Mapping[str, str], prompter: _Prompter | None) -> None:
     message = "Quit every Claude Code session (terminal, IDE and app) before setup changes its settings."
     while tools.claude_running(env):
@@ -578,25 +507,6 @@ def _require_claude_closed(tools: Externals, env: Mapping[str, str], prompter: _
             raise _Stop(message, EXIT_CLAUDE_RUNNING)
         if not prompter.wait_enter(f"{message} Press Enter when Claude Code is closed."):
             raise _Stop(message, EXIT_CLAUDE_RUNNING)
-
-
-def _install_vg(tools: Externals, env: Mapping[str, str], repo: str) -> Path:
-    # vg needs Python 3.12 or newer, and onnxruntime has no wheels for the newest Python yet. uv would pick
-    # the newest Python on the machine, so the version is pinned (vault-graph CI and docs use 3.12).
-    command = ["uv", "tool", "install", "--force", "--python", VG_PYTHON, f"git+{repo}"]
-    result = tools.run(command, env, capture=True)
-    if result.returncode != 0:
-        tail = "\n".join(((result.stdout or "") + (result.stderr or "")).splitlines()[-20:])
-        print(tail, file=sys.stderr)
-        raise _Stop(f"uv tool install exited {result.returncode}. Run it yourself to see why: {shlex.join(command)}")
-    result = tools.run(["uv", "tool", "dir", "--bin"], env, capture=True)
-    folder = (result.stdout or "").strip()
-    if result.returncode != 0 or not folder:
-        raise _Stop(f"uv tool dir --bin exited {result.returncode}: {(result.stderr or '').strip()}")
-    vg = Path(folder) / "vg"
-    if not (vg.is_file() and os.access(vg, os.X_OK)):
-        raise _Stop(f"uv installed vault-graph, but {vg} is not an executable file. Run: {shlex.join(command)}")
-    return vg
 
 
 def _install_vault(vault: _Vault, env: Mapping[str, str], builder_root: Path) -> None:
@@ -635,6 +545,6 @@ def _default_write(plan: _Plan, wanted: str | None, env: Mapping[str, str], prom
                 raise _Stop(f"set-default-write failed for project {project_id}.")
             continue
         print(
-            f"{_COMMAND}: project {project_id} has no default write vault, so vg asks for a vault on each write. "
+            f"{_COMMAND}: project {project_id} has no default write vault, so each write must choose a vault. "
             f"Set one with: vault-builder set-default-write --project {project_id} --vault <name>"
         )

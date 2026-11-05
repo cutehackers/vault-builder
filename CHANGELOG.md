@@ -25,6 +25,25 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+vault-builder는 vault-graph 없이 설치되고 동작한다. vault-graph를 설치하고 설정하는 일은 vault-graph가 맡는다. vault-graph는 vault-builder가 필요하므로 vault-graph의 설치 명령이 vault-builder 설치 명령을 실행한다. 설치 명령의 옵션 `--without-vault-graph`와 `--install-uv`를 없앴으므로 다음 릴리스는 MAJOR다.
+
+### Removed
+
+- `setup`이 vg를 설치하지 않는다. vault-graph 저장소 접근 검사(`git ls-remote`), `uv tool install`, `vg setup --agent claude --mcp`(MCP 등록과 첫 색인), 대화 모드의 vault-graph 설치 질문, 환경 변수 `VAULT_GRAPH_REPO`를 없앴다. 단계는 precheck, hook을 포함한 Vault 설치, 저장소 연결, doctor 네 개다.
+- `setup`과 `install.sh`의 `--without-vault-graph` 옵션을 없앴다. 이 옵션을 주면 알 수 없는 옵션으로 멈춘다.
+- `install.sh`가 uv를 확인하거나 설치하지 않는다. `--install-uv` 옵션을 없앴고, curl도 더 이상 필수 도구가 아니다.
+- `install.sh --uninstall`이 `vg mcp unregister --agent claude`와 `uv tool uninstall vault-graph`를 실행하지 않고, `$HOME/.vault-graph`와 임베딩 모델 폴더를 출력하지 않는다.
+- `doctor`가 `mcpServers.vault-graph` 항목을 검사하지 않는다. vault-builder가 설치하지 않은 항목이기 때문이다.
+
+### Changed
+
+- `setup`은 환경 변수를 그대로 install에 넘긴다. 그래서 `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 hook이 그 vg를 쓰도록 `vault-hooks.json`에 적는다. vg를 설치하는 도구가 이 값을 넣고 setup을 실행하면 된다. vg가 없으면 hook은 recall 스크립트와 직접 세션 수집을 쓴다.
+
+### Upgrade
+
+- 이미 설치한 vg, `mcpServers.vault-graph` 항목, `vault-hooks.json`의 vg 경로는 그대로 남는다. vault-graph를 지우려면 vault-graph의 제거 명령을 쓴다.
+- `--without-vault-graph`를 붙여 설치 명령을 실행하던 스크립트는 이 옵션을 지운다.
+
 ## [3.0.0] - 2026-11-04
 
 설치 명령 하나(`scripts/install.sh`, `vault-builder setup`)로 vg, Vault, hook, 저장소 연결, MCP 등록, 첫 색인을 끝낸다. 공유 MCP 서버 이름을 `llm-wiki`에서 `vault-wiki`로 바꿔 MCP 도구 이름이 `mcp__vault-wiki__*`가 되었으므로 MAJOR로 올렸다. contract와 manifest schema는 5다.

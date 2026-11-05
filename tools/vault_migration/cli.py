@@ -610,7 +610,7 @@ def _build_parser() -> argparse.ArgumentParser:
     default_write_choice.add_argument("--clear", action="store_true")
     setup_parser = subcommands.add_parser(
         "setup",
-        help="Install vg, every vault with hooks, link repositories, register MCP servers, then run doctor.",
+        help="Install every vault with hooks, link repositories, register the MCP server, then run doctor.",
     )
     setup_parser.add_argument(
         "--vault", action="append", metavar="NAME=PATH", help="A vault to install. Repeat for more vaults."
@@ -629,11 +629,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     setup_parser.add_argument("--yes", action="store_true", help="Ask no questions.")
     setup_parser.add_argument("--dry-run", action="store_true", help="Run only the precheck and show the plan.")
-    setup_parser.add_argument(
-        "--without-vault-graph",
-        action="store_true",
-        help="Install vault-builder only: no vg, no mcpServers.vault-graph, no vg index. Hooks are still installed.",
-    )
     role_parser = subcommands.add_parser("set-role")
     role_parser.add_argument("--vault", required=True)
     role_parser.add_argument("--role", required=True)

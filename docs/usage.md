@@ -19,9 +19,9 @@ Claude Code를 모두 종료한 뒤 아래 명령 한 줄로 설치합니다.
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 ```
 
-이 명령은 git, curl, Python 3.10 이상이 있는지 확인하고, builder checkout을 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder` 명령을 만든 뒤 `vault-builder setup`을 실행합니다. `setup`은 vg(vault-graph) 설치, vault 설치와 hook 설치, 저장소 연결, MCP 서버 등록, 색인, doctor 검사를 차례로 합니다(17.6). uv가 없으면 설치할지 묻습니다. 질문마다 Enter를 누르면 개인 vault `$HOME/vault`와, 현재 폴더가 git 저장소일 때 그 저장소의 project vault `$HOME/vaults/<저장소 폴더 이름>`이 생기고 연결됩니다.
+이 명령은 git과 Python 3.10 이상이 있는지 확인하고, builder checkout을 `$HOME/.local/share/vault-builder`에 받고, `$HOME/.local/bin/vault-builder` 명령을 만든 뒤 `vault-builder setup`을 실행합니다. `setup`은 vault 설치와 hook 설치, 저장소 연결, MCP 서버 등록, doctor 검사를 차례로 합니다(17.6). 다른 도구는 설치하지 않습니다. 질문마다 Enter를 누르면 개인 vault `$HOME/vault`와, 현재 폴더가 git 저장소일 때 그 저장소의 project vault `$HOME/vaults/<저장소 폴더 이름>`이 생기고 연결됩니다.
 
-명령이 끝나면 Claude Code를 다시 시작하고, `/mcp` 목록에 `vault-wiki`와 `vault-graph`가 연결되어 있는지 확인합니다. 다음 저장소는 `vault-builder link --repo <경로>` 명령으로 연결합니다(17.3).
+명령이 끝나면 Claude Code를 다시 시작하고, `/mcp` 목록에 `vault-wiki`가 연결되어 있는지 확인합니다. 다음 저장소는 `vault-builder link --repo <경로>` 명령으로 연결합니다(17.3).
 
 질문 없이 설치하려면 옵션을 `bash -s --` 뒤에 붙입니다.
 
@@ -29,11 +29,11 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --repo /path/to/my-app --yes
 ```
 
-vault-graph는 공개 저장소 `https://github.com/cutehackers/vault-graph`에서 HTTPS로 내려받아 설치합니다. SSH 키는 필요 없습니다. GitHub에 접속할 수 없으면 `--without-vault-graph` 옵션을 붙여 vault-builder만 설치합니다. 이때 vg와 `vault-graph` MCP 서버 없이 vault, hook, 저장소 연결, `vault-wiki` MCP 서버만 설치됩니다. 나중에 같은 명령을 이 옵션 없이 다시 실행하면 vault-graph가 더해집니다. 설치 명령의 다른 옵션과 환경 변수는 `| bash -s -- --help`로 봅니다.
+설치 명령의 다른 옵션과 환경 변수는 `| bash -s -- --help`로 봅니다.
 
 #### vault 폴더만 만들기
 
-vg, hook, 저장소 연결 없이 vault 폴더만 만들려면 `bootstrap.sh`를 씁니다.
+hook, 저장소 연결 없이 vault 폴더만 만들려면 `bootstrap.sh`를 씁니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash
@@ -615,7 +615,7 @@ python3 tools/wiki/cli.py metrics --check --policy tools/wiki/metrics-policy.jso
 
 ## 16. MCP 사용하기
 
-install(17.6)은 Claude Code의 user scope MCP 설정 파일에 서버 항목 `mcpServers.vault-wiki` 하나만 등록합니다. 모든 vault가 이 서버 하나를 함께 씁니다. 그래서 어느 저장소 세션에서든 `/mcp` 목록에는 vault 서버 `vault-wiki` 하나만 보이고, 도구 이름은 `mcp__vault-wiki__<도구>` 형태입니다. vault 안에 `.mcp.json` 파일은 만들지 않습니다. 설치 명령(1절)과 `vault-builder setup`은 여기에 vault-graph 서버 `vault-graph`도 등록합니다. 이 서버는 vg가 등록하고 관리합니다.
+install(17.6)은 Claude Code의 user scope MCP 설정 파일에 서버 항목 `mcpServers.vault-wiki` 하나만 등록합니다. 모든 vault가 이 서버 하나를 함께 씁니다. 그래서 어느 저장소 세션에서든 `/mcp` 목록에는 vault 서버 `vault-wiki` 하나만 보이고, 도구 이름은 `mcp__vault-wiki__<도구>` 형태입니다. vault 안에 `.mcp.json` 파일은 만들지 않습니다.
 
 서버 항목은 `<설정 폴더>/vault-builder/llm_wiki_router.py` 라우터를 실행합니다. 라우터는 도구 호출을 받을 때마다 대상 vault를 정하고, 그 vault 폴더에서 그 vault의 `tools/wiki/cli.py`를 실행합니다. 그래서 각 vault는 자기 tools 버전으로 검사받습니다. 라우터는 호출 사이에 아무것도 기억하지 않고, 호출마다 연결 설정(17.1)을 다시 읽습니다. 따라서 `link` 명령(17.3)으로 연결을 바꾸면 Claude Code를 다시 시작하지 않아도 다음 호출부터 적용됩니다.
 
@@ -893,7 +893,7 @@ setup, install, uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` �
 
 1. Claude Code를 모두 종료합니다. 터미널의 `claude` 세션과 IDE 안의 Claude Code도 포함합니다.
 2. 터미널에서 setup, install 또는 uninstall 명령을 실행합니다.
-3. Claude Code를 다시 시작합니다. install 뒤라면 `/mcp` 목록에서 vault 서버가 `vault-wiki` 하나인지 확인합니다. setup 뒤라면 `vault-graph`도 있는지 확인합니다.
+3. Claude Code를 다시 시작합니다. install 뒤라면 `/mcp` 목록에서 vault 서버가 `vault-wiki` 하나인지 확인합니다.
 4. doctor 명령을 실행합니다. setup은 마지막 단계에서 doctor를 직접 실행합니다.
 
 ```bash
@@ -912,23 +912,21 @@ vault-builder uninstall --all
 
 `init-vault.sh`는 Python 3.10 이상을 고른 뒤 같은 install 명령을 실행합니다. `bash init-vault.sh /path/to/vault --name personal`처럼 `--name` 옵션을 그대로 넘길 수 있습니다. 이미 vault인 폴더는 init으로 다시 만들 수 없고, 기존 vault 등록은 install로 합니다.
 
-`setup [--vault NAME=PATH]... [--role NAME=ROLE]... [--repo PATH]... [--project-vault NAME=PATH] [--default-write NAME] [--yes] [--dry-run] [--without-vault-graph]`
+`setup [--vault NAME=PATH]... [--role NAME=ROLE]... [--repo PATH]... [--project-vault NAME=PATH] [--default-write NAME] [--yes] [--dry-run]`
 
-설치 명령(1절)이 마지막에 실행하는 명령입니다. 아래 6단계를 차례로 실행하고, 단계마다 `setup: [N/6]` 줄을 출력합니다.
+설치 명령(1절)이 마지막에 실행하는 명령입니다. 아래 4단계를 차례로 실행하고, 단계마다 `setup: [N/4]` 줄을 출력합니다. vault-builder 파일과 설정만 설치하고 다른 도구는 설치하지 않습니다.
 
-1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 vault마다 install의 `--dry-run` 검사를 실행하고, `git ls-remote`로 vault-graph 저장소에 접근할 수 있는지 확인합니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
-2. `uv tool install --force --python 3.12 git+https://github.com/cutehackers/vault-graph.git`로 vg를 설치합니다. 주소는 `VAULT_GRAPH_REPO` 환경 변수로 바꿀 수 있습니다.
-3. vault마다 hook을 포함해 install을 실행합니다(`install --with-hooks`). 이때 2단계의 vg 절대 경로를 `vault-hooks.json`에 적습니다. 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다.
-4. 저장소마다 `link`를 한 번 실행해 공유 vault 전부와 그 저장소의 project vault를 연결합니다. 기본 쓰기 vault가 정해지지 않으면 대화 모드에서는 묻고, 그 밖에는 `--default-write` 값을 쓰거나 `vault-builder set-default-write` 명령을 안내합니다.
-5. vg로 `vg setup --agent claude --mcp`를 실행합니다. 모든 vault를 색인하고 `vault-graph` MCP 서버를 등록합니다. 처음 실행할 때는 임베딩 모델을 내려받으므로 오래 걸릴 수 있습니다.
-6. 경로 없이 doctor를 실행합니다.
+1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 vault마다 install의 `--dry-run` 검사를 실행합니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
+2. vault마다 hook을 포함해 install을 실행합니다(`install --with-hooks`). 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다. 환경 변수는 그대로 넘기므로, `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 그 경로를 `vault-hooks.json`에 적습니다. vg를 설치하는 도구가 그 경로를 `VAULT_GRAPH_BIN`에 넣고 setup을 실행하면 hook이 그 vg를 씁니다.
+3. 저장소마다 `link`를 한 번 실행해 공유 vault 전부와 그 저장소의 project vault를 연결합니다. 기본 쓰기 vault가 정해지지 않으면 대화 모드에서는 묻고, 그 밖에는 `--default-write` 값을 쓰거나 `vault-builder set-default-write` 명령을 안내합니다.
+4. 경로 없이 doctor를 실행합니다.
 
 - `setup`이 다루는 vault는 연결 설정에 이미 있는 vault 전부와 새 vault입니다. 이미 있는 vault는 install이 vault 밖 단계만 실행합니다. 새 vault는 `--vault`로 준 vault, 연결 설정이 비어 있고 `personal` 역할 vault도 주지 않았을 때 만드는 `$HOME/vault`의 `personal` vault, 아직 연결되지 않은 `--repo` 저장소마다 만드는 project vault(`$HOME/vaults/<저장소 폴더 이름>`)입니다. `--vault`와 `--role`로 역할 `project` vault를 주면 project vault를 따로 만들지 않고 그 vault를 연결합니다. project vault의 경로와 이름은 `--project-vault NAME=PATH`로 바꿉니다. 이 옵션은 `--repo`가 하나일 때만 씁니다.
 - `--role NAME=ROLE`은 vault마다 역할을 정합니다. 없으면 새 vault는 `personal`이고, 이미 있는 vault는 지금 역할을 유지합니다(17.2).
 - 같은 명령을 다시 실행해도 결과가 같습니다. 중간에 실패하면 원인을 고치고 같은 명령을 다시 실행합니다. vault를 나중에 더할 때도 위 예시처럼 새 vault만 넘깁니다.
-- 대화 모드는 터미널(`/dev/tty`)이 있고 `--yes`가 없을 때입니다. `--vault`, `--repo`, `--project-vault`를 하나도 주지 않으면 개인 vault 경로, 연결할 저장소, project vault 생성 여부, 다른 vault 추가 여부, vault-graph 설치 여부를 차례로 묻습니다. 실행 전에는 항상 계획을 보여 주고 진행할지 묻습니다.
-- `--without-vault-graph`는 2단계, 5단계, vault-graph 저장소 접근 검사를 건너뜁니다. hook은 설치하지만 install에 vg 경로를 넘기지 않습니다. 그래서 `PATH`에 vg가 없으면 `vault-hooks.json`에 vg 경로가 적히지 않고, hook은 recall 스크립트와 직접 세션 수집을 씁니다.
-- 종료 코드: 0은 성공, 1은 실패(사전 검사, vg 설치, install, link 실패, `vg setup` 실패, doctor가 문제를 찾음), 2는 옵션이 빠졌거나 잘못됨(터미널이 없는데 `--yes`와 `--dry-run`이 모두 없을 때 포함), 3은 Claude Code가 실행 중이라 멈춤입니다. 대화 모드는 Claude Code가 실행 중이면 종료할 때까지 Enter를 기다립니다.
+- 대화 모드는 터미널(`/dev/tty`)이 있고 `--yes`가 없을 때입니다. `--vault`, `--repo`, `--project-vault`를 하나도 주지 않으면 개인 vault 경로, 연결할 저장소, project vault 생성 여부, 다른 vault 추가 여부를 차례로 묻습니다. 실행 전에는 항상 계획을 보여 주고 진행할지 묻습니다.
+- vg를 찾지 못하면 `vault-hooks.json`에 vg 경로가 적히지 않고, hook은 recall 스크립트와 직접 세션 수집을 씁니다.
+- 종료 코드: 0은 성공, 1은 실패(사전 검사, install, link 실패, doctor가 문제를 찾음), 2는 옵션이 빠졌거나 잘못됨(터미널이 없는데 `--yes`와 `--dry-run`이 모두 없을 때 포함), 3은 Claude Code가 실행 중이라 멈춤입니다. 대화 모드는 Claude Code가 실행 중이면 종료할 때까지 Enter를 기다립니다.
 
 `install <path> [--name NAME] [--role ROLE] [--with-stenc] [--with-hooks] [--dry-run]`
 
@@ -965,7 +963,7 @@ vault-builder uninstall --all
 - 한 vault가 실패하면 그 vault와 오류를 출력하고 멈춥니다. 남은 vault, `vault-builder` 명령, builder checkout은 그대로 둡니다.
 - 모든 vault를 지운 뒤 `$HOME/.local/bin/vault-builder` 파일을 지웁니다. 설치 명령이 쓴 표시 줄이 없는 파일은 사용자 파일로 보고 지우지 않습니다.
 - 마지막으로 그 파일에 적힌 builder checkout을 지웁니다. 기본 위치 `$HOME/.local/share/vault-builder`의 checkout만 지우고, `VAULT_BUILDER_HOME`으로 고른 checkout이나 다른 위치의 checkout은 남깁니다.
-- vault-graph 쪽(`vault-graph` 서버 항목과 vg)은 지우지 않습니다. 이것까지 지우려면 설치 명령에 `--uninstall`을 붙입니다: `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --uninstall`. 이 명령은 `vault-builder uninstall --all`, `vg mcp unregister --agent claude`, `uv tool uninstall vault-graph`를 차례로 실행하고, vault 폴더와 `$HOME/.vault-graph` 폴더는 남긴 채 그 경로를 출력합니다.
+- vault-builder가 설치하지 않은 항목(다른 도구의 MCP 서버 항목과 실행 파일)은 지우지 않습니다. 설치 명령에 `--uninstall`을 붙이면(`curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --uninstall`) `vault-builder uninstall --all`을 실행하고, vault 폴더는 남긴 채 그 경로를 출력합니다.
 
 `doctor [<path>]`
 
@@ -984,9 +982,8 @@ hook, vg, `vault-builder` 명령은 아래를 검사합니다.
 
 - `settings.json`에 SessionStart, PreCompact, SessionEnd launcher 항목이 하나씩 있는지. hook이 하나도 설치되지 않았으면 문제가 아니라 알림(`Note:`)으로 출력합니다.
 - launcher 파일이 있고 builder 원본과 같은지
-- `vault-hooks.json`의 `vg` 값이 절대 경로이고 실행 파일인지. 이 파일이나 `vg` 값이 없으면 vault-graph 없이 설치한 것으로 보고 알림으로 출력합니다.
+- `vault-hooks.json`의 `vg` 값이 절대 경로이고 실행 파일인지. 이 파일이나 `vg` 값이 없으면 hook이 recall 스크립트와 직접 세션 수집을 쓴다고 알림으로 출력합니다.
 - 그 vg가 `vg --help`로 10초 안에 exit 0으로 끝나는지
-- `$HOME/.claude.json`의 `mcpServers.vault-graph` 항목의 `command`가 실행 파일인지. 항목이 없으면 알림으로 출력합니다.
 - `$HOME/.local/bin/vault-builder` 파일에 표시 줄이 있고, 적힌 checkout이 builder checkout이고, 실행 권한이 있는지. 파일이 없으면 알림으로 출력합니다.
 
 문제 줄은 `Problem: ... Fix: <명령>` 형식이고, 끝에 고치는 명령 하나가 붙습니다. 대부분 `vault-builder setup`입니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. 서버 항목의 interpreter 경로에 patch version이 들어 있고 고를 수 있는 다른 경로가 있으면 install을 다시 실행하라는 알림만 출력하고 exit 값에는 넣지 않습니다. doctor는 어떤 파일도 쓰지 않습니다.
@@ -1143,8 +1140,8 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 세션 보관소 상태 확인 (읽기 전용) | `python3 tools/wiki/cli.py sessions status` |
 | 커밋된 세션 파일 삭제·변경 검사 | `python3 tools/wiki/cli.py sessions git-check` |
 | L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
-| 첫 설치 (vg, vault, hook, 저장소 연결, MCP 등록, 색인) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash` |
-| 설치 명령으로 전부 제거 (vault 폴더, `$HOME/.vault-graph`, 임베딩 모델 폴더 `$HOME/llm/models`는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
+| 첫 설치 (vault, hook, 저장소 연결, MCP 등록) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash` |
+| 설치 명령으로 전부 제거 (vault 폴더는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
 | vault 추가, 빠진 부분 다시 설치 | `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/my-app` |
 | 저장소를 공유 vault 전부에 연결 | `vault-builder link --repo /path/to/my-app` |
 | 저장소를 vault 여러 개에 연결 | `vault-builder link personal team app --repo /path/to/my-app` |

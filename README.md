@@ -14,13 +14,12 @@ Quit Claude Code, then run one command:
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash
 ```
 
-The command checks git, curl and Python 3.10 or newer, clones the builder
+The command checks git and Python 3.10 or newer, clones the builder
 checkout into `$HOME/.local/share/vault-builder`, creates the
 `$HOME/.local/bin/vault-builder` command, and runs `vault-builder setup`. Setup
-installs `vg` (Vault Graph), creates your Vaults, installs the Vault hooks,
-links the repository, registers the `vault-wiki` and `vault-graph` MCP servers in
-Claude Code, runs the first index, and ends with `vault-builder doctor`. When
-uv is missing, the command asks before it installs uv. Press Enter at every
+creates your Vaults, installs the Vault hooks, links the repository, registers
+the `vault-wiki` MCP server in Claude Code, and ends with
+`vault-builder doctor`. It installs no other tool. Press Enter at every
 question to get a personal Vault at `$HOME/vault` and, when the current folder
 is a git repository, a project Vault for it at
 `$HOME/vaults/<repository folder name>`. The command stops before it writes
@@ -29,8 +28,8 @@ is a git repository, a project Vault for it at
 When the command finishes:
 
 1. Start Claude Code again.
-2. Run `/mcp` in Claude Code and check that `vault-wiki` and `vault-graph` are
-   listed as connected.
+2. Run `/mcp` in Claude Code and check that `vault-wiki` is listed as
+   connected.
 
 Link another repository later with:
 
@@ -43,30 +42,17 @@ Without a Vault name, `link` links every shared Vault (roles `personal`,
 `vault-builder link <name> --repo /path/to/other-repo`. Add a Vault later with
 `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/app`.
 
-Installing Vault Graph downloads it from the public repository
-`https://github.com/cutehackers/vault-graph` over HTTPS. No SSH key is needed.
-If this computer cannot reach GitHub, install vault-builder only:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash -s -- --without-vault-graph
-```
-
-This installs the Vaults, the hooks, the repository links and the `vault-wiki`
-MCP server, without `vg` and the `vault-graph` server. Run the command again
-without `--without-vault-graph` to add Vault Graph later.
-
 Other options go after `bash -s --`, for example
 `--repo /path/to/app --yes` to run without questions. `--help` lists every
 option and environment variable. `--uninstall` removes the builder files of every
-Vault, the hooks, both MCP servers, `vg`, the `vault-builder` command and the
-builder checkout. Each Vault keeps `raw/` and `wiki/`. `$HOME/.vault-graph` and
-the embedding model folder (`$HOME/llm/models`) stay. See
+Vault, the hooks, the `vault-wiki` MCP server, the `vault-builder` command and
+the builder checkout. Each Vault keeps `raw/` and `wiki/`. See
 [docs/usage.md](docs/usage.md) sections 1 and 17 for details.
 
 ## Create a vault folder only
 
-To create only a Vault folder, without `vg`, hooks, repository links or MCP
-servers, use `bootstrap.sh`:
+To create only a Vault folder, without hooks, repository links or the MCP
+server, use `bootstrap.sh`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/bootstrap.sh | bash
