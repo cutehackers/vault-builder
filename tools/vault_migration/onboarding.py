@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import shlex
 import subprocess
@@ -41,9 +42,10 @@ from typing import Protocol
 
 from tools.vault_migration import installing, linking, map_settings, roles, uninstalling
 from tools.vault_migration.applying import apply_plan
+from tools.vault_migration.catalogs import load_catalog
 from tools.vault_migration.manifests import load_manifest
-from tools.vault_migration.models import MigrationPlan
-from tools.vault_migration.planning import audit_vault
+from tools.vault_migration.models import MigrationAction, MigrationPlan
+from tools.vault_migration.planning import _CURRENT_CATALOG_PATH, audit_vault
 from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -270,9 +272,7 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
     upgrades = _audit_vaults(plan.vaults, builder_root)
     _print_upgrades(upgrades)
     for vault in plan.vaults:
-        # An upgraded vault runs the install precheck in step 2, right after its upgrade.
-        if vault.name not in upgrades:
-            _precheck_vault(vault, env, builder_root)
+        _precheck_vault(vault, env, builder_root, upgrade_pending=vault.name in upgrades)
     if options.dry_run:
         if tools.claude_running(env):
             print(f"{_COMMAND}: note: Claude Code is running. Quit it before the real run.")
@@ -518,50 +518,105 @@ def _print_plan(plan: _Plan, dry_run: bool) -> None:
 
 
 def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Upgrade]:
-    """Audit every vault that has a manifest. Return the upgrades, or stop listing every path a person must review.
+    """Audit every vault that has a manifest. Return the upgrades, or stop listing every path a person must handle.
 
     A folder without a manifest is a new vault or one install restores itself, so it is not audited here.
+    Nothing in a stopped run is written.
     """
+    catalog = load_catalog(_current_catalog_path(builder_root))
+    managed = set(catalog.managed_files)
+    current_contract = catalog.contract_version
     upgrades: dict[str, _Upgrade] = {}
     problems: list[str] = []
     for vault in vaults:
         if not vault.path.is_dir():
             continue
+        where = f"vault {vault.name} ({vault.path})"
         try:
             manifest = load_manifest(vault.path)
         except ValueError as exc:
-            problems.append(f"vault {vault.name} ({vault.path}): its manifest is invalid: {exc}")
+            problems.append(_manifest_problem(where, vault.path, exc, current_contract))
             continue
         if manifest is None:
             continue
         try:
             migration = audit_vault(builder_root, vault.path)
         except ValueError as exc:
-            problems.append(f"vault {vault.name} ({vault.path}): audit failed: {exc}")
+            problems.append(
+                f"{where}: audit failed: {exc} When a file was deleted by mistake, restore it from git: "
+                f"git -C {_quote(vault.path)} checkout -- <path>"
+            )
             continue
-        review = sorted(f"{action.action} {action.path}" for action in migration.actions if action.action in _REVIEW_ACTIONS)
-        if review:
-            shown = review[:_SHOWN_REVIEW_PATHS]
-            more = len(review) - len(shown)
-            lines = [f"vault {vault.name} ({vault.path}): {len(review)} paths:"]
-            lines += [f"    {item}" for item in shown]
-            if more:
-                lines.append(f"    ... and {more} more")
-            lines.append(f"  See all of them: vault-builder audit --target {_quote(vault.path)} --plan-out <plan.json>")
-            problems.append("\n".join(lines))
+        blocking = [action for action in migration.actions if action.action in _REVIEW_ACTIONS]
+        if blocking:
+            problems.append(_review_problem(where, vault.path, blocking, managed))
             continue
         pending = any(action.action in _UPGRADE_ACTIONS for action in migration.actions)
         if pending or manifest.schema_version != MANIFEST_SCHEMA_VERSION:
             upgrades[vault.name] = _Upgrade(vault, migration, manifest.schema_version)
     if problems:
         raise _Stop(
-            "these vaults have files that differ from every version vault-builder shipped, so setup cannot "
-            "upgrade them. Nothing was written.\n"
+            "setup cannot upgrade these vaults until the paths below are fixed. Nothing was written.\n"
             + "\n".join(f"  {problem}" for problem in problems)
-            + "\n  For each path: copy the file somewhere else if you want to keep your changes, delete it from the "
-            "vault, then run this command again. setup puts back the vault-builder version."
+            + "\n  Fix them, then run this command again."
         )
     return upgrades
+
+
+def _manifest_problem(where: str, path: Path, error: ValueError, current_contract: int) -> str:
+    try:
+        recorded = json.loads((path / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        recorded = None
+    version = recorded.get("contract_version") if isinstance(recorded, dict) else None
+    if type(version) is int and version > current_contract:
+        return (
+            f"{where}: a newer vault-builder (contract {version}) manages this vault, and this vault-builder knows "
+            f"contract {current_contract}. Update vault-builder with git -C <builder checkout> pull --ff-only, or "
+            "run the install command again."
+        )
+    return f"{where}: its .vault-builder/manifest.json is not valid: {error} Restore it from git: git -C {_quote(path)} checkout -- .vault-builder/manifest.json"
+
+
+def _review_problem(where: str, path: Path, blocking: Sequence[MigrationAction], managed: set[str]) -> str:
+    """One block per vault: each path with the audit reason, then what to do for each kind of path."""
+    lines = [f"{where}:"]
+    shown = sorted(blocking, key=lambda action: action.path)[:_SHOWN_REVIEW_PATHS]
+    for action in shown:
+        lines.append(f"    {action.action} {action.path}: {action.reason}")
+    if len(blocking) > len(shown):
+        lines.append(f"    ... and {len(blocking) - len(shown)} more")
+    kinds = {_review_kind(action, managed) for action in blocking}
+    if "managed" in kinds:
+        lines.append(
+            "    A vault-builder file differs from every version vault-builder shipped. Copy it outside the vault "
+            "if you want to keep your changes, then delete it from the vault. setup puts back the vault-builder "
+            "version."
+        )
+    if "manifest" in kinds:
+        lines.append(
+            "    The manifest was written by a newer vault-builder. Update vault-builder with "
+            "git -C <builder checkout> pull --ff-only, or run the install command again."
+        )
+    if "page" in kinds:
+        lines.append(
+            "    A wiki page breaks the source page rules. Fix the page so it follows them; "
+            f"cd {_quote(path)} && python3 tools/wiki/cli.py lint shows the details."
+        )
+    lines.append(f"    List every path: vault-builder audit --target {_quote(path)} --plan-out <plan.json>")
+    return "\n".join(lines)
+
+
+def _review_kind(action: MigrationAction, managed: set[str]) -> str:
+    if action.path == ".vault-builder/manifest.json":
+        return "manifest"
+    if action.path in managed:
+        return "managed"
+    return "page"
+
+
+def _current_catalog_path(builder_root: Path) -> Path:
+    return builder_root / _CURRENT_CATALOG_PATH
 
 
 def _quote(path: Path) -> str:
@@ -584,8 +639,8 @@ def _upgrade_vault(upgrade: _Upgrade, builder_root: Path) -> None:
     except _INSTALL_ERRORS as exc:
         raise _Stop(
             f"upgrade of vault {vault.name} ({vault.path}) failed: {exc} "
-            "The upgrade restores the vault's files when it fails; when the message above names a recover "
-            "command, run it. Vaults before it stay installed. Fix the cause, then run the same command again."
+            "The upgrade restores the vault's files when it fails. When the message names a recover command, "
+            "run it. Vaults before it stay installed. Fix the cause, then run the same command again."
         ) from None
 
 
@@ -599,9 +654,12 @@ def _install_kwargs(vault: _Vault, env: Mapping[str, str], builder_root: Path) -
     }
 
 
-def _precheck_vault(vault: _Vault, env: Mapping[str, str], builder_root: Path) -> None:
+def _precheck_vault(vault: _Vault, env: Mapping[str, str], builder_root: Path, *, upgrade_pending: bool = False) -> None:
+    kwargs = _install_kwargs(vault, env, builder_root)
+    if upgrade_pending:
+        kwargs["upgrade_pending"] = True
     try:
-        installing.install(vault.path, dry_run=True, out=io.StringIO(), **_install_kwargs(vault, env, builder_root))  # type: ignore[arg-type]
+        installing.install(vault.path, dry_run=True, out=io.StringIO(), **kwargs)  # type: ignore[arg-type]
     except _INSTALL_ERRORS as exc:
         raise _Stop(f"vault {vault.name} ({vault.path}): {exc}") from None
 

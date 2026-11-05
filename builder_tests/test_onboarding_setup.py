@@ -478,11 +478,23 @@ class UpgradeTests(_SetupCase):
         output = self.assert_setup("--repo", str(self.repo), "--yes", code=1)
 
         self.assertIn("Nothing was written", output)
-        self.assertIn("delete it from the vault, then run this command again", output)
+        self.assertIn("then delete it from the vault. setup puts back the vault-builder version", output)
+        self.assertIn("audit failed: Vault topology is missing required file: AGENTS.md", output)
+        self.assertIn(f"git -C {self.personal} checkout -- <path>", output)
         self.assertIn("review-required README.md", output)
         self.assertIn(f"vault personal ({self.personal})", output)
         self.assertIn(f"vault app ({self.app})", output)
         self.assertIn(f"vault-builder audit --target {self.personal}", output)
+        self.assertEqual(before, _snapshot(self.home))
+
+    def test_an_install_problem_of_a_vault_to_upgrade_stops_before_the_upgrade(self) -> None:
+        (self.personal / "README.md").unlink()
+        self.settings.write_text("{not json", encoding="utf-8")
+        before = _snapshot(self.home)
+
+        result, output = self.setup("--repo", str(self.repo), "--yes")
+
+        self.assertEqual(1, result, output)
         self.assertEqual(before, _snapshot(self.home))
 
     def test_a_failed_upgrade_stops_and_names_the_vault(self) -> None:
@@ -576,10 +588,6 @@ class CliTests(unittest.TestCase):
             self.assertIn(name, out.getvalue())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class UpgradeResolutionTests(_SetupCase):
     def test_deleting_an_edited_file_lets_the_next_run_upgrade(self) -> None:
         self.assert_setup("--repo", str(self.repo), "--yes")
@@ -593,3 +601,36 @@ class UpgradeResolutionTests(_SetupCase):
 
         self.assertEqual(expected, readme.read_bytes())
         self.assertIn("Doctor found no problems", output)
+
+    def test_a_wiki_page_that_breaks_the_source_rules_is_not_deleted_but_fixed(self) -> None:
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        page = self.home / "vault" / "wiki" / "concepts" / "x.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text('---\ntitle: "X"\ntype: source\nstatus: seed\n---\n# X\n\nbody\n', encoding="utf-8")
+        before = _snapshot(self.home)
+
+        output = self.assert_setup("--repo", str(self.repo), "--yes", code=1)
+
+        self.assertIn("review-required wiki/concepts/x.md", output)
+        self.assertIn("A wiki page breaks the source page rules", output)
+        self.assertIn("tools/wiki/cli.py lint", output)
+        self.assertNotIn("delete it from the vault", output)
+        self.assertEqual(before, _snapshot(self.home))
+
+    def test_a_manifest_from_a_newer_builder_asks_for_an_update(self) -> None:
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        manifest_path = self.home / "vault" / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["contract_version"] = 99
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result, output = self.setup("--repo", str(self.repo), "--yes")
+
+        self.assertEqual(1, result, output)
+        self.assertIn("a newer vault-builder (contract 99) manages this vault", output)
+        self.assertNotIn("delete it from the vault", output)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
