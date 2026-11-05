@@ -19,7 +19,10 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 hook을 설치하고, 저장소를 연결하고, Claude Code에 `vault-wiki` MCP 서버를 등록한 뒤
 `vault-builder doctor`로 검사합니다. 다른 도구는 설치하지 않습니다. 질문마다
 Enter를 누르면 개인 Vault가 `$HOME/vault`에 생기고, 현재 폴더가 git 저장소이면
-그 저장소의 project Vault가 `$HOME/vaults/<저장소 폴더 이름>`에 생깁니다. Claude
+그 저장소의 project Vault가 `$HOME/vaults/<저장소 폴더 이름>`에 생깁니다.
+이전 vault-builder로 만든 Vault는 같은 실행에서 업그레이드합니다. wiki 페이지와
+raw source는 그대로 남습니다. vault-builder가 관리하는 파일을 직접 고쳤으면
+setup은 그 파일 목록을 출력하고 아무것도 쓰기 전에 멈춥니다. Claude
 Code가 실행 중이면 이 명령은 `$HOME/.claude.json`을 쓰기 전에 멈춥니다.
 
 명령이 끝나면 다음을 합니다.

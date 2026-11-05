@@ -916,8 +916,8 @@ vault-builder uninstall --all
 
 설치 명령(1절)이 마지막에 실행하는 명령입니다. 아래 4단계를 차례로 실행하고, 단계마다 `setup: [N/4]` 줄을 출력합니다. vault-builder 파일과 설정만 설치하고 다른 도구는 설치하지 않습니다.
 
-1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 vault마다 install의 `--dry-run` 검사를 실행합니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
-2. vault마다 hook을 포함해 install을 실행합니다(`install --with-hooks`). 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다. 환경 변수는 그대로 넘기므로, `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 그 경로를 `vault-hooks.json`에 적습니다. vg를 설치하는 도구가 그 경로를 `VAULT_GRAPH_BIN`에 넣고 setup을 실행하면 hook이 그 vg를 씁니다.
+1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 manifest가 있는 vault마다 audit을 실행합니다. manifest schema가 예전 것이거나 audit 계획에 `create`, `replace` 항목이 있는 vault는 업그레이드할 vault로 계획에 함께 출력합니다. 어느 vault든 audit에 `review-required`나 `invalid` 항목이 있으면, 그런 경로를 모든 vault에 걸쳐 한 번에 출력하고 아무것도 쓰지 않고 멈춥니다. 이 파일은 사람이 직접 고친 것이라 사람이 정해야 하기 때문입니다. 업그레이드하지 않는 vault마다 install의 `--dry-run` 검사를 실행합니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
+2. vault마다 업그레이드가 필요하면 audit 계획을 apply하고(1.1절의 apply와 같은 동작이며 실패하면 vault 파일을 되돌립니다), 이어서 hook을 포함해 install을 실행합니다(`install --with-hooks`). 업그레이드는 vault-builder 관리 파일과 manifest만 바꾸고 wiki 페이지와 raw source는 그대로 둡니다. 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다. 환경 변수는 그대로 넘기므로, `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 그 경로를 `vault-hooks.json`에 적습니다. vg를 설치하는 도구가 그 경로를 `VAULT_GRAPH_BIN`에 넣고 setup을 실행하면 hook이 그 vg를 씁니다.
 3. 저장소마다 `link`를 한 번 실행해 공유 vault 전부와 그 저장소의 project vault를 연결합니다. 기본 쓰기 vault가 정해지지 않으면 대화 모드에서는 묻고, 그 밖에는 `--default-write` 값을 쓰거나 `vault-builder set-default-write` 명령을 안내합니다.
 4. 경로 없이 doctor를 실행합니다.
 
@@ -931,7 +931,7 @@ vault-builder uninstall --all
 `install <path> [--name NAME] [--role ROLE] [--with-stenc] [--with-hooks] [--dry-run]`
 
 - 대상 폴더가 없거나 비어 있으면 새 vault를 만듭니다. 임시 폴더에서 vault를 조립하고 lint로 검사한 뒤 한 번에 대상 경로로 옮깁니다. 중간에 실패하면 대상 폴더는 생기지 않습니다.
-- 대상이 이미 vault이면 vault 밖 파일만 설치합니다. 이때 audit 결과에 `create`, `replace`, `review-required`, `invalid` 항목이 하나라도 있으면 거부합니다. 1.1절의 audit/apply를 먼저 실행하세요.
+- 대상이 이미 vault이면 vault 밖 파일만 설치합니다. 이때 audit 결과에 `create`, `replace`, `review-required`, `invalid` 항목이 하나라도 있으면 거부합니다. `vault-builder setup`을 실행하면 사람 검토 항목이 없는 vault는 업그레이드한 뒤 설치합니다(17.6). 직접 하려면 1.1절의 audit/apply를 먼저 실행하세요.
 - uninstall한 vault(manifest는 없고 `wiki/index.md` 파일은 있는 폴더)는 install 한 번으로 다시 설치됩니다. install이 audit 계획을 만들고, `review-required`나 `invalid` 항목이 없으면 apply와 같은 방법으로 managed 파일과 manifest를 되돌린 뒤 vault 밖 파일을 설치합니다. 계획에 그런 항목이 있으면 경로 목록과 audit/apply 안내를 출력하고 아무것도 쓰지 않습니다. `--dry-run` 옵션을 주면 audit 계획 요약과 vault 밖 계획만 출력합니다. vault 밖 설치가 실패하면 vault 밖 변경만 되돌리고, 되돌린 managed 파일과 manifest는 남습니다. 이때 install을 다시 실행하면 vault 밖 설치부터 이어갑니다.
 - 불러오기 skill, recall 스크립트, 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
 - 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 `--role` 값(없으면 `personal`)으로 더합니다. 저장소 연결은 `link` 명령(17.3)으로 합니다.

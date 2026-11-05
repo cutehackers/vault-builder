@@ -2,11 +2,15 @@
 
 Steps:
 
-1. Precheck. Writes no file. Parse the options, read vault-map.json, run the install precheck of every vault
-   (install --dry-run --with-hooks), check every --repo, and check that Claude Code is not running (decision 5).
-   Any failure stops the run.
-2. install --with-hooks for every vault, in order. The environment is passed on unchanged, so install records
-   a vg found through VAULT_GRAPH_BIN or PATH and records nothing when there is none (installing.py).
+1. Precheck. Writes no file. Parse the options, read vault-map.json, audit every existing vault, run the install
+   precheck of every vault that needs no upgrade (install --dry-run --with-hooks), check every --repo, and check
+   that Claude Code is not running (decision 5). Any failure stops the run.
+   A vault whose manifest schema is older, or whose audit plans create or replace actions, is upgraded in step 2.
+   When any vault's audit has a review-required or invalid action, setup lists every such path of every vault and
+   stops before writing, because only a person can decide those files.
+2. For every vault, in order: apply its audit plan when it needs an upgrade (the same transaction as the apply
+   command, with its rollback), then install --with-hooks. The environment is passed on unchanged, so install
+   records a vg found through VAULT_GRAPH_BIN or PATH and records nothing when there is none (installing.py).
 3. One link per repository: the shared vaults and that repository's project vault.
 4. doctor without a path.
 
@@ -27,6 +31,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -35,6 +40,11 @@ from pathlib import Path
 from typing import Protocol
 
 from tools.vault_migration import installing, linking, map_settings, roles, uninstalling
+from tools.vault_migration.applying import apply_plan
+from tools.vault_migration.manifests import load_manifest
+from tools.vault_migration.models import MigrationPlan
+from tools.vault_migration.planning import audit_vault
+from tools.wiki.lib.vault_manifest import MANIFEST_SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 PERSONAL_NAME = "personal"
@@ -44,6 +54,9 @@ EXIT_CLAUDE_RUNNING = 3
 _INSTALL_ERRORS = (OSError, ValueError, RuntimeError, subprocess.SubprocessError)
 _INSTALL_SUMMARY = ("LLM Wiki Vault", "Vault name:", "MCP server:", "Hooks:", "Note:")
 _COMMAND = "setup"
+_UPGRADE_ACTIONS = frozenset({"create", "replace"})
+_REVIEW_ACTIONS = frozenset({"review-required", "invalid"})
+_SHOWN_REVIEW_PATHS = 10
 
 
 class Tty(Protocol):
@@ -150,6 +163,20 @@ class _Repo:
     project_vaults: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _Upgrade:
+    """An existing vault that install would refuse until its audit plan is applied."""
+
+    vault: _Vault
+    plan: MigrationPlan
+    schema_version: int
+
+    def counts(self) -> str:
+        created = sum(1 for action in self.plan.actions if action.action == "create")
+        replaced = sum(1 for action in self.plan.actions if action.action == "replace")
+        return f"{created} files to create, {replaced} to replace"
+
+
 @dataclass
 class _Plan:
     vaults: list[_Vault]
@@ -240,8 +267,12 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
         plan_options = _ask(prompter, options, data, env, cwd)
     plan = _build_plan(plan_options, data, user.home)
     _print_plan(plan, options.dry_run)
+    upgrades = _audit_vaults(plan.vaults, builder_root)
+    _print_upgrades(upgrades)
     for vault in plan.vaults:
-        _precheck_vault(vault, env, builder_root)
+        # An upgraded vault runs the install precheck in step 2, right after its upgrade.
+        if vault.name not in upgrades:
+            _precheck_vault(vault, env, builder_root)
     if options.dry_run:
         if tools.claude_running(env):
             print(f"{_COMMAND}: note: Claude Code is running. Quit it before the real run.")
@@ -252,8 +283,11 @@ def _setup(options: SetupOptions, env: dict[str, str], tools: Externals, builder
     _require_claude_closed(tools, env, prompter)
 
     # Step 2: install every vault with hooks, in plan order.
-    _step(2, "install vaults with hooks")
+    _step(2, "upgrade and install vaults with hooks")
     for vault in plan.vaults:
+        upgrade = upgrades.get(vault.name)
+        if upgrade is not None:
+            _upgrade_vault(upgrade, builder_root)
         _install_vault(vault, env, builder_root)
 
     # Step 3: one link per repository, then the default write vault.
@@ -481,6 +515,77 @@ def _print_plan(plan: _Plan, dry_run: bool) -> None:
             print(f"    role {vault.final_role} is not a known role; it is linked as a shared vault.")
     for repo in plan.repos:
         print(f"  repository {repo.root}: link {', '.join(plan.link_names(repo)) or 'nothing'}")
+
+
+def _audit_vaults(vaults: Sequence[_Vault], builder_root: Path) -> dict[str, _Upgrade]:
+    """Audit every vault that has a manifest. Return the upgrades, or stop listing every path a person must review.
+
+    A folder without a manifest is a new vault or one install restores itself, so it is not audited here.
+    """
+    upgrades: dict[str, _Upgrade] = {}
+    problems: list[str] = []
+    for vault in vaults:
+        if not vault.path.is_dir():
+            continue
+        try:
+            manifest = load_manifest(vault.path)
+        except ValueError as exc:
+            problems.append(f"vault {vault.name} ({vault.path}): its manifest is invalid: {exc}")
+            continue
+        if manifest is None:
+            continue
+        try:
+            migration = audit_vault(builder_root, vault.path)
+        except ValueError as exc:
+            problems.append(f"vault {vault.name} ({vault.path}): audit failed: {exc}")
+            continue
+        review = sorted(f"{action.action} {action.path}" for action in migration.actions if action.action in _REVIEW_ACTIONS)
+        if review:
+            shown = review[:_SHOWN_REVIEW_PATHS]
+            more = len(review) - len(shown)
+            lines = [f"vault {vault.name} ({vault.path}): {len(review)} paths need your review:"]
+            lines += [f"    {item}" for item in shown]
+            if more:
+                lines.append(f"    ... and {more} more")
+            lines.append(f"  See all of them: vault-builder audit --target {_quote(vault.path)} --plan-out <plan.json>")
+            problems.append("\n".join(lines))
+            continue
+        pending = any(action.action in _UPGRADE_ACTIONS for action in migration.actions)
+        if pending or manifest.schema_version != MANIFEST_SCHEMA_VERSION:
+            upgrades[vault.name] = _Upgrade(vault, migration, manifest.schema_version)
+    if problems:
+        raise _Stop(
+            "these vaults need a person's decision before setup can upgrade them. Nothing was written.\n"
+            + "\n".join(f"  {problem}" for problem in problems)
+            + "\n  For each path, keep your edit or take the builder's file, then apply the plan with "
+            "vault-builder apply --target <vault> --plan <plan.json> and run this command again."
+        )
+    return upgrades
+
+
+def _quote(path: Path) -> str:
+    return shlex.quote(str(path))
+
+
+def _print_upgrades(upgrades: Mapping[str, _Upgrade]) -> None:
+    for upgrade in upgrades.values():
+        print(
+            f"  upgrade vault {upgrade.vault.name}: manifest schema {upgrade.schema_version} to "
+            f"{MANIFEST_SCHEMA_VERSION}, {upgrade.counts()}. Your wiki pages and raw sources are kept."
+        )
+
+
+def _upgrade_vault(upgrade: _Upgrade, builder_root: Path) -> None:
+    vault = upgrade.vault
+    print(f"  upgrading vault {vault.name} ({upgrade.counts()}); it runs the vault's release gate.")
+    try:
+        apply_plan(builder_root, vault.path, upgrade.plan)
+    except _INSTALL_ERRORS as exc:
+        raise _Stop(
+            f"upgrade of vault {vault.name} ({vault.path}) failed: {exc} "
+            "The upgrade restores the vault's files when it fails; when the message above names a recover "
+            "command, run it. Vaults before it stay installed. Fix the cause, then run the same command again."
+        ) from None
 
 
 def _install_kwargs(vault: _Vault, env: Mapping[str, str], builder_root: Path) -> dict[str, object]:
