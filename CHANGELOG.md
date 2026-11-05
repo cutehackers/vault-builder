@@ -25,7 +25,13 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
-vault-builder는 vault-graph 없이 설치되고 동작한다. vault-graph를 설치하고 설정하는 일은 vault-graph가 맡는다. vault-graph는 vault-builder가 필요하므로 vault-graph의 설치 명령이 vault-builder 설치 명령을 실행한다. 설치 명령의 옵션 `--without-vault-graph`와 `--install-uv`를 없앴으므로 다음 릴리스는 MAJOR다.
+## [4.0.0] - 2026-11-05
+
+vault-builder는 vault-graph 없이 설치되고 동작한다. vault-graph를 설치하고 설정하는 일은 vault-graph가 맡는다. vault-graph는 vault-builder가 필요하므로 vault-graph의 설치 명령이 vault-builder 설치 명령을 실행한다. 설치 명령의 옵션 `--without-vault-graph`와 `--install-uv`를 없앴으므로 MAJOR로 올렸다. contract와 manifest schema는 5 그대로다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 4.0.0 | 5 | 5 | 2 |
 
 ### Removed
 
