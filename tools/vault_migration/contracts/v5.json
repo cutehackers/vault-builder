@@ -1,5 +1,5 @@
 {
-  "builder_revision": "4.0.0",
+  "builder_revision": "4.1.0",
   "contract_version": 5,
   "managed_files": {
     ".agents/skills/memory-cleanup/SKILL.md": {
@@ -90,13 +90,13 @@
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "6cdf12fbc70c2803a299911a9753b463e9e88d3ee4a8b3eec0cb260959388766"
+      "sha256": "7d4a47c9db695e9a90a91b57b51b47b645180bf8d56b7597b18cfd10b5445e04"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "80420a1d8e5b58c09d2cce7cc8fae300acd3e55954fab6303ad68e7cd58e3c22"
+      "sha256": "a393588922c9291227e9701d30ae4fa2d2953e600580210269fdc3abc4143f5d"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
@@ -132,7 +132,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "549af8b58affce360dc4614f4760edfd258af313638ca49ed72be54a209947d9"
+      "sha256": "82b8f7fe529f83551d4906c6b1437d514cf6e05ce28e846bc4a739a7530d292d"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",

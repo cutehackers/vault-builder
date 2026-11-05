@@ -25,6 +25,24 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-05
+
+이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 설치가 끝난다. 기존 설치와 함께 쓸 수 있는 새 동작이라 MINOR로 올렸다. contract와 manifest schema는 5 그대로다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 4.1.0 | 5 | 5 | 2 |
+
+### Changed
+
+- `setup`이 예전 vault를 업그레이드한다. 사전 검사에서 manifest가 있는 vault마다 audit을 실행하고, manifest schema가 예전 것이거나 `create`, `replace` 항목이 있는 vault를 계획에 출력한 뒤 2단계에서 apply하고 install한다. 그래서 이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 끝난다. wiki 페이지와 raw source는 바뀌지 않는다.
+- 어느 vault든 audit에 `review-required`나 `invalid` 항목이 있으면 `setup`은 그 경로를 모든 vault에 걸쳐 한 번에 출력하고 아무것도 쓰지 않고 멈춘다. `--dry-run`도 같은 이유로 exit 1을 낸다.
+- install이 schema가 예전 것이거나 migration이 필요한 vault를 거부할 때 `vault-builder setup`과 `vault-builder audit` 명령을 안내한다.
+
+### Upgrade
+
+- 설치 명령이나 `vault-builder setup`을 다시 실행한다. 사람 검토 항목이 없는 vault는 이 실행에서 업그레이드된다.
+
 ## [4.0.0] - 2026-11-05
 
 vault-builder는 vault-graph 없이 설치되고 동작한다. vault-graph를 설치하고 설정하는 일은 vault-graph가 맡는다. vault-graph는 vault-builder가 필요하므로 vault-graph의 설치 명령이 vault-builder 설치 명령을 실행한다. 설치 명령의 옵션 `--without-vault-graph`와 `--install-uv`를 없앴으므로 MAJOR로 올렸다. contract와 manifest schema는 5 그대로다.
