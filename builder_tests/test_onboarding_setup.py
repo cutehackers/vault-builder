@@ -437,6 +437,65 @@ class RecoveryTests(_SetupCase):
         self.assertIn("Doctor found no problems", output)
 
 
+class UpgradeTests(_SetupCase):
+    """An existing vault that install would refuse is upgraded by setup, unless a person must decide a file."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.assert_setup("--repo", str(self.repo), "--yes")
+        self.personal = self.home / "vault"
+        self.app = self.home / "vaults" / "app"
+
+    def test_a_vault_with_a_missing_managed_file_is_upgraded_and_installed(self) -> None:
+        readme = self.personal / "README.md"
+        expected = readme.read_bytes()
+        readme.unlink()
+
+        output = self.assert_setup("--repo", str(self.repo), "--yes")
+
+        self.assertIn("upgrade vault personal", output)
+        self.assertIn("1 files to create, 0 to replace", output)
+        self.assertEqual(expected, readme.read_bytes())
+        self.assertNotIn("upgrade vault app", output)
+        self.assertIn("Doctor found no problems", output)
+
+    def test_dry_run_shows_the_upgrade_and_writes_nothing(self) -> None:
+        (self.personal / "README.md").unlink()
+        before = _snapshot(self.home)
+
+        output = self.assert_setup("--repo", str(self.repo), "--dry-run")
+
+        self.assertIn("upgrade vault personal", output)
+        self.assertEqual(before, _snapshot(self.home))
+
+    def test_a_file_a_person_edited_stops_before_any_write_and_lists_every_vault(self) -> None:
+        for vault in (self.personal, self.app):
+            with (vault / "README.md").open("a", encoding="utf-8") as stream:
+                stream.write("\nmy own note\n")
+        (self.personal / "AGENTS.md").unlink()
+        before = _snapshot(self.home)
+
+        output = self.assert_setup("--repo", str(self.repo), "--yes", code=1)
+
+        self.assertIn("Nothing was written", output)
+        self.assertIn("review-required README.md", output)
+        self.assertIn(f"vault personal ({self.personal})", output)
+        self.assertIn(f"vault app ({self.app})", output)
+        self.assertIn(f"vault-builder audit --target {self.personal}", output)
+        self.assertEqual(before, _snapshot(self.home))
+
+    def test_a_failed_upgrade_stops_and_names_the_vault(self) -> None:
+        (self.personal / "README.md").unlink()
+
+        with mock.patch.object(onboarding, "apply_plan", side_effect=RuntimeError("gate failed")):
+            result, output = self.setup("--repo", str(self.repo), "--yes")
+
+        self.assertEqual(1, result, output)
+        self.assertIn("upgrade of vault personal", output)
+        self.assertIn("gate failed", output)
+        self.assertIn("run the same command again", output)
+
+
 class InteractiveTests(_SetupCase):
     def test_enter_on_every_question_gives_the_baseline_result(self) -> None:
         """Questions 1 to 5 and their defaults (spec 4.4); the Claude Code check waits for Enter."""

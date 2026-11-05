@@ -22,7 +22,10 @@ the `vault-wiki` MCP server in Claude Code, and ends with
 `vault-builder doctor`. It installs no other tool. Press Enter at every
 question to get a personal Vault at `$HOME/vault` and, when the current folder
 is a git repository, a project Vault for it at
-`$HOME/vaults/<repository folder name>`. The command stops before it writes
+`$HOME/vaults/<repository folder name>`. Vaults made by an older
+vault-builder are upgraded in the same run. Your wiki pages and raw sources
+stay as they are. When you edited a file that vault-builder manages, setup
+lists those files and stops before it writes anything. The command stops before it writes
 `$HOME/.claude.json` while Claude Code is running.
 
 When the command finishes:

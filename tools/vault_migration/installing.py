@@ -562,8 +562,9 @@ def _target_state(target: Path, builder_root: Path) -> tuple[str, bool]:
     if manifest is not None:
         if manifest.schema_version != MANIFEST_SCHEMA_VERSION:
             raise InstallError(
-                f"Target manifest is schema version {manifest.schema_version}. Run audit and apply first: "
-                f"tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json>"
+                f"Target manifest is schema version {manifest.schema_version}. Run vault-builder setup, which "
+                "upgrades it, or audit and apply it yourself: "
+                f"vault-builder audit --target {shlex.quote(str(target))} --plan-out <plan.json>"
             )
         return "existing", False
     if (target / "wiki" / "index.md").exists() or (target / "tools" / "wiki" / "cli.py").exists():
@@ -754,8 +755,9 @@ def _require_audit_clean(builder_root: Path, target: Path) -> None:
     if pending:
         shown = "; ".join(pending[:5]) + ("; ..." if len(pending) > 5 else "")
         raise InstallError(
-            f"Existing vault needs migration first ({len(pending)} actions: {shown}). Run "
-            f"tools/vault_migration/cli.py audit --target {shlex.quote(str(target))} --plan-out <plan.json>, "
+            f"Existing vault needs migration first ({len(pending)} actions: {shown}). Run vault-builder setup, "
+            "which upgrades it, or run "
+            f"vault-builder audit --target {shlex.quote(str(target))} --plan-out <plan.json>, "
             "then apply, then install again."
         )
 
