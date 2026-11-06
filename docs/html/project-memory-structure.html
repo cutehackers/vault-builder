@@ -224,7 +224,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       <div class="step" data-step="3" data-zone="z3"><span class="n">3 · 정리할 때</span><h3>검증 후 반영</h3><p>ingest-source, publish-draft로 vault에 반영</p><span><span class="chip have">있음</span></span></div>
       <div class="step" data-step="4" data-zone="z3"><span class="n">4 · 정리할 때</span><h3>요약 생성</h3><p>프로젝트별 요약 페이지를 다시 만듦</p><span><span class="chip new">신규</span></span></div>
       <div class="step" data-step="5" data-zone="z2"><span class="n">5 · 세션 시작</span><h3>요약 읽기</h3><p>/project-memory skill, 또는 <code>install --with-hooks</code>로 넣은 SessionStart hook이 연결된 vault의 요약을 읽음</p><span><span class="chip have">있음 · hook은 선택</span></span></div>
-      <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 요약이 세션 맥락으로 들어감</p><span><span class="chip have">있음</span></span></div>
+      <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 hook 출력(vg 회상, 또는 vg가 없을 때 요약)이 세션 맥락으로 들어감</p><span><span class="chip have">있음</span></span></div>
     </div>
     <div class="legend">
       <span><i style="background:var(--z1)"></i>프로젝트 저장소</span>
@@ -246,7 +246,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       </button>
       <button type="button" class="card" id="sc2" data-steps="5,6" aria-pressed="false">
         <div class="top"><h3>다음 날 이어서</h3><span class="chip have">매일</span></div>
-        <dl class="who"><dt>사용자</dt><dd>설명 없이 세션을 시작한다</dd><dt>자동</dt><dd class="auto">MEMORY.md 로드, hook이 프로젝트 요약을 넣음</dd></dl>
+        <dl class="who"><dt>사용자</dt><dd>설명 없이 세션을 시작한다</dd><dt>자동</dt><dd class="auto">MEMORY.md 로드. hook을 설치했으면 vg 출력을, vg가 없거나 실패하면 프로젝트 요약을 넣음</dd></dl>
         <div class="steps-used"><span>5</span><span>6</span></div>
       </button>
       <button type="button" class="card" id="sc3" data-steps="2,3,4" aria-pressed="false">
@@ -344,7 +344,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         <tbody>
           <tr><td><span class="sw" style="background:var(--z2)"></span><b>L1 빠른 메모리</b></td><td><code>~/.claude/projects/&lt;저장소&gt;/memory/</code></td><td>프로젝트 세션, 작업 중 수시로</td><td>세션 시작 때 자동</td><td>떠올리기, 기록하기, 이어하기</td></tr>
           <tr><td><span class="sw" style="background:var(--z3)"></span><b>L2 장기 메모리</b></td><td>vault 저장소 (개인 · 팀 · 프로젝트)</td><td>정리 skill, 일괄로</td><td>L3 요약과 검색을 통해</td><td>프로젝트 간 공유, 정확성과 이력</td></tr>
-          <tr><td><span class="sw" style="background:var(--z3)"></span><b>L3 프로젝트 요약</b></td><td><code>wiki/maps/projects/&lt;p&gt;.md</code></td><td>vault 도구가 자동 생성</td><td>hook이 세션 시작 때 주입</td><td>장기 메모리 떠올리기</td></tr>
+          <tr><td><span class="sw" style="background:var(--z3)"></span><b>L3 프로젝트 요약</b></td><td><code>wiki/maps/projects/&lt;p&gt;.md</code></td><td>vault 도구가 자동 생성</td><td>/project-memory로 불러옴. hook이 있고 vg가 없거나 실패할 때만 세션 시작 때 주입</td><td>장기 메모리 떠올리기</td></tr>
         </tbody>
       </table>
     </div>

@@ -33,6 +33,10 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 - `import-source <file> --into raw/imports/<kind>/ [--json]`이 vault 밖 파일을 `raw/imports/<kind>/<stem>--<sha256 앞 8자><확장자>`에 바이트 그대로 복사하고 source page를 만든다. 같은 sha256의 source page가 있으면 아무것도 만들지 않고 기존 경로를 돌려준다. `AGENTS.md` 규칙1에 이 명령의 예외를 적는다.
 - 페이지 종류 `project`를 더한다. project brief는 `wiki/projects/<project>.md`에만 두고 frontmatter `project`가 그 파일 이름과 같아야 하며, 어긋나면 검증이 `project-page-path`로 거부한다. `publish-draft`로 쓸 수 있다. `/project-memory`(`recall.sh`)는 인자 없이 실행하면 brief 본문을 먼저 출력한다.
 
+### Changed
+
+- `docs/usage.md` 17절과 `docs/html/project-memory-structure.html`의 세션 시작 회상 설명을 실제 동작에 맞춘다. hook이 없으면 아무것도 넣지 않고, hook이 있으면 vg 출력을 넣으며, vg가 없거나 실패할 때만 프로젝트 요약을 넣는다.
+
 ## [4.1.0] - 2026-11-05
 
 이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 설치가 끝난다. 기존 설치와 함께 쓸 수 있는 새 동작이라 MINOR로 올렸다. contract와 manifest schema는 5 그대로다.
