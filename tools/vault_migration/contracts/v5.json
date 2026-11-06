@@ -78,7 +78,7 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "fc5028339ea9e9253f639162b443a54bc8334c82fc494a31fa952b68f3775a50"
+      "sha256": "b79c9f5f69fa5aec86041e2eacb4d14564b7e9a92a25569c89777b89fa0ca4e6"
     },
     "CLAUDE.md": {
       "mode": "0644",
@@ -126,13 +126,13 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "77cff9fdaa4c21de82513cbcb933c635b39e7d22d5cb4327d08fed3e290de2eb"
+      "sha256": "5857f0e81668e2745ab65b30a116017faa430780a7764dea38ff826bb7e2a750"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "e23177bbc1ae43c449a7d26ef59bbf49117e713b05d43a8840e34cc68c236e41"
+      "sha256": "ef98177ebb4128d6860100101ddd335ca142a1ef0a1a5dd729d929bf86c2df03"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -192,7 +192,7 @@
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "29832953d760c86f0bb500d36361d6e62f885da2d58d5b709d1232b92e40d6a8"
+      "sha256": "0f1081e04bbcafd05f8b85c3853034ce86a45694c9413bb40d8caaa302bf882c"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -240,7 +240,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/ingest.py",
       "policy": "replace-if-unmodified",
-      "sha256": "fb0ee52b31bcb8bfe8cad82f9e11c045f6db785b1a8fd04cb5a9bd1dfbc9a60f"
+      "sha256": "9b785e2e55210083b9c13bb5317d0b41904d5ccb5187f644a3509135c17fc209"
     },
     "tools/wiki/lib/links.py": {
       "mode": "0644",

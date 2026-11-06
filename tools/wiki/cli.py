@@ -17,7 +17,7 @@ from tools.wiki.lib.frontmatter import parse_page
 from tools.wiki.lib.authority import authority_contract_version, validate_page_authority
 from tools.wiki.lib.draft import apply_batch_draft, apply_draft
 from tools.wiki.lib.hash_source import compute_sha256, display_path
-from tools.wiki.lib.ingest import ingest_source
+from tools.wiki.lib.ingest import import_source, ingest_source
 from tools.wiki.lib.lint import (
     LintResult,
     lint_repo,
@@ -126,6 +126,17 @@ def main(argv: list[str] | None = None) -> int:
     ingest_source_cmd.add_argument("--title")
     ingest_source_cmd.add_argument("--summary")
     ingest_source_cmd.add_argument("--report", nargs="?", const="__default__")
+
+    import_source_cmd = subcommands.add_parser(
+        "import-source",
+        description=(
+            "Copy a file from outside raw/ to raw/imports/<kind>/<stem>--<sha256 first 8><suffix> and create its "
+            "source page. A file whose sha256 a source page already records creates nothing."
+        ),
+    )
+    import_source_cmd.add_argument("path")
+    import_source_cmd.add_argument("--into", required=True, metavar="raw/imports/<kind>/")
+    import_source_cmd.add_argument("--json", action="store_true")
 
     source_registry_cmd = subcommands.add_parser("source-registry")
     source_registry_cmd.add_argument("--report", nargs="?", const="__default__")
@@ -508,6 +519,22 @@ def main(argv: list[str] | None = None) -> int:
         if result.report_path is not None:
             print(f"Report written: {display_path(result.report_path, ROOT)}")
         return 0 if result.ok else 1
+
+    if args.command == "import-source":
+        try:
+            imported = import_source(ROOT, Path(args.path), args.into)
+        except ValueError as exc:
+            if args.json:
+                print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False))
+            print(f"import-source: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(imported.to_json(), ensure_ascii=False))
+        elif imported.status == "exists":
+            print(f"Already imported: {imported.raw_path} ({imported.source_page}); nothing written.")
+        else:
+            print(f"Imported: {imported.raw_path} ({imported.source_page}).")
+        return 0
 
     if args.command == "ingest-source":
         source_path = Path(args.path)

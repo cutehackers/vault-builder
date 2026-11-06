@@ -32,7 +32,7 @@ raw source
 
 ## Non-Negotiable Rules
 
-1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks. One exception: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/`. Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden.
+1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks. Two exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/`, and `python3 tools/wiki/cli.py import-source <file> --into raw/imports/<kind>/` may add a byte-for-byte copy of a file from outside `raw/` under `raw/imports/<kind>/`. Every other write there, including editing, renaming, or deleting an existing session file or import copy, stays forbidden.
 2. Never present LLM draft text as durable knowledge before validation.
 3. Every substantive wiki claim needs provenance from a raw source, source page, prior wiki page, or explicit human instruction.
 4. Do not silently resolve contradictions. Record the tension and request human judgment when it affects an important decision.
@@ -77,6 +77,7 @@ python3 tools/wiki/cli.py hash-source raw/sources/example.md
 python3 tools/wiki/cli.py ingest-source raw/sources/example.md --report
 python3 tools/wiki/cli.py source-registry --report
 python3 tools/wiki/cli.py bulk-ingest raw/sources/a.md raw/sources/b.md --report
+python3 tools/wiki/cli.py import-source /path/outside/note.md --into raw/imports/claude-memory/ --json
 ```
 
 Run workflow checkpoints:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -242,3 +244,105 @@ def _source_kind(path: Path) -> str:
     if suffix in {".py", ".js", ".ts", ".tsx", ".jsx", ".sh"}:
         return "code"
     return "other"
+
+
+# import-source (vault-graph request S8, spec 4.4.5)
+
+IMPORTS_DIR = "raw/imports"
+_IMPORT_INTO_RE = re.compile(r"^raw/imports/(?P<kind>[a-z0-9][a-z0-9-]*)/?$")
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    status: str  # "imported" or "exists"
+    raw_path: str
+    source_page: str
+    sha256: str
+    created: tuple[str, ...]
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "raw_path": self.raw_path,
+            "source_page": self.source_page,
+            "sha256": self.sha256,
+            "created": list(self.created),
+        }
+
+
+def import_source(root: Path, file_path: Path, into: str) -> ImportResult:
+    """Copy a file from outside raw/ to raw/imports/<kind>/<stem>--<sha256 first 8><suffix> and ingest it.
+
+    When a source page already records the file's sha256, nothing is written and that page's
+    canonical_source and path are returned. Raises ValueError and writes nothing on bad input.
+    """
+    match = _IMPORT_INTO_RE.match(into)
+    if match is None:
+        raise ValueError(
+            f"--into must be {IMPORTS_DIR}/<kind>/ where kind uses lowercase letters, digits, and '-': {into!r}."
+        )
+    source = Path(file_path).expanduser()
+    if not source.is_file():
+        raise ValueError(f"File does not exist or is not a regular file: {source.name}.")
+    resolved = source.resolve()
+    if _is_under(resolved, (root / "raw").resolve()):
+        raise ValueError(
+            f"{display_path(resolved, root)} is already under raw/; run ingest-source on it instead of import-source."
+        )
+    data = resolved.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+
+    existing = _source_page_with_hash(root, digest)
+    if existing is not None:
+        page, canonical = existing
+        return ImportResult("exists", canonical, page, digest, ())
+
+    stem = _UNSAFE_NAME_CHARS.sub("-", source.stem).strip("-.") or "file"
+    suffix = _UNSAFE_NAME_CHARS.sub("", source.suffix)
+    target = root / IMPORTS_DIR / match.group("kind") / f"{stem}--{digest[:8]}{suffix}"
+    raw_relative = display_path(target, root)
+    created: list[str] = []
+    if target.exists():
+        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            raise ValueError(f"{raw_relative} already exists with other bytes; nothing written.")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        created.append(raw_relative)
+    try:
+        result = ingest_source(root, target, summary=f"Imported with import-source from {source.name}."[:240])
+    except Exception:
+        if created:
+            target.unlink()
+        raise
+    page_relative = display_path(result.source_page, root)
+    if result.outcome != "unchanged":
+        created.append(page_relative)
+    return ImportResult("imported", raw_relative, page_relative, digest, tuple(created))
+
+
+def _source_page_with_hash(root: Path, digest: str) -> tuple[str, str] | None:
+    sources = root / "wiki" / "sources"
+    if not sources.is_dir():
+        return None
+    for page_path in sorted(sources.glob("*.md")):
+        try:
+            frontmatter = parse_page(page_path).frontmatter or {}
+        except (OSError, UnicodeDecodeError):
+            continue
+        canonical = frontmatter.get("canonical_source")
+        if frontmatter.get("raw_sha256") == digest and isinstance(canonical, str) and canonical:
+            return display_path(page_path, root), canonical
+    return None
+
+
+def _is_under(path: Path, folder: Path) -> bool:
+    try:
+        path.relative_to(folder)
+    except ValueError:
+        return False
+    return True
