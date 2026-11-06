@@ -124,7 +124,7 @@ Every durable page under `wiki/` starts with frontmatter containing:
 
 ```yaml
 title: "Human-readable title"
-type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview
+type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview | project
 status: seed | active | stable | contested | deprecated
 created: YYYY-MM-DD
 updated: YYYY-MM-DD

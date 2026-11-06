@@ -875,7 +875,7 @@ L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니�
 
 | 인자 | 출력 |
 |---|---|
-| 없음 | 섹션 3개 전부. 전체 추정 token 1,500 이하 |
+| 없음 | 섹션 3개 전부. 전체 추정 token 1,500 이하. vault에 project brief `wiki/projects/<project id>.md`가 있으면 그 본문을 `## Project Brief` 아래 먼저 출력합니다(추정 token 400 이하, 줄 단위로 자름) |
 | `open` | 남은 일 |
 | `decisions` | 현재 결정 |
 | `corrections` | 교정과 작업 규칙 |
