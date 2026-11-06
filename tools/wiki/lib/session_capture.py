@@ -6,6 +6,9 @@ and subagent conversations live in "<session_id>/subagents/*.jsonl" next to the 
 
 The capture writes one new file under the target vault's raw/sessions/ and nothing else. It never
 runs git commands that change state and never writes the vault manifest.
+
+`sessions capture --normalized` reads a vault-graph normalized session file (vg-session-jsonl/1)
+instead of a transcript and writes the part in vault-session/v2 (vault-graph request S10).
 """
 
 from __future__ import annotations
@@ -17,14 +20,17 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, TextIO
+from typing import Any, Callable, Iterable, Mapping, TextIO
+from urllib.parse import quote
 
 from .frontmatter import _parse_frontmatter, render_page
 from .memory_scan import MemoryScanError, ProjectStop, find_project, load_vault_map, vault_map_path
 from .session_archive import (
+    SESSION_AGENTS,
     SESSION_ARCHIVE_DIR,
     SESSION_ID_PATTERN,
     SESSION_SCHEMA,
+    SESSION_SCHEMA_V2,
     check_session_file,
     parse_session_path,
     session_body_sha256,
@@ -62,6 +68,7 @@ class PartCursor:
     last_turn_uuid: str
     last_turn_at: str
     part: int = 0
+    last_exchange_id: str | None = None  # Only vault-session/v2 parts have it.
 
 
 def format_turn_at(value: datetime) -> str:
@@ -370,12 +377,13 @@ class CaptureResult:
     turn_count: int = 0
     redactions: int = 0
     warnings: tuple[str, ...] = field(default=())
+    extra: tuple[tuple[str, Any], ...] = field(default=())  # --normalized adds schema, part, exchange_count.
 
     def exit_code(self, from_hook: bool) -> int:
         return 0 if from_hook else self.manual_exit
 
     def as_json(self) -> dict[str, Any]:
-        return {
+        data = {
             "status": self.status,
             "message": self.message,
             "vault": self.vault,
@@ -384,6 +392,8 @@ class CaptureResult:
             "redactions": self.redactions,
             "warnings": list(self.warnings),
         }
+        data.update(self.extra)
+        return data
 
 
 def read_capture_request(values: Mapping[str, Any], stdin: TextIO | None) -> CaptureRequest:
@@ -521,7 +531,28 @@ def find_previous_part(
         raise CaptureStop(
             f"Cannot read last_turn_uuid and last_turn_at from {relative}; nothing written to avoid repeating turns."
         ) from None
-    return PartCursor(last_turn_uuid=last_uuid, last_turn_at=last_at, part=part)
+    last_exchange = frontmatter.get("last_exchange_id")
+    return PartCursor(
+        last_turn_uuid=last_uuid,
+        last_turn_at=last_at,
+        part=part,
+        last_exchange_id=last_exchange if isinstance(last_exchange, str) and last_exchange else None,
+    )
+
+
+def highest_part(vault_root: Path, agent: str, session_id: str) -> int:
+    """The highest part number of the session in raw/sessions/<agent>/, v1 and v2 together. 0 when none."""
+    directory = Path(vault_root) / SESSION_ARCHIVE_DIR / agent
+    if not directory.is_dir():
+        return 0
+    numbers = [
+        parsed.part
+        for path in directory.iterdir()
+        if not path.name.startswith(".") and path.is_file()
+        for parsed in [parse_session_path(f"{SESSION_ARCHIVE_DIR}/{agent}/{path.name}")]
+        if parsed is not None and parsed.session_id == session_id
+    ]
+    return max(numbers, default=0)
 
 
 def render_session_file(meta: SessionMeta, turns: list[Turn]) -> str:
@@ -559,6 +590,11 @@ def render_session_file(meta: SessionMeta, turns: list[Turn]) -> str:
         "redactions": redactions,
         "body_sha256": "",
     }
+    return _session_text(frontmatter, body)
+
+
+def _session_text(frontmatter: dict[str, Any], body: str) -> str:
+    """Render frontmatter and body, filling body_sha256 last."""
     for key, value in frontmatter.items():
         if isinstance(value, str) and ("\n" in value or "\r" in value):
             raise ValueError(f"Frontmatter field {key} cannot hold a line break.")
@@ -617,7 +653,7 @@ def capture_session(
         transcript = display_home_path(request.transcript_path, env)
         return skipped(f"Cannot read transcript {transcript}: {exc.strerror or exc}; nothing written.", 1)
 
-    collected_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    collected_at = (now or _utc_now()).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cwd_text = display_home_path(request.cwd, env)
     archive = selected.path / SESSION_ARCHIVE_DIR / CAPTURE_AGENT
     part = 1
@@ -682,18 +718,38 @@ def run_capture_command(
     env: Mapping[str, str] | None = None,
     now: datetime | None = None,
 ) -> int:
-    """CLI body of `sessions capture`. Hook input (no --transcript) always returns 0 (spec decision M)."""
-    from_hook = not values.get("transcript")
+    """CLI body of `sessions capture`. Hook input (no --transcript) always returns 0 (spec decision M).
+
+    With --normalized, hook JSON on stdin is optional; when present the run counts as hook input.
+    """
+    normalized = values.get("normalized")
+    hook: dict[str, Any] | None = None
+    if normalized:
+        try:
+            hook = _read_optional_hook_json(stdin)
+        except CaptureStop as stop:
+            hook = None
+            result = CaptureResult("skipped", stop.message, stop.manual_exit)
+            return _print_result(result, values, stdout, stderr, from_hook=True)
+    from_hook = hook is not None if normalized else not values.get("transcript")
     try:
-        request = read_capture_request(values, stdin)
-        result = capture_session(request, env, now)
+        if normalized:
+            result = capture_normalized(values, hook, env, now)
+        else:
+            request = read_capture_request(values, stdin)
+            result = capture_session(request, env, now)
     except CaptureStop as stop:
         result = CaptureResult("skipped", stop.message, stop.manual_exit)
     except Exception as exc:  # A hook must never block session end or compaction.
         if not from_hook:
             raise
         result = CaptureResult("skipped", f"sessions capture failed: {type(exc).__name__}: {exc}", 1)
+    return _print_result(result, values, stdout, stderr, from_hook=from_hook)
 
+
+def _print_result(
+    result: CaptureResult, values: Mapping[str, Any], stdout: TextIO, stderr: TextIO, *, from_hook: bool
+) -> int:
     for warning in result.warnings:
         print(warning, file=stderr)
     if values.get("json"):
@@ -703,6 +759,576 @@ def run_capture_command(
     elif not values.get("json"):
         print(result.message, file=stdout)
     return result.exit_code(from_hook)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# Normalized session JSONL (vg-session-jsonl/1, vault-graph spec 4.2.2) and the vault-session/v2 body
+# (vault-graph spec 4.2.5). The same input and the same RENDERER always give the same body bytes.
+
+SOURCE_SCHEMA = "vg-session-jsonl/1"
+RENDERER = "vg-session-md/2.0"
+TITLE_CHARS = 60
+CONTINUED_TITLE = "(이전 파트에서 이어짐)"
+FAILED_MARK = "→ 실패"
+TOOL_ONLY = "tool_only"
+HUMAN = "human"
+
+_HEADING_LINE_RE = re.compile(r"^( {0,3})(#)")
+_META_LINE_RE = re.compile(r"^(\s*)<!--(\s*vg:)")
+_SPACE_RE = re.compile(r"\s+")
+
+
+class NormalizedInputError(ValueError):
+    """The normalized file cannot be used. Nothing is written."""
+
+
+@dataclass(frozen=True)
+class NormTurn:
+    turn_id: str
+    exchange_id: str
+    role: str
+    turn_kind: str
+    at: datetime
+    text: str
+    actions: tuple[dict[str, Any], ...]
+
+
+@dataclass
+class NormExchange:
+    exchange_id: str
+    seq: int
+    agent_scope: str
+    subagent_type: str | None
+    started_at: datetime | None
+    ended_at: datetime | None
+    closed: bool
+    tools: tuple[tuple[str, int], ...]
+    files: tuple[str, ...]
+    errors: int
+    outcome: str
+    turns: list[NormTurn] = field(default_factory=list)
+
+    @property
+    def is_subagent(self) -> bool:
+        return self.agent_scope != "main"
+
+    @property
+    def agent_id(self) -> str:
+        return self.agent_scope.split(":", 1)[1] if ":" in self.agent_scope else self.agent_scope
+
+
+@dataclass(frozen=True)
+class NormSession:
+    session_id: str
+    agent: str
+    project: str | None
+    cwd: str | None
+    exchanges: tuple[NormExchange, ...]
+
+    def turns(self) -> list[NormTurn]:
+        return [turn for exchange in self.exchanges for turn in exchange.turns]
+
+
+@dataclass(frozen=True)
+class PartExchange:
+    """One exchange as written in a part: the turns after the cursor, and whether earlier turns were left out."""
+
+    exchange: NormExchange
+    turns: tuple[NormTurn, ...]
+    continued: bool
+
+
+def read_normalized(
+    path: Path, parse_at: Callable[[str], datetime], *, warnings: list[str] | None = None
+) -> NormSession:
+    """Read one normalized session file. Raises NormalizedInputError on any line that breaks the format."""
+    try:
+        text = Path(path).read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise NormalizedInputError(f"Normalized file is not UTF-8: {exc}") from None
+    session: dict[str, Any] | None = None
+    exchanges: list[NormExchange] = []
+    skipped: dict[str, int] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise NormalizedInputError(f"Line {number} is not JSON ({exc.msg}).") from None
+        if not isinstance(data, dict):
+            raise NormalizedInputError(f"Line {number} is not a JSON object.")
+        if data.get("schema") != SOURCE_SCHEMA:
+            raise NormalizedInputError(f"Line {number} schema is {data.get('schema')!r}, not {SOURCE_SCHEMA}.")
+        kind = data.get("kind")
+        if session is None:
+            if kind != "session":
+                raise NormalizedInputError(f"Line {number}: the first line must be kind session, not {kind!r}.")
+            session = data
+            continue
+        if kind == "session":
+            raise NormalizedInputError(f"Line {number}: a second session line.")
+        if kind == "exchange":
+            exchanges.append(_exchange(data, number, parse_at))
+        elif kind == "turn":
+            if not exchanges:
+                raise NormalizedInputError(f"Line {number}: a turn line before any exchange line.")
+            turn = _turn(data, number, parse_at)
+            if turn.exchange_id != exchanges[-1].exchange_id:
+                raise NormalizedInputError(
+                    f"Line {number}: turn {turn.turn_id} belongs to exchange {turn.exchange_id}, "
+                    f"not to the exchange above it ({exchanges[-1].exchange_id})."
+                )
+            exchanges[-1].turns.append(turn)
+        else:
+            skipped[str(kind)] = skipped.get(str(kind), 0) + 1
+    if session is None:
+        raise NormalizedInputError("Normalized file is empty.")
+    if skipped and warnings is not None:
+        kinds = ", ".join(f"{name} {count}" for name, count in sorted(skipped.items()))
+        warnings.append(f"Skipped normalized lines of unknown kind: {kinds}.")
+    return NormSession(
+        session_id=_required_text(session, "session_id", 1),
+        agent=_required_text(session, "agent", 1),
+        project=_optional_text(session.get("project")),
+        cwd=_optional_text(session.get("cwd")),
+        exchanges=tuple(exchanges),
+    )
+
+
+def _exchange(data: dict[str, Any], number: int, parse_at: Callable[[str], datetime]) -> NormExchange:
+    closed = data.get("closed")
+    if not isinstance(closed, bool):
+        raise NormalizedInputError(f"Line {number}: exchange closed must be true or false.")
+    tools_value = data.get("tools") or {}
+    if not isinstance(tools_value, dict):
+        raise NormalizedInputError(f"Line {number}: exchange tools must be an object.")
+    tools = tuple(
+        (str(name), count if isinstance(count, int) and not isinstance(count, bool) else 0)
+        for name, count in sorted(tools_value.items())
+    )
+    files_value = data.get("files_touched") or []
+    if not isinstance(files_value, list):
+        raise NormalizedInputError(f"Line {number}: exchange files_touched must be a list.")
+    errors = data.get("errors")
+    return NormExchange(
+        exchange_id=_required_text(data, "exchange_id", number),
+        seq=data.get("seq") if isinstance(data.get("seq"), int) else 0,
+        agent_scope=_required_text(data, "agent_scope", number),
+        subagent_type=_optional_text(data.get("subagent_type")),
+        started_at=_optional_at(data.get("started_at"), parse_at),
+        ended_at=_optional_at(data.get("ended_at"), parse_at),
+        closed=closed,
+        tools=tools,
+        files=tuple(str(item) for item in files_value if isinstance(item, str) and item),
+        errors=errors if isinstance(errors, int) and not isinstance(errors, bool) else 0,
+        outcome=_optional_text(data.get("outcome")) or "open",
+    )
+
+
+def _turn(data: dict[str, Any], number: int, parse_at: Callable[[str], datetime]) -> NormTurn:
+    at_value = _required_text(data, "at", number)
+    try:
+        at = parse_at(at_value)
+    except ValueError:
+        raise NormalizedInputError(f"Line {number}: turn at {at_value!r} is not a time.") from None
+    actions = data.get("actions") or []
+    if not isinstance(actions, list):
+        raise NormalizedInputError(f"Line {number}: turn actions must be a list.")
+    text = data.get("text")
+    return NormTurn(
+        turn_id=_required_text(data, "turn_id", number),
+        exchange_id=_required_text(data, "exchange_id", number),
+        role=_required_text(data, "role", number),
+        turn_kind=_required_text(data, "turn_kind", number),
+        at=at,
+        text=text if isinstance(text, str) else "",
+        actions=tuple(item for item in actions if isinstance(item, dict)),
+    )
+
+
+def _required_text(data: dict[str, Any], key: str, number: int) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value:
+        raise NormalizedInputError(f"Line {number}: {data.get('kind')} field {key} must be a one-line string.")
+    return value
+
+
+def _optional_text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _optional_at(value: Any, parse_at: Callable[[str], datetime]) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return parse_at(value)
+    except ValueError:
+        return None
+
+
+# Cursor (spec 4.2.12)
+
+
+def select_part_exchanges(
+    session: NormSession,
+    *,
+    last_exchange_id: str | None,
+    last_turn_uuid: str | None,
+    last_turn_at: datetime | None,
+    warnings: list[str] | None = None,
+) -> list[PartExchange]:
+    """Pick the exchanges for the next part.
+
+    Start after the cursor: after the exchange last_exchange_id when it is in the input, else after
+    the turn last_turn_uuid, else after the time last_turn_at (with a warning). No cursor means the
+    whole input. Exchanges are taken in file order and the part stops before the first exchange that
+    is not closed, so a later capture never skips an exchange that closes late.
+    """
+    flat = [(index, turn) for index, exchange in enumerate(session.exchanges) for turn in exchange.turns]
+    keep: Callable[[int, int, NormTurn], bool]
+    exchange_ids = [exchange.exchange_id for exchange in session.exchanges]
+    if last_exchange_id is None and last_turn_uuid is None:
+        keep = lambda exchange_index, position, turn: True  # noqa: E731
+    elif last_exchange_id is not None and last_exchange_id in exchange_ids:
+        after = exchange_ids.index(last_exchange_id)
+        keep = lambda exchange_index, position, turn: exchange_index > after  # noqa: E731
+    elif last_turn_uuid is not None and any(turn.turn_id == last_turn_uuid for _, turn in flat):
+        cut = next(position for position, (_, turn) in enumerate(flat) if turn.turn_id == last_turn_uuid)
+        keep = lambda exchange_index, position, turn: position > cut  # noqa: E731
+    else:
+        if last_turn_at is None:
+            raise NormalizedInputError("The previous part has no usable cursor.")
+        if warnings is not None:
+            warnings.append(
+                f"Previous last_turn_uuid {last_turn_uuid} is not in the normalized file; keeping turns later than "
+                f"{last_turn_at.isoformat()}."
+            )
+        keep = lambda exchange_index, position, turn: turn.at > last_turn_at  # noqa: E731
+
+    chosen: list[PartExchange] = []
+    position = 0
+    for index, exchange in enumerate(session.exchanges):
+        written = []
+        for turn in exchange.turns:
+            if keep(index, position, turn):
+                written.append(turn)
+            position += 1
+        if not written:
+            continue
+        if not exchange.closed:
+            break
+        chosen.append(PartExchange(exchange, tuple(written), continued=len(written) < len(exchange.turns)))
+    return chosen
+
+
+# Rendering (spec 4.2.5)
+
+
+def render_v2_body(
+    exchanges: Iterable[PartExchange],
+    format_at: Callable[[datetime], str],
+    redact: Callable[[str], tuple[str, int]],
+    clean: Callable[[str], str],
+) -> tuple[str, int]:
+    """Render the part body and return it with the number of secrets replaced.
+
+    Main exchanges come first in file order, then subagent exchanges at the end of the file.
+    """
+    items = list(exchanges)
+    ordered = [item for item in items if not item.exchange.is_subagent] + [
+        item for item in items if item.exchange.is_subagent
+    ]
+    redactions = 0
+
+    def scrub(value: str) -> str:
+        nonlocal redactions
+        text, count = redact(value)
+        redactions += count
+        return text
+
+    blocks = [_render_exchange(item, format_at, scrub, clean) for item in ordered]
+    return "\n\n".join(blocks) + "\n", redactions
+
+
+def _render_exchange(
+    item: PartExchange,
+    format_at: Callable[[datetime], str],
+    scrub: Callable[[str], str],
+    clean: Callable[[str], str],
+) -> str:
+    exchange = item.exchange
+    turns = item.turns
+    texts = {turn.turn_id: clean(scrub(turn.text)) if turn.text else "" for turn in turns}
+    started = turns[0].at if item.continued else (exchange.started_at or turns[0].at)
+    ended = exchange.ended_at or turns[-1].at
+    short_id = exchange.exchange_id[:8]
+    if exchange.is_subagent:
+        heading = (
+            f"## Subagent {_one_line(exchange.agent_id)} · {_one_line(exchange.subagent_type or 'unknown')} · "
+            f"{format_at(started)} · {short_id}"
+        )
+    else:
+        if item.continued:
+            title = CONTINUED_TITLE
+        else:
+            human = next((turn for turn in turns if turn.turn_kind == HUMAN), None)
+            title = _title(texts[human.turn_id]) if human is not None else ""
+            title = title or "(no human text)"
+        heading = f"## {title} {format_at(started)} · {short_id}"
+
+    meta = [
+        f"id={_value(exchange.exchange_id)}",
+        f"scope={_value(exchange.agent_scope)}",
+        f"started={format_at(started)}",
+        f"ended={format_at(ended)}",
+        "tools=" + ",".join(f"{_value(name, ':,')}:{count}" for name, count in exchange.tools),
+        f"errors={exchange.errors}",
+        f"outcome={_value(exchange.outcome)}",
+        "files=" + ",".join(_value(scrub(name), ",") for name in exchange.files),
+    ]
+    if item.continued:
+        meta.append("continued=1")
+    lines = [heading, "<!-- vg:exchange " + " ".join(meta) + " -->"]
+
+    blocks: list[list[str]] = []  # [heading, text, action lines...]
+    for turn in turns:
+        actions = [_action_line(action, scrub) for action in turn.actions]
+        text = texts[turn.turn_id]
+        if turn.turn_kind == TOOL_ONLY and not text and blocks:
+            blocks[-1].extend(actions)
+            continue
+        role = "user" if turn.turn_kind == HUMAN else (
+            "assistant" if turn.turn_kind in ("assistant_text", TOOL_ONLY) else _one_line(turn.turn_kind)
+        )
+        block = [f"### {role} · {format_at(turn.at)} · {turn.turn_id[:8]}", _escape(text) if text else ""]
+        block.extend(actions)
+        blocks.append(block)
+
+    rendered = []
+    for block in blocks:
+        parts = [block[0]]
+        if block[1]:
+            parts.append(block[1])
+        if len(block) > 2:
+            parts.append("\n".join(block[2:]))
+        rendered.append("\n\n".join(parts))
+    return "\n".join(lines) + ("\n\n" + "\n\n".join(rendered) if rendered else "")
+
+
+def _action_line(action: dict[str, Any], scrub: Callable[[str], str]) -> str:
+    tool = _one_line(str(action.get("tool") or "unknown")) or "unknown"
+    line = f"- {tool}"
+    target = action.get("target")
+    if isinstance(target, str) and target.strip():
+        line += " " + _code(_one_line(scrub(target)))
+    if action.get("ok") is False:
+        head = action.get("error_head")
+        line += f" {FAILED_MARK}"
+        if isinstance(head, str) and head.strip():
+            line += ": " + _one_line(scrub(head))
+    return line
+
+
+def _title(text: str) -> str:
+    collapsed = _one_line(text)
+    return collapsed[:TITLE_CHARS].rstrip()
+
+
+def _one_line(value: str) -> str:
+    return _SPACE_RE.sub(" ", value).strip()
+
+
+def _code(value: str) -> str:
+    if "`" in value:
+        return f"`` {value} ``"
+    return f"`{value}`"
+
+
+def _escape(text: str) -> str:
+    """Keep turn text from looking like an exchange heading, turn heading or meta line."""
+    lines = []
+    for line in text.split("\n"):
+        line = _HEADING_LINE_RE.sub(r"\1\\\2", line, count=1)
+        line = _META_LINE_RE.sub(r"\1&lt;!--\2", line, count=1)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _value(value: str, extra_unsafe: str = "") -> str:
+    """Percent-encode one meta line value so spaces, commas and '-->' cannot break the line."""
+    safe = "".join(char for char in "/._-~:+@" if char not in extra_unsafe)
+    return quote(value, safe=safe)
+
+
+# Normalized capture (vault-graph request S10, spec 4.2.5 and 4.2.12)
+
+
+def capture_normalized(
+    values: Mapping[str, Any],
+    hook: Mapping[str, Any] | None,
+    env: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+) -> CaptureResult:
+    """Render the closed exchanges after the cursor of one normalized session file as a new v2 part.
+
+    With rerender, ignore the cursor and write every closed exchange as a new part after the highest
+    part. Existing files are never changed.
+    """
+    warnings: list[str] = []
+    rerender = bool(values.get("rerender"))
+
+    def skipped(message: str, manual_exit: int, vault: str | None = None) -> CaptureResult:
+        return CaptureResult("skipped", message, manual_exit, vault=vault, warnings=tuple(warnings))
+
+    source = Path(str(values["normalized"])).expanduser()
+    trigger = values.get("trigger") or (hook or {}).get("hook_event_name") or "manual"
+    if trigger not in TRIGGERS:
+        return skipped(f"Trigger {trigger!r} is not one of {', '.join(TRIGGERS)}; nothing written.", 1)
+    try:
+        session = read_normalized(source, parse_turn_at, warnings=warnings)
+    except OSError as exc:
+        return skipped(
+            f"Cannot read normalized file {display_home_path(source, env)}: {exc.strerror or exc}; nothing written.", 1
+        )
+    except NormalizedInputError as exc:
+        return skipped(f"Normalized file {display_home_path(source, env)}: {exc} Nothing written.", 1)
+    if session.agent not in SESSION_AGENTS:
+        return skipped(f"Agent {session.agent!r} is not one of {', '.join(SESSION_AGENTS)}; nothing written.", 1)
+    if not _SESSION_ID_RE.fullmatch(session.session_id):
+        return skipped(
+            f"Session id {session.session_id!r} has characters outside {SESSION_ID_PATTERN}; nothing written.", 1
+        )
+
+    cwd_value = values.get("cwd") or _text((hook or {}).get("cwd")) or session.cwd
+    cwd = _expand_home(cwd_value, env) if cwd_value else Path.cwd()
+    vault = values.get("vault")
+    request = CaptureRequest(
+        transcript_path=source,
+        session_id=session.session_id,
+        cwd=cwd,
+        trigger=trigger,
+        vault=Path(vault).expanduser() if vault else None,
+        from_hook=hook is not None,
+    )
+    selected = select_target_vault(request, env)
+    if isinstance(selected, CaptureSkip):
+        return skipped(selected.reason, selected.manual_exit)
+
+    collected_at = (now or _utc_now()).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    archive = selected.path / SESSION_ARCHIVE_DIR / session.agent
+    part = 1
+    for _ in range(_WRITE_ATTEMPTS):
+        try:
+            if rerender:
+                part = highest_part(selected.path, session.agent, session.session_id) + 1
+                chosen = select_part_exchanges(
+                    session, last_exchange_id=None, last_turn_uuid=None, last_turn_at=None, warnings=warnings
+                )
+            else:
+                cursor = find_previous_part(selected.path, session.agent, session.session_id, warnings=warnings)
+                part = cursor.part + 1 if cursor is not None else 1
+                chosen = select_part_exchanges(
+                    session,
+                    last_exchange_id=cursor.last_exchange_id if cursor else None,
+                    last_turn_uuid=cursor.last_turn_uuid if cursor else None,
+                    last_turn_at=parse_turn_at(cursor.last_turn_at) if cursor else None,
+                    warnings=warnings,
+                )
+        except CaptureStop as stop:
+            return skipped(stop.message, stop.manual_exit, selected.name)
+        except (NormalizedInputError, ValueError) as exc:
+            return skipped(f"{exc} Nothing written.", 1, selected.name)
+        if not chosen:
+            return CaptureResult("no-new-turns", "no new turns", 0, vault=selected.name, warnings=tuple(warnings))
+
+        first_turn = chosen[0].turns[0]
+        last_turn = chosen[-1].turns[-1]
+        turn_count = sum(len(item.turns) for item in chosen)
+        body, redactions = render_v2_body(chosen, format_turn_at, redact, _clean_text)
+        frontmatter: dict[str, Any] = {
+            "schema": SESSION_SCHEMA_V2,
+            "renderer": RENDERER,
+            "source_schema": SOURCE_SCHEMA,
+            "agent": session.agent,
+            "session_id": session.session_id,
+            "project": selected.project,
+            "cwd": display_home_path(cwd, env),
+            "part": part,
+            "first_exchange_id": chosen[0].exchange.exchange_id,
+            "last_exchange_id": chosen[-1].exchange.exchange_id,
+            "first_turn_uuid": first_turn.turn_id,
+            "first_turn_at": format_turn_at(first_turn.at),
+            "last_turn_uuid": last_turn.turn_id,
+            "last_turn_at": format_turn_at(last_turn.at),
+            "exchange_count": len(chosen),
+            "turn_count": turn_count,
+            "collected_at": collected_at,
+            "trigger": trigger,
+            "redactions": redactions,
+            "body_sha256": "",
+        }
+        try:
+            text = _session_text(frontmatter, body)
+        except ValueError as exc:
+            return skipped(f"{exc} Nothing written.", 1, selected.name)
+        relative = (
+            f"{SESSION_ARCHIVE_DIR}/{session.agent}/{first_turn.at.date().isoformat()}-{session.session_id}-part{part}.md"
+        )
+        if _part_taken(archive, session.session_id, part, session.agent):
+            continue
+        try:
+            written = write_new_file(selected.path / relative, text)
+        except OSError as exc:
+            return skipped(f"Cannot write {relative} in vault {selected.name}: {exc}; nothing written.", 1, selected.name)
+        if not written:
+            continue
+        return CaptureResult(
+            "written",
+            f"Wrote {relative} in vault {selected.name} ({len(chosen)} exchanges, {turn_count} turns, "
+            f"{redactions} redactions).",
+            0,
+            vault=selected.name,
+            path=relative,
+            turn_count=turn_count,
+            redactions=redactions,
+            warnings=tuple(warnings),
+            extra=(("schema", SESSION_SCHEMA_V2), ("part", part), ("exchange_count", len(chosen))),
+        )
+    return skipped(
+        f"Part {part} of session {session.session_id} was created by another capture again after one retry; "
+        "nothing written.",
+        1,
+        selected.name,
+    )
+
+
+def _read_optional_hook_json(stdin: TextIO | None) -> dict[str, Any] | None:
+    """Hook JSON on stdin, or None when stdin is a terminal or empty."""
+    if stdin is None or (hasattr(stdin, "isatty") and stdin.isatty()):
+        return None
+    text = stdin.read()
+    if not text.strip():
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CaptureStop(f"stdin is not JSON ({exc.msg}); nothing written.") from None
+    if not isinstance(data, dict):
+        raise CaptureStop("Hook JSON must be an object; nothing written.")
+    return data
+
+
+def _expand_home(value: str, env: Mapping[str, str] | None) -> Path:
+    """Expand a leading $HOME or ~ (normalized files may record the home folder as $HOME)."""
+    environ = os.environ if env is None else env
+    home = environ.get("HOME") or str(Path.home())
+    if value == "$HOME" or value.startswith("$HOME/"):
+        value = home + value[len("$HOME") :]
+    return Path(value).expanduser()
 
 
 def display_home_path(path: Path, env: Mapping[str, str] | None = None) -> str:
@@ -773,14 +1399,14 @@ def _contract_problem(vault_root: Path) -> str | None:
     return None
 
 
-def _part_taken(archive: Path, session_id: str, part: int) -> bool:
+def _part_taken(archive: Path, session_id: str, part: int, agent: str = CAPTURE_AGENT) -> bool:
     """True when any file already holds this part number, whatever date its name carries."""
     if not archive.is_dir():
         return False
     for path in archive.iterdir():
         if path.name.startswith("."):
             continue
-        parsed = parse_session_path(f"{SESSION_ARCHIVE_DIR}/{CAPTURE_AGENT}/{path.name}")
+        parsed = parse_session_path(f"{SESSION_ARCHIVE_DIR}/{agent}/{path.name}")
         if parsed is not None and parsed.session_id == session_id and parsed.part == part:
             return True
     return False
