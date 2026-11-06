@@ -198,6 +198,67 @@ class SetRoleTests(_MapCase):
                 self.assertEqual(before, self.digest())
 
 
+class SetSharableTests(_MapCase):
+    """set-sharable sets vaults.<name>.sharable (vault-graph request S4)."""
+
+    def test_set_sharable_true_adds_field_and_keeps_every_other_field(self) -> None:
+        result = self.cli("set-sharable", "--vault", "a", "--value", "true")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        expected = json.loads(json.dumps(self.initial))
+        expected["vaults"]["a"]["sharable"] = True
+        self.assertEqual(expected, self.read_map())
+        self.assertIn("sharable: true", result.stdout)
+
+    def test_set_sharable_false_writes_false(self) -> None:
+        result = self.cli("set-sharable", "--vault", "a", "--value", "false")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIs(False, self.read_map()["vaults"]["a"]["sharable"])
+
+    def test_set_sharable_again_keeps_bytes(self) -> None:
+        self.assertEqual(0, self.cli("set-sharable", "--vault", "a", "--value", "true").returncode)
+        before = self.digest()
+        result = self.cli("set-sharable", "--vault", "a", "--value", "true")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(before, self.digest())
+        self.assertIn("unchanged", result.stdout)
+
+    def test_set_sharable_clear_removes_only_that_field(self) -> None:
+        self.assertEqual(0, self.cli("set-sharable", "--vault", "a", "--value", "true").returncode)
+        result = self.cli("set-sharable", "--vault", "a", "--clear")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.initial, self.read_map())
+
+    def test_set_sharable_writes_a_temporary_file_then_renames_it(self) -> None:
+        with (
+            mock.patch.object(installing.os, "replace", wraps=os.replace) as replace,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            code = map_settings.set_sharable("a", True, environ=self.env())
+        self.assertEqual(0, code)
+        self.assertEqual(1, replace.call_count)
+        self.assertIs(True, self.read_map()["vaults"]["a"]["sharable"])
+
+    def test_set_sharable_refuses_unknown_vault_bad_value_and_wrong_options(self) -> None:
+        before = self.digest()
+        cases = (
+            ("--vault", "zzz", "--value", "true"),
+            ("--vault", "a", "--value", "yes"),
+            ("--vault", "a"),
+            ("--vault", "a", "--value", "true", "--clear"),
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                result = self.cli("set-sharable", *arguments)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(before, self.digest())
+        self.assertIn("a, t", self.cli("set-sharable", "--vault", "zzz", "--value", "true").stderr)
+
+    def test_link_and_set_role_keep_sharable(self) -> None:
+        self.assertEqual(0, self.cli("set-sharable", "--vault", "a", "--value", "true").returncode)
+        self.assertEqual(0, self.cli("set-role", "--vault", "a", "--role", "team").returncode)
+        self.assertIs(True, self.read_map()["vaults"]["a"]["sharable"])
+
+
 class LinkKeepsDefaultWriteTests(_MapCase):
     def _repo(self, name: str) -> Path:
         repo = self.tmp / name

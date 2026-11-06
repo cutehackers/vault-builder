@@ -305,6 +305,35 @@ def _project_summary_pages(
     return summaries
 
 
+def render_no_project_summary(root: Path) -> str:
+    """Render the project summary sections for open inbox items and pages that have no `project`.
+
+    Read-only. maps build does not write this text, so its output never depends on the vault map.
+    recall.sh prints it for a project when the vault map puts this vault's pages without `project`
+    in that project's scope (vault-graph spec 4.4.2, request S4).
+    """
+    project_dir = _project_map_dir(root)
+    pages = [page for page in _load_wiki_pages(root / "wiki") if page.path.parent != project_dir]
+    open_items = [item for item in load_inbox_items(root) if item.is_open and not project_ids(item.project)]
+    decisions: list[Page] = []
+    corrections: list[Page] = []
+    for page in pages:
+        frontmatter = page.frontmatter or {}
+        if project_ids(frontmatter.get("project")):
+            continue
+        if _page_type(page) == "decision" and str(frontmatter.get("status")) not in NOT_CURRENT_STATUSES:
+            decisions.append(page)
+        if PROJECT_CORRECTION_TAGS & set(_as_string_list(frontmatter.get("tags", []))):
+            corrections.append(page)
+    open_items = sorted(sorted(open_items, key=lambda item: item.line), key=lambda item: item.date, reverse=True)
+    sections = [
+        [f"- [[inbox]] — {item.title} ({item.status})" for item in open_items],
+        _project_page_lines(root, decisions),
+        _project_page_lines(root, corrections),
+    ]
+    return _render_project_summary("(no project)", sections)
+
+
 def _project_page_lines(root: Path, pages: list[Page]) -> list[str]:
     ordered = sorted(
         sorted(pages, key=lambda page: display_path(page.path, root)),

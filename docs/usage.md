@@ -738,7 +738,7 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 
 저장소가 어느 project 항목에 해당하는지는 17.3의 project 찾기 순서(root 경로, remote URL, 폴더 이름)로 정합니다. `link` 명령으로 새 항목을 만들면 project id는 기본으로 저장소 root 폴더 이름입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다.
 
-저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
+저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. 여러 저장소에 연결된 vault의 `project` 없는 페이지를 모든 연결 저장소의 요약에 넣으려면 `vault-builder set-sharable --vault <이름> --value true` 명령으로 `sharable` 값을 정합니다(17.5). 상한 값 같은 다른 설정 key는 두지 않습니다.
 
 ### 17.2 vault 역할
 
@@ -867,6 +867,14 @@ L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니�
 | `open` | 남은 일 |
 | `decisions` | 현재 결정 |
 | `corrections` | 교정과 작업 규칙 |
+
+요약에 들어가는 페이지는 vault마다 아래 규칙으로 정합니다(`docs/contracts/vault-map-v2.md`).
+
+1. frontmatter `project` 값이 이 저장소의 project id인 페이지와 남은 일은 요약 페이지 `wiki/maps/projects/<project id>.md`에서 읽습니다.
+2. `project`가 없는 페이지와 남은 일은 그 vault를 연결한 project가 이 저장소 하나뿐일 때 넣습니다.
+3. 그 vault를 연결한 project가 둘 이상이면 연결 설정의 `sharable` 값이 `true`일 때만 넣습니다. 값이 없으면 넣지 않습니다. `vault-builder set-sharable --vault <이름> --value true|false` 명령으로 정하고, `--clear` 옵션으로 지웁니다.
+
+2와 3의 항목은 recall 스크립트가 그 vault의 읽기 전용 명령 `python3 tools/wiki/cli.py maps no-project-summary`를 실행해 읽고, 같은 섹션의 1 항목 뒤에 붙입니다. 이 명령이 없는 이전 vault 도구이면 그 사실을 한 줄로 알리고 1 항목만 출력합니다. `maps build`가 쓰는 요약 페이지는 연결 설정과 상관없이 같습니다.
 
 섹션 하나만 요청하면 출력은 추정 token 750 이하입니다. 연결된 vault가 여러 개면 vault마다 vault 이름과 요약 페이지 경로를 담은 머리 줄이 붙습니다. 합계가 상한을 넘으면 상한을 vault 수로 나눠 vault마다 줄 단위로 자르고, 잘렸다는 줄을 하나 붙입니다. 각 줄 끝의 `wiki/...` 경로는 근거 페이지이며, 필요할 때만 열어 읽습니다.
 
@@ -1153,6 +1161,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 연결 상태 확인 (읽기 전용) | `vault-builder list --repo /path/to/my-app` |
 | 기본 쓰기 vault 정하기 | `vault-builder set-default-write --project my-app --vault app` |
 | vault 역할 바꾸기 | `vault-builder set-role --vault app --role project` |
+| 여러 저장소가 쓰는 vault의 `project` 없는 페이지를 모든 연결 저장소 요약에 넣기 | `vault-builder set-sharable --vault personal --value true` |
 | project 요약 불러오기 (Claude Code 세션) | `/project-memory [open\|decisions\|corrections]` |
 | vault 밖 파일 설치 | `vault-builder install /path/to/vault --name personal --with-hooks` |
 | 모든 vault와 hook, vg 점검 (읽기 전용) | `vault-builder doctor` |

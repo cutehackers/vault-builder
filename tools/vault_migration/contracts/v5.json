@@ -6,7 +6,7 @@
       "mode": "0644",
       "path": ".agents/skills/memory-cleanup/SKILL.md",
       "policy": "replace-if-unmodified",
-      "sha256": "3ceade1c702bd7037655b4b17067584b4ea013616b75493370e0e66416752dcf"
+      "sha256": "25d39c9c57bc5a8c1277ca3d083b483980565b752ede2e2169e0b215ac2c09da"
     },
     ".agents/skills/session-capture/SKILL.md": {
       "mode": "0644",
@@ -132,7 +132,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "257b5718cc41f41a6e629311d18ecbaaabae0fd0e000bebb02ad111e7a48d5ce"
+      "sha256": "e23177bbc1ae43c449a7d26ef59bbf49117e713b05d43a8840e34cc68c236e41"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -192,7 +192,7 @@
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "b1850f09abe08c2a4acfadb2623ef7c1e342b11df2976c1ef637add081517839"
+      "sha256": "29832953d760c86f0bb500d36361d6e62f885da2d58d5b709d1232b92e40d6a8"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -258,7 +258,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/maps.py",
       "policy": "replace-if-unmodified",
-      "sha256": "0f34118d568088dc20063c816f4a9112991af5541bc1b7f3be08c170d57c636f"
+      "sha256": "2666d26af851cc1f85387fbb42732b38367dfe1087e349190041f703683294c2"
     },
     "tools/wiki/lib/memory_fields.py": {
       "mode": "0644",

@@ -1,4 +1,4 @@
-"""set-default-write and set-role: edit project and vault settings in the link config (contract 5).
+"""set-default-write, set-role, and set-sharable: edit project and vault settings in the link config (contract 5).
 
 The owner uses these commands instead of editing vault-map.json by hand. Each command reads the link config
 with the router's format check, changes one field, keeps every other field, and writes the file through a
@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from tools.vault_migration.linking import _load, _Refused, _write, default_write_from_project_role
 
 DEFAULT_WRITE_FIELD = "default_write_vault"
+SHARABLE_FIELD = "sharable"
 
 
 def set_default_write(
@@ -73,6 +74,32 @@ def set_role(vault: str, role: str, *, environ: Mapping[str, str] = os.environ) 
         for project_id, entry in data["projects"].items():
             if vault in entry["vaults"]:
                 default_write_from_project_role(data, project_id, command)
+        _write(path, data, False, command)
+        return 0
+    except _Refused as exc:
+        print(f"{command}: {exc}", file=sys.stderr)
+        return 1
+
+
+def set_sharable(vault: str, value: bool | None, *, environ: Mapping[str, str] = os.environ) -> int:
+    """Set vaults.<vault>.sharable to true or false, or remove it when value is None (vault-graph request S4).
+
+    A missing field means false. It matters only for a vault linked to two or more projects: true puts that
+    vault's pages without `project` into every linked project's session memory.
+    """
+    command = "set-sharable"
+    try:
+        path, data = _load(environ)
+        vaults = data["vaults"]
+        if vault not in vaults:
+            names = ", ".join(sorted(vaults)) or "none"
+            raise _Refused(f"Vault {vault} is not in the link config. Vaults: {names}.")
+        if value is None:
+            vaults[vault].pop(SHARABLE_FIELD, None)
+            print(f"{command}: vault {vault} has no sharable field (read as false).")
+        else:
+            vaults[vault][SHARABLE_FIELD] = value
+            print(f"{command}: vault {vault} sharable: {'true' if value else 'false'}")
         _write(path, data, False, command)
         return 0
     except _Refused as exc:

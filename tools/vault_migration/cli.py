@@ -29,7 +29,7 @@ from tools.vault_migration.versioning import read_version
 from tools.vault_migration import onboarding
 from tools.vault_migration.installing import install
 from tools.vault_migration.linking import link, list_links, unlink
-from tools.vault_migration.map_settings import set_default_write, set_role
+from tools.vault_migration.map_settings import set_default_write, set_role, set_sharable
 from tools.vault_migration.uninstalling import doctor, uninstall, uninstall_all
 from tools.vault_migration.manifests import create_manifest, load_manifest, write_manifest
 from tools.vault_migration.models import MigrationPlan
@@ -632,6 +632,14 @@ def _build_parser() -> argparse.ArgumentParser:
     role_parser = subcommands.add_parser("set-role")
     role_parser.add_argument("--vault", required=True)
     role_parser.add_argument("--role", required=True)
+    sharable_parser = subcommands.add_parser(
+        "set-sharable",
+        help="Set whether a vault linked to several projects shares its pages without project with all of them.",
+    )
+    sharable_parser.add_argument("--vault", required=True)
+    sharable_choice = sharable_parser.add_mutually_exclusive_group(required=True)
+    sharable_choice.add_argument("--value", choices=("true", "false"))
+    sharable_choice.add_argument("--clear", action="store_true")
     return parser
 
 
@@ -809,10 +817,12 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             print(f"setup: {exc}", file=sys.stderr)
             return 1
-    if args.command in {"set-default-write", "set-role"}:
+    if args.command in {"set-default-write", "set-role", "set-sharable"}:
         try:
             if args.command == "set-default-write":
                 return set_default_write(args.project, vault=args.vault, clear=args.clear)
+            if args.command == "set-sharable":
+                return set_sharable(args.vault, None if args.clear else args.value == "true")
             return set_role(args.vault, args.role)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"{args.command}: {exc}", file=sys.stderr)

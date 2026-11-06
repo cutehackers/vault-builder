@@ -29,7 +29,7 @@ from tools.wiki.lib.lint import (
     validate_provenance,
     validate_source_hash,
 )
-from tools.wiki.lib.maps import build_navigation_maps
+from tools.wiki.lib.maps import build_navigation_maps, render_no_project_summary
 from tools.wiki.lib.memory_scan import MemoryScanError, render_memory_scan, scan_memory
 from tools.wiki.lib.merge import scan_merge_candidates
 from tools.wiki.lib.metrics import build_maintenance_metrics
@@ -173,6 +173,13 @@ def main(argv: list[str] | None = None) -> int:
     maps_build.add_argument("--report", nargs="?", const="__default__")
     maps_build.add_argument("--dry-run", action="store_true")
     maps_build.add_argument("--check", action="store_true")
+    maps_subcommands.add_parser(
+        "no-project-summary",
+        description=(
+            "Print the project summary sections for open inbox items and pages without project. "
+            "Read-only; recall.sh uses it for the project scope rule."
+        ),
+    )
 
     workflow_cmd = subcommands.add_parser("workflow")
     workflow_subcommands = workflow_cmd.add_subparsers(dest="workflow_command", required=True)
@@ -696,6 +703,9 @@ def _handle_merge(args: argparse.Namespace) -> int:
 
 
 def _handle_maps(args: argparse.Namespace) -> int:
+    if args.maps_command == "no-project-summary":
+        sys.stdout.write(render_no_project_summary(ROOT))
+        return 0
     try:
         if args.maps_command == "build":
             if args.dry_run and args.check:

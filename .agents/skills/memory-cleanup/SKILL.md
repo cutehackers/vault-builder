@@ -23,6 +23,16 @@ Wiki/Git = durable state
 
 Never edit, move, or delete L1 memory files. Read them only. The vault map `<config dir>/vault-builder/vault-map.json` (`<config dir>` is `CLAUDE_CONFIG_DIR`, else `$HOME/.claude`) lists vaults by name with `path` and `role`, and projects by project id with `root` and `vaults`. Do not keep a separate state file; the source pages' `raw_sha256` values are the record of what was imported.
 
+## Project Scope
+
+When you compare a note with existing pages of a project, or decide whether a page already covers this project, a page is in the project's scope by these rules (vault-graph spec 4.4.2):
+
+1. A page whose `project` names this project is in scope. A page whose `project` names only other projects is not.
+2. A page without `project` is in scope when its vault is linked to this project only in the vault map.
+3. A page without `project` in a vault linked to two or more projects is in scope only when that vault has `sharable: true` in the vault map. A missing or non-boolean `sharable` is false.
+
+`python3 tools/wiki/cli.py maps no-project-summary` lists this vault's pages without `project`.
+
 ## Workflow
 
 1. Run `python3 tools/wiki/cli.py memory-scan --json` (add `--project <id>` for one project). It is read-only. It lists each linked project's notes with `sha256`, note `type`, `raw_name`, and `imported`. Exit 1 means the vault map is missing or does not list this vault; report the line and stop.
