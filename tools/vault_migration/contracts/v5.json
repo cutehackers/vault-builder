@@ -78,7 +78,7 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "b79c9f5f69fa5aec86041e2eacb4d14564b7e9a92a25569c89777b89fa0ca4e6"
+      "sha256": "763dc56cba1dbe11b6740d2f9fc0a841274181dbfdab53764b708219027d851c"
     },
     "CLAUDE.md": {
       "mode": "0644",
@@ -126,13 +126,13 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "5857f0e81668e2745ab65b30a116017faa430780a7764dea38ff826bb7e2a750"
+      "sha256": "2d9e4c0095e097b9e671be433ea005d0ff1f2edab4dced51cd2abcfcd10f059b"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "ef98177ebb4128d6860100101ddd335ca142a1ef0a1a5dd729d929bf86c2df03"
+      "sha256": "04802bc0210fae61d2b57b1400b9b28e92b2b0927b73d6192a07eeea6ea32c9e"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -312,7 +312,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/schema.py",
       "policy": "replace-if-unmodified",
-      "sha256": "9af575d475b47084fc41fd65487eb0181f9afdb2ba550e30551ad12acf6b42ba"
+      "sha256": "2b165f067af13358d0bdcf93b0875aea587bc1181dea5cf8c0ab436c1bdad56c"
     },
     "tools/wiki/lib/search.py": {
       "mode": "0644",
@@ -390,7 +390,7 @@
       "mode": "0644",
       "path": "tools/wiki/templates/frontmatter.yaml",
       "policy": "replace-if-unmodified",
-      "sha256": "67818304853b04cd91eb37326288b77b5b67b43434d25d6566797daf10750cb5"
+      "sha256": "80b885ddd340be70a75388ea3c0a7ddc4c2088faccb231d9ef22a0bd70cb6374"
     }
   },
   "schema_version": 1

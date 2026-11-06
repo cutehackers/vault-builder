@@ -36,6 +36,9 @@ SECTION_HEADINGS = {
     "corrections": "## Corrections and Rules",
 }
 USAGE = "usage: recall.sh [open|decisions|corrections]"
+# A project brief (vault-graph request S9): wiki/projects/<project id>.md. Printed first, without a section argument.
+BRIEF_HEADING = "## Project Brief"
+BRIEF_MAX_TOKENS = 400
 PREFIX = "project-memory: "
 NO_PROJECT_TIMEOUT_S = 10
 
@@ -314,7 +317,26 @@ def read_sections(text, wanted):
     return found
 
 
-def vault_block(name, vault_path, project_id, wanted, no_project=False):
+def brief_block(vault_path, project_id):
+    """The brief body lines under BRIEF_HEADING, cut by whole lines to BRIEF_MAX_TOKENS. None without a brief."""
+    try:
+        text = (vault_path / "wiki" / "projects" / f"{project_id}.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    lines = [line for line in page_body(text).strip("\n").splitlines() if not line.startswith("# ")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    kept = [BRIEF_HEADING, ""]
+    for line in lines:
+        if estimate_tokens("\n".join(kept + [line])) > BRIEF_MAX_TOKENS:
+            break
+        kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return kept if len(kept) > 2 else None
+
+
+def vault_block(name, vault_path, project_id, wanted, no_project=False, brief=False):
     """Return (header, sections, notes) for one vault, or (None, None, notes) when it is skipped.
 
     With no_project, the items of pages without `project` are added after the summary page items.
@@ -333,10 +355,11 @@ def vault_block(name, vault_path, project_id, wanted, no_project=False):
                 for key, block in read_sections(extra_text, wanted).items()
                 if any(line.strip() and line.strip() != "- (none)" for line in block[1:])
             }
+    brief_lines = brief_block(vault_path, project_id) if brief else None
     try:
         text = page.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        if not extra:
+        if not extra and brief_lines is None:
             return None, None, notes + [f"{PREFIX}skipped vault {name}: no summary page {page}; run maps build there."]
         text = ""
     sections = read_sections(text, wanted)
@@ -347,10 +370,11 @@ def vault_block(name, vault_path, project_id, wanted, no_project=False):
         for key in wanted
         if key not in sections
     ]
-    if not sections:
+    if not sections and brief_lines is None:
         return None, None, notes
     header = f"# vault {name}: {page}" if text else f"# vault {name}: pages without project"
-    return header, [sections[key] for key in wanted if key in sections], notes
+    blocks = [brief_lines] if brief_lines is not None else []
+    return header, blocks + [sections[key] for key in wanted if key in sections], notes
 
 
 def render_block(header, sections):
@@ -403,7 +427,9 @@ def recall(arguments):
     blocks = []
     for name, vault_path in vaults:
         no_project = includes_no_project_pages(data, name)
-        header, sections, block_notes = vault_block(name, vault_path, project_id, wanted, no_project)
+        header, sections, block_notes = vault_block(
+            name, vault_path, project_id, wanted, no_project, brief=len(wanted) == len(SECTION_HEADINGS)
+        )
         notes.extend(block_notes)
         if header is not None:
             blocks.append((header, sections))

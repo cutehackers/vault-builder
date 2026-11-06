@@ -102,6 +102,7 @@ The human should not have to manually maintain backlinks, index entries, page pl
 | `wiki/workflows/` | Agent | Mutable | Repeatable processes the human or agent follows. |
 | `wiki/decisions/` | Agent | Mutable | Architectural decisions and knowledge-management decisions. |
 | `wiki/maps/` | Agent | Mutable | Generated reading paths and navigational maps, not durable claim authorities. |
+| `wiki/projects/` | Agent | Mutable | One project brief per project: `wiki/projects/<project>.md` with `type: project`. |
 | `scratch/drafts/` | Agent | Ephemeral | LLM-generated semantic drafts before deterministic validation. Never cite as durable source truth. |
 | `scratch/reports/` | Agent | Mutable | Ingest reports, query reports, lint reports, audit reports, proposed patches. |
 | `scratch/review/` | Human/Agent | Ephemeral | Pending human-judgment items for contested claims, merges, and unresolved decisions. |
@@ -290,6 +291,9 @@ good: specification-drift.md
 | `workflow` | `wiki/workflows/` | `ingest-new-source.md` |
 | `decision` | `wiki/decisions/` | `use-obsidian-as-wiki-ide.md` |
 | `map` | `wiki/maps/` | `llm-wiki-operating-map.md` |
+| `project` | `wiki/projects/<project>.md` only | `vault-graph.md` |
+
+A `project` page is the brief of one project: its goal, structure, constraints to keep, and next steps. Its path is `wiki/projects/<project>.md`, its frontmatter `project` is that one project id, and every page directly in `wiki/projects/` has `type: project`. Validation reports `project-page-path` otherwise. Agents write it through `publish-draft` like any other page. The generated summaries under `wiki/maps/projects/` are `map` pages, not briefs.
 
 Optional page types may live in the nearest default folder until they become numerous enough to deserve their own folder.
 
@@ -309,7 +313,7 @@ Every wiki page must start with YAML frontmatter.
 
 ```yaml
 title: "Human-readable title"
-type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview
+type: source | concept | entity | system | workflow | decision | map | claim | comparison | timeline | question | glossary | index | log | inbox | overview | project
 status: seed | active | stable | contested | deprecated
 created: YYYY-MM-DD
 updated: YYYY-MM-DD

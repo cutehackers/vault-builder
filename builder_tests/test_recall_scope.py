@@ -46,7 +46,7 @@ def _vault_with_tools(path: Path) -> Path:
     return path
 
 
-class RecallScopeTests(unittest.TestCase):
+class _RecallCase(unittest.TestCase):
     def setUp(self) -> None:
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
@@ -78,6 +78,8 @@ class RecallScopeTests(unittest.TestCase):
         return subprocess.run([str(self.script), *arguments], cwd=self.repo, text=True, capture_output=True,
                               check=False, env=env, timeout=60)
 
+
+class RecallScopeTests(_RecallCase):
     def test_vault_linked_to_this_project_only_shows_pages_without_project(self):
         self.write_map({"sample-app": ["personal"]})
         result = self.recall()
@@ -109,6 +111,46 @@ class RecallScopeTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(SHARED_DECISION, result.stdout)
         self.assertIn("# vault personal: pages without project", result.stdout)
+
+
+class RecallBriefTests(_RecallCase):
+    """recall.sh prints the project brief wiki/projects/<project id>.md first (vault-graph request S9)."""
+
+    def write_brief(self, body: str) -> None:
+        brief = self.vault / "wiki" / "projects" / "sample-app.md"
+        brief.parent.mkdir(parents=True)
+        brief.write_text(
+            "---\ntitle: \"Sample App Brief\"\ntype: project\nproject: sample-app\n---\n\n# Sample App Brief\n\n" + body,
+            encoding="utf-8",
+        )
+
+    def test_brief_comes_first_without_a_section_argument(self):
+        self.write_map({"sample-app": ["personal"]})
+        self.write_brief("Goal: ship v1.\n\nNext: write the parser.\n")
+        result = self.recall()
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual("## Project Brief", lines[2])
+        self.assertIn("Goal: ship v1.", result.stdout)
+        self.assertLess(result.stdout.index("Next: write the parser."), result.stdout.index("## Open Work"))
+        self.assertNotIn("# Sample App Brief", result.stdout)
+
+    def test_section_argument_leaves_the_brief_out(self):
+        self.write_map({"sample-app": ["personal"]})
+        self.write_brief("Goal: ship v1.\n")
+        result = self.recall("open")
+        self.assertNotIn("Project Brief", result.stdout)
+
+    def test_long_brief_is_cut_by_whole_lines(self):
+        self.write_map({"sample-app": ["personal"]})
+        self.write_brief("".join(f"Line {index} of the brief with some words in it.\n" for index in range(200)))
+        result = self.recall()
+        self.assertIn("Line 0 of the brief", result.stdout)
+        self.assertNotIn("Line 199 of the brief", result.stdout)
+
+    def test_without_brief_output_has_no_brief_heading(self):
+        self.write_map({"sample-app": ["personal"]})
+        self.assertNotIn("Project Brief", self.recall().stdout)
 
 
 if __name__ == "__main__":

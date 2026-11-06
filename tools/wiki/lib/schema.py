@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .frontmatter import Page
@@ -44,7 +45,12 @@ ALLOWED_TYPES = {
     "log",
     "inbox",
     "overview",
+    "project",
 }
+# A project brief (vault-graph request S9) lives at wiki/projects/<project>.md and names that project.
+PROJECT_TYPE = "project"
+PROJECT_PAGE_DIR = "projects"
+_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # Same as lint.PROJECT_ID_PATTERN.
 
 ALLOWED_STATUS = {"seed", "active", "stable", "contested", "deprecated", "retired"}
 # Pages with these statuses are not current. `deprecated` has a replacement in superseded_by.
@@ -138,8 +144,36 @@ def validate_schema(page: Page) -> list[Issue]:
     _validate_type(issues, page, "source_count", frontmatter.get("source_count"), int)
     _validate_type(issues, page, "tags", frontmatter.get("tags"), list)
     _validate_type(issues, page, "related", frontmatter.get("related"), list)
+    issues.extend(_validate_project_page_path(page))
 
     return issues
+
+
+def _in_project_page_dir(page: Page) -> bool:
+    parent = page.path.parent
+    return parent.name == PROJECT_PAGE_DIR and parent.parent.name == "wiki"
+
+
+def _validate_project_page_path(page: Page) -> list[Issue]:
+    """type project <=> wiki/projects/<project>.md, where <project> is the page's one project id."""
+    frontmatter = page.frontmatter or {}
+    is_project_type = frontmatter.get("type") == PROJECT_TYPE
+    in_dir = _in_project_page_dir(page)
+    if not is_project_type and not in_dir:
+        return []
+    project = frontmatter.get("project")
+    problem = None
+    if not is_project_type:
+        problem = f"Pages in wiki/{PROJECT_PAGE_DIR}/ must have type {PROJECT_TYPE}."
+    elif not in_dir:
+        problem = f"A {PROJECT_TYPE} page must be at wiki/{PROJECT_PAGE_DIR}/<project>.md."
+    elif not isinstance(project, str) or not _PROJECT_ID.match(project):
+        problem = f"A {PROJECT_TYPE} page needs one project id in project, not {project!r}."
+    elif page.path.stem != project:
+        problem = f"A {PROJECT_TYPE} page for project {project} must be named {project}.md, not {page.path.name}."
+    if problem is None:
+        return []
+    return [Issue(severity="error", code="project-page-path", path=str(page.path), message=problem)]
 
 
 def _validate_enum(
