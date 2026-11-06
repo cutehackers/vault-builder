@@ -1444,7 +1444,7 @@ Frontmatter fields, all required, in this order:
 
 | Field | Value |
 |---|---|
-| `schema` | `vault-session/v1` |
+| `schema` | `vault-session/v1` (v2 below) |
 | `agent` | `claude-code` |
 | `session_id` | Session id |
 | `project` | Vault-map project id. Empty string when `--vault` picked the vault and no project matched. |
@@ -1469,12 +1469,49 @@ Body:
 - Line endings become `\n`, trailing spaces and tabs are removed, and the file ends with one `\n`.
 - Known secret patterns (PEM private keys, `Authorization`/`Bearer` values, known token prefixes, values of secret-named keys, URL passwords) become `[REDACTED:<kind>]`. Patterns outside this list can remain.
 
+#### Session file v2 (`vault-session/v2`)
+
+`sessions capture --normalized <file>` renders a vault-graph normalized session file (`vg-session-jsonl/1`: one `session` line, then each `exchange` line followed by its `turn` lines) as one new part in this format. vault-graph decides when to run it and which normalized file to pass; this vault tool picks the vault, renders, and writes. The path rule is the same as v1.
+
+Frontmatter fields, all required, in this order: `schema` (`vault-session/v2`), `renderer` (`vg-session-md/2.0`), `source_schema` (`vg-session-jsonl/1`), `agent`, `session_id`, `project`, `cwd`, `part`, `first_exchange_id`, `last_exchange_id`, `first_turn_uuid`, `first_turn_at`, `last_turn_uuid`, `last_turn_at`, `exchange_count`, `turn_count`, `collected_at`, `trigger`, `redactions`, `body_sha256`. The fields shared with v1 mean the same. `first_*` and `last_*` follow the normalized file order.
+
+Body grammar:
+
+```text
+## <first human turn, first 60 chars on one line> <exchange start UTC time> · <exchange id first 8 chars>
+<!-- vg:exchange id=<id> scope=<main|subagent:<agent id>> started=<UTC> ended=<UTC> tools=<name:count,...> errors=<n> outcome=<value> files=<path,...>[ continued=1] -->
+
+### <user|assistant|notification|meta|compact_summary> · <turn UTC time> · <turn id first 8 chars>
+
+<turn text>
+
+- <tool> `<target>`
+- <tool> `<target>` → 실패: <error first line>
+```
+
+- Main exchanges come in file order. Subagent exchanges come after them at the end of the file, each with the heading `## Subagent <agent id> · <subagent type> · <start time> · <exchange id first 8 chars>` and its own meta line.
+- The heading role is `user` for a `human` turn and `assistant` for `assistant_text`. Other `turn_kind` values are written as they are.
+- A `tool_only` turn with no text gets no heading. Its action lines go under the turn above it in the same exchange. Without a turn above, it gets an `assistant` heading.
+- Meta line values are percent-encoded (spaces, commas, `-->` cannot appear). Tool lists are sorted by name. `files` comes from `files_touched`.
+- A turn text line that starts with `#` gets a `\` before the `#`, and a line that starts with `<!-- vg:` gets `&lt;!--`, so turn text never looks like a heading or a meta line.
+- Secrets are replaced again with the v1 rules while rendering (turn text, action targets, error lines, file names). `redactions` counts these replacements.
+- The same normalized input, `collected_at`, and `trigger` always give the same bytes. The body never depends on `collected_at` or `trigger`.
+
+Which exchanges go into a part (part number and cursor):
+
+- Only closed exchanges (`closed: true`). Exchanges are taken in file order after the cursor, and the part stops before the first exchange that is not closed, so an exchange never spans two files and none is skipped.
+- Part numbers run across v1 and v2 together: the new part is the highest existing part of the session + 1.
+- The cursor is the highest part's frontmatter. A v2 part continues after `last_exchange_id`. A v1 part has no `last_exchange_id`, so the next part continues after the turn `last_turn_uuid`. When that uuid is not in the normalized file, the part keeps turns later than `last_turn_at` and prints a warning.
+- When the cursor falls inside an exchange, the part writes the rest of it as a continued exchange: the heading title is `(이전 파트에서 이어짐)`, the meta line ends with `continued=1`, and `started` is the time of the first turn written in this part. The exchange id stays the id from the normalized file.
+- `--rerender` ignores the cursor and writes every closed exchange (same stop rule) as a new part after the highest part. Existing files stay as they are. It exists only for moving sessions whose transcripts still exist to v2.
+- No new closed exchange: nothing is written and the status is `no-new-turns`.
+
 Archive check (`lint`, `health`; no Git needed. The release gate runs it through `lint`):
 
 | Code | Condition |
 |---|---|
 | `session-file-invalid-path` | A file in the archive does not match the path format, including non-`.md` files. Files starting with `.` are ignored. |
-| `session-file-invalid-frontmatter` | Frontmatter is missing, a required field is missing, `schema` is unknown, or the path's session id or part differs from the frontmatter. |
+| `session-file-invalid-frontmatter` | Frontmatter is missing, a required field of its `schema` (v1 or v2) is missing, `schema` is unknown, or the path's session id or part differs from the frontmatter. |
 | `session-file-hash-mismatch` | The recomputed body hash differs from `body_sha256`. |
 | `session-part-duplicate` | Two files have the same agent, session id, and part number. |
 | `session-source-page-forbidden` | A `wiki/sources/` page has a `canonical_source` inside `raw/sessions/`. |

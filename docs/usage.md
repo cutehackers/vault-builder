@@ -1016,10 +1016,13 @@ Claude Code는 대화 파일(transcript)을 기본 30일 뒤에 지웁니다. `s
 
 `sessions capture [--transcript PATH] [--session-id ID] [--cwd PATH] [--trigger PreCompact|SessionEnd|manual] [--vault PATH] [--json]`
 
-입력은 두 형태입니다.
+`sessions capture --normalized PATH [--rerender] [--cwd PATH] [--trigger ...] [--vault PATH] [--json]`
 
-- 훅 형태: `--transcript` 옵션이 없으면 stdin에서 Claude Code 훅 JSON 한 개를 읽습니다. 이 JSON의 `session_id`, `transcript_path`, `cwd`, `hook_event_name` 값을 씁니다. `hook_event_name` 값이 trigger가 됩니다. 훅은 이 명령을 인자 없이 호출하면 됩니다.
+입력은 세 형태입니다.
+
+- 훅 형태: `--transcript`와 `--normalized` 옵션이 없으면 stdin에서 Claude Code 훅 JSON 한 개를 읽습니다. 이 JSON의 `session_id`, `transcript_path`, `cwd`, `hook_event_name` 값을 씁니다. `hook_event_name` 값이 trigger가 됩니다. 훅은 이 명령을 인자 없이 호출하면 됩니다.
 - 수동 형태: `--transcript PATH` 옵션으로 transcript 파일을 지정합니다. session id는 `--session-id` 값이고, 없으면 파일 이름에서 확장자를 뺀 값입니다. 작업 폴더는 `--cwd` 값이고, 없으면 transcript 첫 항목의 `cwd` 값, 그것도 없으면 현재 폴더입니다. trigger 기본값은 `manual`입니다.
+- 정규화 형태: `--normalized PATH` 옵션으로 vault-graph가 만든 정규화 세션 파일(`vg-session-jsonl/1`)을 넘깁니다. 파일 형식은 `vault-session/v2`이고 닫힌 교환만 씁니다(`docs/agent/OPERATING-SCHEMA.md` 16.1절 "Session file v2"). session id와 agent는 정규화 파일 첫 줄에서 읽습니다. stdin에 훅 JSON이 있으면 그 `hook_event_name` 값을 trigger로, `cwd` 값을 작업 폴더로 쓰고, 훅 형태처럼 어떤 실패에서도 exit 0으로 끝납니다. 훅 JSON이 없으면 작업 폴더는 `--cwd` 값, 없으면 정규화 파일의 `cwd` 값입니다. `--rerender` 옵션은 이전 part의 이어 쓸 위치를 무시하고 닫힌 교환 전체를 새 part로 씁니다. 기존 파일은 바꾸지 않습니다. `--rerender`를 `--normalized` 없이 쓰거나, `--normalized`를 `--transcript`나 `--session-id`와 함께 쓰면 exit 2로 끝납니다. 모르는 옵션도 exit 2입니다.
 
 ```bash
 python3 tools/wiki/cli.py sessions capture \
@@ -1041,6 +1044,7 @@ python3 tools/wiki/cli.py sessions capture \
 | 대상 vault manifest가 없거나 contract가 3 미만 | 0, migration을 먼저 실행하라는 안내 |
 | `--vault` 경로가 그 project의 역할 `project` vault가 아님 | 1 |
 | transcript 파일이 없거나 읽을 수 없음, session id 형식 오류 | 1 |
+| 정규화 파일이 없거나 형식(`vg-session-jsonl/1`)에 맞지 않음, agent가 `claude-code`가 아님 | 1 |
 | 연결 설정이 없거나 손상됨, 저장소를 찾지 못함, 여러 project가 맞음 | 1 |
 | 이전 part 파일의 frontmatter에서 이어 쓸 위치를 읽을 수 없음 | 1 |
 | 같은 part 번호를 다른 수집이 먼저 만들었고 한 번 재시도도 실패함, 디스크 쓰기 실패 | 1 |

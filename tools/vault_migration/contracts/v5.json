@@ -126,13 +126,13 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "a721aea4bc46aab0179a296176e4dafb012efdcb1728fb5a9fd10a0361507871"
+      "sha256": "77cff9fdaa4c21de82513cbcb933c635b39e7d22d5cb4327d08fed3e290de2eb"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "b6b592a363dd6a840230b1b076dcfc0048a9f46551763ed4393220880b6e86a0"
+      "sha256": "257b5718cc41f41a6e629311d18ecbaaabae0fd0e000bebb02ad111e7a48d5ce"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -192,7 +192,7 @@
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "b545f913ec32dcd46ac5207e33c4955478345fcdb937508098ef416d00f2b033"
+      "sha256": "b1850f09abe08c2a4acfadb2623ef7c1e342b11df2976c1ef637add081517839"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -324,13 +324,13 @@
       "mode": "0644",
       "path": "tools/wiki/lib/session_archive.py",
       "policy": "replace-if-unmodified",
-      "sha256": "99a9b59c1b3b7585a63efe907a387ad71bc5d7563b48b55604ff6cbc269c98a0"
+      "sha256": "d205fc2c377b57c7beeb317a70d89fdb4bfe5c55d86e5a7ff403521586e6275c"
     },
     "tools/wiki/lib/session_capture.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/session_capture.py",
       "policy": "replace-if-unmodified",
-      "sha256": "2cab3157a4fd803ebefa0c6273eb86e2d5ab5341184bc614f13665a75aea6170"
+      "sha256": "0daedffd41f8fe6c08fc776cce8be6790b508cfee04223363a2bf9c21fa5ecfb"
     },
     "tools/wiki/lib/source_registry.py": {
       "mode": "0644",

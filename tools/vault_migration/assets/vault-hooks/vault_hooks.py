@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """User-scope Claude Code hook launcher for vault-builder (vault-graph requests spec, contract 6).
 
-Usage: vault_hooks.py session-start | capture | capture --direct
+Usage: vault_hooks.py session-start | capture | capture --direct [--normalized FILE [--rerender]]
 
 Every subcommand reads the Claude Code hook JSON from stdin, passes it on unchanged, and exits 0.
-A hook that fails or runs long must never block the Claude Code session.
+A hook that fails or runs long must never block the Claude Code session. Two exceptions exit 2 so
+vault-graph can fall back to `capture --direct` (vault-graph spec 4.2.5): bad arguments after
+`capture --direct`, and a vault CLI that exits 2 because it does not know --normalized.
 
 - session-start: run `vg hook session-start`. On exit 0 print its stdout as is (empty output too).
   Otherwise print the output of the installed project-memory recall.sh.
@@ -13,6 +15,9 @@ A hook that fails or runs long must never block the Claude Code session.
   to that vault's `tools/wiki/cli.py sessions capture --json`. The vault choice must stay the same
   as select_target_vault in tools/wiki/lib/session_capture.py. builder_tests/test_vault_hooks_launcher.py
   runs both on one table of cases.
+- capture --direct --normalized FILE [--rerender]: the same, but pass the vault-graph normalized session
+  file (absolute path) as `sessions capture --json --normalized FILE [--rerender]`. The vault is picked
+  from the hook JSON cwd, else the normalized file's session cwd.
 
 vg lookup order: VAULT_GRAPH_BIN, the "vg" absolute path in <config dir>/vault-builder/vault-hooks.json,
 then vg on PATH. <config dir> is CLAUDE_CONFIG_DIR, else $HOME/.claude.
@@ -35,7 +40,7 @@ from types import ModuleType
 from typing import Mapping
 
 PREFIX = "vault-hooks: "
-USAGE = "usage: vault_hooks.py session-start | capture [--direct]"
+USAGE = "usage: vault_hooks.py session-start | capture [--direct [--normalized FILE [--rerender]]]"
 
 # Claude Code gives the capture hook entries 60 seconds (contract 6). vg and the direct capture share it.
 VG_SESSION_START_TIMEOUT_S = 20.0
@@ -112,6 +117,10 @@ def run_process(
 
 def hook_cwd(data: bytes) -> Path:
     """The hook JSON cwd when it is a non-empty string, else this process's folder."""
+    return _hook_cwd_value(data) or Path.cwd()
+
+
+def _hook_cwd_value(data: bytes) -> Path | None:
     try:
         hook = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -119,7 +128,41 @@ def hook_cwd(data: bytes) -> Path:
     value = hook.get("cwd") if isinstance(hook, dict) else None
     if isinstance(value, str) and value.strip():
         return Path(value).expanduser()
-    return Path.cwd()
+    return None
+
+
+def normalized_cwd(path: Path, environ: Mapping[str, str]) -> Path | None:
+    """The cwd of the session line (first line) of a normalized session file. $HOME is expanded."""
+    try:
+        with path.open("rb") as stream:
+            first = json.loads(stream.readline().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    value = first.get("cwd") if isinstance(first, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    home = environ.get("HOME") or str(Path.home())
+    if value == "$HOME" or value.startswith("$HOME/"):
+        value = home + value[len("$HOME") :]
+    return Path(value).expanduser()
+
+
+def parse_normalized_args(args: list[str]) -> tuple[Path, bool] | None:
+    """Read `--normalized FILE [--rerender]` (either order). None when anything else is there."""
+    path: Path | None = None
+    rerender = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--rerender" and not rerender:
+            rerender = True
+            index += 1
+        elif arg == "--normalized" and path is None and index + 1 < len(args) and not args[index + 1].startswith("--"):
+            path = Path(args[index + 1]).expanduser().absolute()
+            index += 2
+        else:
+            return None
+    return (path, rerender) if path is not None else None
 
 
 def process_cwd(data: bytes) -> Path:
@@ -251,36 +294,51 @@ def _skipped_json(message: str) -> bytes:
     return (json.dumps(result, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def capture_direct(data: bytes, environ: Mapping[str, str], out, err) -> None:
-    """Run the chosen vault's sessions capture with the hook JSON. stdout gets one result JSON line."""
+def capture_direct(
+    data: bytes, environ: Mapping[str, str], out, err, normalized: Path | None = None, rerender: bool = False
+) -> int:
+    """Run the chosen vault's sessions capture with the hook JSON. stdout gets one result JSON line.
+
+    Returns 2 only when normalized is given and the vault CLI exits 2 (it does not know --normalized).
+    """
+    cwd = _hook_cwd_value(data)
+    if cwd is None and normalized is not None:
+        cwd = normalized_cwd(normalized, environ)
     try:
-        chosen = select_vault(hook_cwd(data), environ)
+        chosen = select_vault(cwd or Path.cwd(), environ)
     except Exception as exc:  # The hook must still exit 0 when the router cannot load.
         chosen = f"vault choice failed: {type(exc).__name__}: {exc}"
     if isinstance(chosen, str):
         out.write(_skipped_json(chosen))
         err.write(f"{PREFIX}{chosen}\n".encode())
-        return
+        return 0
     name, root = chosen
     cli = root / "tools" / "wiki" / "cli.py"
     if not cli.is_file():
         message = f"Vault {name} has no tools/wiki/cli.py; nothing written."
         out.write(_skipped_json(message))
         err.write(f"{PREFIX}{message}\n".encode())
-        return
+        return 0
     command = [sys.executable, "-I", "-B", str(cli), "sessions", "capture", "--json"]
+    if normalized is not None:
+        command += ["--normalized", str(normalized)] + (["--rerender"] if rerender else [])
     code, stdout, stderr = run_process(command, data, root, DIRECT_CAPTURE_TIMEOUT_S, environ)
     err.write(stderr)
+    if normalized is not None and code == 2:
+        err.write(f"{PREFIX}vault {name} sessions capture does not accept --normalized (exit 2).\n".encode())
+        out.write(stdout)
+        return 2
     if code is None or not stdout.strip():
         message = f"Vault {name} sessions capture ended with {code} and no result."
         out.write(_skipped_json(message))
         err.write(f"{PREFIX}{message}\n".encode())
-        return
+        return 0
     out.write(stdout)
+    return 0
 
 
 def run(argv: list[str], data: bytes, environ: Mapping[str, str], out, err) -> int:
-    """Run one subcommand. Always returns 0."""
+    """Run one subcommand. Returns 0, or 2 for the two cases in the module docstring."""
     try:
         if argv == ["session-start"]:
             session_start(data, environ, out, err)
@@ -288,6 +346,12 @@ def run(argv: list[str], data: bytes, environ: Mapping[str, str], out, err) -> i
             capture(data, environ, out, err)
         elif argv == ["capture", "--direct"]:
             capture_direct(data, environ, out, err)
+        elif argv[:2] == ["capture", "--direct"]:
+            parsed = parse_normalized_args(argv[2:])
+            if parsed is None:
+                err.write(f"{USAGE}\n".encode())
+                return 2
+            return capture_direct(data, environ, out, err, normalized=parsed[0], rerender=parsed[1])
         else:
             err.write(f"{USAGE}\n".encode())
     except Exception as exc:  # A hook must never block the Claude Code session.
@@ -300,13 +364,13 @@ def main() -> int:
         data = sys.stdin.buffer.read()
     except (OSError, ValueError, AttributeError):
         data = b""
-    run(sys.argv[1:], data, os.environ, sys.stdout.buffer, sys.stderr.buffer)
+    code = run(sys.argv[1:], data, os.environ, sys.stdout.buffer, sys.stderr.buffer)
     try:
         sys.stdout.flush()
         sys.stderr.flush()
     except OSError:
         pass
-    return 0
+    return code
 
 
 if __name__ == "__main__":

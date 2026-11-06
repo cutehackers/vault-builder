@@ -327,6 +327,92 @@ class CaptureTests(LauncherCase):
         self.assertIn(b"llm_wiki_router.py", result.stderr)
 
 
+class NormalizedCaptureTests(LauncherCase):
+    """capture --direct --normalized FILE [--rerender] (vault-graph request S10)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.vault = make_vault(self.tmp / "vaults" / "proj")
+        self.cli_record = self.tmp / "cli-record.json"
+        self.write_map({"proj": (self.vault, "project")}, ["proj"])
+        self.normalized = self.tmp / "export" / "s.jsonl"
+        self.normalized.parent.mkdir()
+        session = {"schema": "vg-session-jsonl/1", "kind": "session", "session_id": SESSION_ID,
+                   "agent": "claude-code", "cwd": str(self.repo)}
+        self.normalized.write_text(json.dumps(session) + "\n", encoding="utf-8")
+
+    def fake_cli(self, exit_code: int = 0) -> None:
+        write_program(
+            self.vault / "tools" / "wiki" / "cli.py",
+            f"data = sys.stdin.buffer.read()\n"
+            f"json.dump({{'argv': sys.argv[1:], 'stdin': data.decode(), 'cwd': os.getcwd()}}, "
+            f"open({str(self.cli_record)!r}, 'w'))\n"
+            f"print(json.dumps({{'status': 'written', 'schema': 'vault-session/v2'}}))\n"
+            f"sys.exit({exit_code})",
+        )
+
+    def test_passes_the_absolute_normalized_path_and_hook_json(self) -> None:
+        self.fake_cli()
+        data = self.hook("SessionEnd", reason="exit")
+        result = subprocess.run(
+            [sys.executable, "-I", str(LAUNCHER_SOURCE), "capture", "--direct", "--normalized", "export/s.jsonl"],
+            input=data, capture_output=True, env=self.env, cwd=self.tmp, timeout=60, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["schema"], "vault-session/v2")
+        record = json.loads(self.cli_record.read_text())
+        self.assertEqual(record["argv"], ["sessions", "capture", "--json", "--normalized", str(self.normalized)])
+        self.assertEqual(record["stdin"], data.decode())
+        self.assertEqual(Path(record["cwd"]).resolve(), self.vault)
+
+    def test_rerender_is_passed_on(self) -> None:
+        self.fake_cli()
+        result = self.run_script(["capture", "--direct", "--normalized", str(self.normalized), "--rerender"], self.hook())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(self.cli_record.read_text())
+        self.assertEqual(record["argv"][-1], "--rerender")
+
+    def test_vault_cli_that_does_not_know_normalized_exits_two(self) -> None:
+        self.fake_cli(exit_code=2)
+        result = self.run_script(["capture", "--direct", "--normalized", str(self.normalized)], self.hook())
+        self.assertEqual(result.returncode, 2)
+
+    def test_without_hook_cwd_the_normalized_cwd_picks_the_vault(self) -> None:
+        self.fake_cli()
+        result = self.run_script(["capture", "--direct", "--normalized", str(self.normalized)], b"")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.cli_record.exists())
+
+    def test_bad_normalized_arguments_print_usage_and_exit_two(self) -> None:
+        for argv in (["capture", "--direct", "--normalized"], ["capture", "--direct", "--normalized", "x", "--bogus"],
+                     ["capture", "--direct", "--rerender"]):
+            with self.subTest(argv=argv):
+                result = self.run_script(argv, self.hook())
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(b"usage", result.stderr)
+
+    def test_end_to_end_writes_a_v2_part_with_real_vault_tools(self) -> None:
+        vault = make_vault(self.tmp / "vaults" / "real", tools=BUILDER_ROOT / "tools")
+        self.write_map({"real": (vault, "project")}, ["real"])
+        lines = [
+            {"schema": "vg-session-jsonl/1", "kind": "session", "session_id": SESSION_ID, "agent": "claude-code",
+             "cwd": str(self.repo)},
+            {"schema": "vg-session-jsonl/1", "kind": "exchange", "exchange_id": "x1", "seq": 1, "agent_scope": "main",
+             "closed": True, "started_at": "2026-11-02T01:00:00.000Z", "ended_at": "2026-11-02T01:00:01.000Z",
+             "tools": {}, "files_touched": [], "errors": 0, "outcome": "answered"},
+            {"schema": "vg-session-jsonl/1", "kind": "turn", "turn_id": "x1", "exchange_id": "x1", "role": "user",
+             "turn_kind": "human", "at": "2026-11-02T01:00:00.000Z", "text": "hello", "actions": []},
+        ]
+        self.normalized.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+        result = self.run_script(["capture", "--direct", "--normalized", str(self.normalized)],
+                                 self.hook("SessionEnd", reason="exit"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "written", result.stdout)
+        files = list((vault / "raw" / "sessions").rglob("*.md"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("schema: vault-session/v2", files[0].read_text(encoding="utf-8"))
+
+
 class InstalledLayoutTests(LauncherCase):
     def test_installed_copy_loads_the_router_from_its_own_folder(self) -> None:
         folder = self.config / "vault-builder"

@@ -25,6 +25,10 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- `sessions capture --normalized <file> [--rerender] --json`이 vault-graph 정규화 세션 파일(`vg-session-jsonl/1`)을 새 세션 파일 형식 `vault-session/v2`로 쓴다. 닫힌 교환만 쓰고, part 번호는 v1과 v2를 이어서 매긴다. 이전 part가 v1이면 `last_turn_uuid` 뒤부터, v2이면 `last_exchange_id` 뒤부터 쓴다. 훅 실행기 `vault_hooks.py capture --direct --normalized <file> [--rerender]`도 같은 일을 하고, vault 도구가 `--normalized`를 모르면 exit 2로 끝낸다. 기존 v1 파일과 v1 수집은 그대로다.
+
 ## [4.1.0] - 2026-11-05
 
 이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 설치가 끝난다. 기존 설치와 함께 쓸 수 있는 새 동작이라 MINOR로 올렸다. contract와 manifest schema는 5 그대로다.

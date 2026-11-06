@@ -14,6 +14,7 @@ from .schema import Issue
 
 SESSION_ARCHIVE_DIR = "raw/sessions"
 SESSION_SCHEMA = "vault-session/v1"
+SESSION_SCHEMA_V2 = "vault-session/v2"
 SESSION_AGENTS = ("claude-code",)
 SESSION_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9-]*"
 SESSION_PATH_RE = re.compile(
@@ -39,6 +40,33 @@ SESSION_FRONTMATTER_FIELDS = (
     "redactions",
     "body_sha256",
 )
+# vault-session/v2 (vault-graph request S10): rendered from normalized session JSONL by sessions capture --normalized.
+SESSION_V2_FRONTMATTER_FIELDS = (
+    "schema",
+    "renderer",
+    "source_schema",
+    "agent",
+    "session_id",
+    "project",
+    "cwd",
+    "part",
+    "first_exchange_id",
+    "last_exchange_id",
+    "first_turn_uuid",
+    "first_turn_at",
+    "last_turn_uuid",
+    "last_turn_at",
+    "exchange_count",
+    "turn_count",
+    "collected_at",
+    "trigger",
+    "redactions",
+    "body_sha256",
+)
+SESSION_FIELDS_BY_SCHEMA = {
+    SESSION_SCHEMA: SESSION_FRONTMATTER_FIELDS,
+    SESSION_SCHEMA_V2: SESSION_V2_FRONTMATTER_FIELDS,
+}
 
 INVALID_PATH = "session-file-invalid-path"
 INVALID_FRONTMATTER = "session-file-invalid-frontmatter"
@@ -150,10 +178,12 @@ def check_session_file(root: Path, path: Path) -> SessionFileCheck:
 
     frontmatter, parse_errors = _parse_frontmatter(raw_frontmatter)
     issues = [_issue(INVALID_FRONTMATTER, path, f"Frontmatter parse error: {error}") for error in parse_errors]
-    missing = [field for field in SESSION_FRONTMATTER_FIELDS if field not in frontmatter]
+    schema = frontmatter.get("schema")
+    required = SESSION_FIELDS_BY_SCHEMA.get(schema, SESSION_FRONTMATTER_FIELDS) if isinstance(schema, str) else SESSION_FRONTMATTER_FIELDS
+    missing = [field for field in required if field not in frontmatter]
     if missing:
         issues.append(_issue(INVALID_FRONTMATTER, path, f"Missing session fields: {', '.join(missing)}."))
-    if "schema" in frontmatter and frontmatter["schema"] != SESSION_SCHEMA:
+    if "schema" in frontmatter and not (isinstance(schema, str) and schema in SESSION_FIELDS_BY_SCHEMA):
         issues.append(_issue(INVALID_FRONTMATTER, path, f"Unknown session schema: {frontmatter['schema']!r}."))
     if "session_id" in frontmatter and str(frontmatter["session_id"]) != session_path.session_id:
         issues.append(

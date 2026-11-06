@@ -221,6 +221,19 @@ def main(argv: list[str] | None = None) -> int:
     # No argparse choices: a bad value must not exit 2 (spec decision M). read_capture_request checks it.
     sessions_capture.add_argument("--trigger", metavar="{" + ",".join(TRIGGERS) + "}", help="Default: manual.")
     sessions_capture.add_argument("--vault", help="Pick one of several role project vaults by path.")
+    sessions_capture.add_argument(
+        "--normalized",
+        metavar="PATH",
+        help=(
+            "Normalized session JSONL (vg-session-jsonl/1) to render as a vault-session/v2 part. "
+            "Hook JSON on stdin is optional and gives the trigger and cwd."
+        ),
+    )
+    sessions_capture.add_argument(
+        "--rerender",
+        action="store_true",
+        help="With --normalized: ignore the cursor and write every closed exchange as a new part.",
+    )
     sessions_capture.add_argument("--json", action="store_true")
     sessions_status = sessions_subcommands.add_parser(
         "status",
@@ -245,6 +258,10 @@ def main(argv: list[str] | None = None) -> int:
             return _sessions_status(args.json)
         if args.sessions_command == "git-check":
             return _sessions_git_check()
+        if args.rerender and not args.normalized:
+            sessions_capture.error("--rerender needs --normalized")
+        if args.normalized and (args.transcript or args.session_id):
+            sessions_capture.error("--normalized cannot be used with --transcript or --session-id")
         return run_capture_command(vars(args), sys.stdin, sys.stdout, sys.stderr)
 
     if args.command == "search":
