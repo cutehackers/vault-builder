@@ -330,7 +330,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/session_capture.py",
       "policy": "replace-if-unmodified",
-      "sha256": "0daedffd41f8fe6c08fc776cce8be6790b508cfee04223363a2bf9c21fa5ecfb"
+      "sha256": "7c85007122b3fe11f06f8a8d8b7e0742bc45912320b9fb5e1006d94247a270bc"
     },
     "tools/wiki/lib/source_registry.py": {
       "mode": "0644",

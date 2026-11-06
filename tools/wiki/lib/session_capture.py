@@ -990,15 +990,19 @@ def select_part_exchanges(
     """
     flat = [(index, turn) for index, exchange in enumerate(session.exchanges) for turn in exchange.turns]
     keep: Callable[[int, int, NormTurn], bool]
+    # An exchange with no turns yet: is it after the cursor? Used only to stop at an open one.
+    after_cursor: Callable[[int, int], bool] = lambda exchange_index, position: True  # noqa: E731
     exchange_ids = [exchange.exchange_id for exchange in session.exchanges]
     if last_exchange_id is None and last_turn_uuid is None:
         keep = lambda exchange_index, position, turn: True  # noqa: E731
     elif last_exchange_id is not None and last_exchange_id in exchange_ids:
         after = exchange_ids.index(last_exchange_id)
         keep = lambda exchange_index, position, turn: exchange_index > after  # noqa: E731
+        after_cursor = lambda exchange_index, position: exchange_index > after  # noqa: E731
     elif last_turn_uuid is not None and any(turn.turn_id == last_turn_uuid for _, turn in flat):
         cut = next(position for position, (_, turn) in enumerate(flat) if turn.turn_id == last_turn_uuid)
         keep = lambda exchange_index, position, turn: position > cut  # noqa: E731
+        after_cursor = lambda exchange_index, position: position > cut  # noqa: E731
     else:
         if last_turn_at is None:
             raise NormalizedInputError("The previous part has no usable cursor.")
@@ -1012,6 +1016,8 @@ def select_part_exchanges(
     chosen: list[PartExchange] = []
     position = 0
     for index, exchange in enumerate(session.exchanges):
+        if not exchange.turns and not exchange.closed and after_cursor(index, position):
+            break
         written = []
         for turn in exchange.turns:
             if keep(index, position, turn):
