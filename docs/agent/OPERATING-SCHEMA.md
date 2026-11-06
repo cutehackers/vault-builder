@@ -88,7 +88,7 @@ The human should not have to manually maintain backlinks, index entries, page pl
 | `raw/` | Human | Immutable | Source of truth. The agent may read but must not edit. |
 | `raw/sources/` | Human | Immutable | Stable primary sources: notes, PDFs, articles, transcripts, exports, papers. |
 | `raw/assets/` | Human/Agent | Immutable after capture | Images, screenshots, diagrams, and attachments referenced by sources. |
-| `raw/imports/` | Human/Agent | Immutable after capture | Temporary landing zone for newly clipped or imported files before ingest. |
+| `raw/imports/` | Human/Agent | Immutable after capture | Temporary landing zone for newly clipped or imported files before ingest. `import-source` adds copies under `raw/imports/<kind>/` (section 16.2). |
 | `raw/sessions/` | Session capture command | Add-only | Session archive: agent conversation transcripts, one file per capture run. Only `sessions capture` adds files. No source pages; integrity comes from each file's `body_sha256` (section 16.1). |
 | `wiki/` | Agent | Mutable | Compiled knowledge. The agent creates and updates pages here. |
 | `wiki/index.md` | Agent | Mutable | Content catalog. Read first before answering or updating. |
@@ -144,7 +144,7 @@ When creating an optional folder, append a `schema-change` entry to `wiki/log.md
 
 Never edit, rewrite, rename, or delete files under `raw/` unless explicitly instructed.
 
-One exception: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/` without a per-file human request. Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden. Session files have no source pages. Lint checks each session file's integrity with its body hash (`body_sha256`), and the release gate checks committed session files against Git history (section 16.1).
+Two exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/` without a per-file human request, and `import-source` may add copies under `raw/imports/<kind>/` (section 16.2). Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden. Session files have no source pages. Lint checks each session file's integrity with its body hash (`body_sha256`), and the release gate checks committed session files against Git history (section 16.1).
 
 If a raw source contains errors, record corrections in the wiki, not in the source.
 
@@ -1538,6 +1538,18 @@ Git archive check (release gate):
 - Otherwise it collects every path ever added under `raw/sessions/` in history reachable from the current branch, with the blob first added. It prints one line per path that is missing from the work tree or whose bytes differ from that first blob, and exits 1. Restoring the file makes it pass again.
 - `scripts/release_gate.sh` runs it from the vault root after the metrics step in every tier, including `check`.
 - Uncommitted session files get only the archive check. `python3 tools/wiki/cli.py sessions status` reports how many are uncommitted.
+
+### 16.2 Importing Files From Outside `raw/` (`import-source`)
+
+`python3 tools/wiki/cli.py import-source <file> --into raw/imports/<kind>/ [--json]` copies one file from outside `raw/` into the vault and registers it. vault-graph uses it to keep a copy of a Claude Code memory note it cites (`--into raw/imports/claude-memory/`).
+
+- `<kind>` uses lowercase letters, digits, and `-`. Any other `--into` value is refused.
+- The copy is byte-for-byte at `raw/imports/<kind>/<stem>--<sha256 first 8><suffix>`. Characters outside `A-Z a-z 0-9 . _ -` in the stem become `-`.
+- It then runs `ingest-source` on the copy, which creates the source page and updates `wiki/index.md` and `wiki/log.md`.
+- When a `wiki/sources/` page already records the file's sha256 in `raw_sha256`, nothing is written and the result points at that page and its `canonical_source`.
+- The original file is only read. A file already under `raw/`, a missing file, or a folder is refused with exit 1 and nothing written. If the source page cannot be created, the copy made in the same run is removed.
+- `--json` prints one object: `status` (`imported` or `exists`), `raw_path`, `source_page`, `sha256`, and `created` (files created in this run; `wiki/index.md` and `wiki/log.md` also change when the status is `imported`). A refusal prints `{"status": "error", "message": ...}`.
+- Existing copies under `raw/imports/` are never edited, renamed, or deleted.
 
 ---
 

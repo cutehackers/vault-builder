@@ -142,7 +142,7 @@ LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 �
 
 현재 저장소의 결정론적 도구는 `tools/wiki/cli.py` 아래에 있습니다. 위 skill/workflow는 사람이 기억하기 쉬운 권장 사용 방식이며, 내부에서는 기존 CLI를 조합합니다.
 
-현재 구현된 안정 명령은 `ingest-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `sessions capture/status/git-check`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
+현재 구현된 안정 명령은 `ingest-source`, `import-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `sessions capture/status/git-check`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
 
 ```text
 wiki-ingest
@@ -307,6 +307,18 @@ python3 tools/wiki/cli.py bulk-ingest --all-raw --report
 ```
 
 `bulk-ingest`도 semantic extraction을 수행하지 않습니다. 각 raw file에 대해 `ingest-source`와 같은 source registration만 수행하고, source별 outcome을 report에 남깁니다.
+
+vault 밖 파일을 사본으로 남기고 등록하려면 `import-source`를 사용합니다. vault-graph가 Claude Code 자동 기억 노트를 근거로 쓸 때 이 명령을 실행합니다.
+
+```bash
+python3 tools/wiki/cli.py import-source /path/outside/note.md --into raw/imports/claude-memory/ --json
+```
+
+- 원본 파일은 읽기만 합니다. 바이트를 그대로 `raw/imports/<kind>/<파일 이름>--<sha256 앞 8자><확장자>`에 복사하고, 그 사본으로 `ingest-source`를 실행해 source page를 만듭니다.
+- `<kind>`는 영문 소문자, 숫자, `-`로 씁니다.
+- 같은 sha256을 `raw_sha256`으로 가진 source page가 이미 있으면 아무것도 쓰지 않고 그 page와 사본 경로를 돌려줍니다(`status: exists`).
+- 이미 `raw/` 안에 있는 파일, 없는 파일, 폴더는 거부하고 exit 1로 끝납니다. 이때 아무것도 쓰지 않습니다.
+- `--json` 출력은 `status`(`imported` 또는 `exists`), `raw_path`, `source_page`, `sha256`, `created`(이번에 만든 파일) 필드를 가진 객체 하나입니다. 형식은 `docs/agent/OPERATING-SCHEMA.md` 16.2절에 있습니다.
 
 ## 7. 원본에서 wiki page 만들기
 
