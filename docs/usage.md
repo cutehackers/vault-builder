@@ -706,7 +706,15 @@ L1 메모리
 -> /project-memory: 현재 저장소에 연결된 vault들의 요약 페이지에서 요청한 섹션만 출력
 ```
 
-세션을 시작할 때 요약을 자동으로 넣지는 않습니다. 평소 세션에 드는 비용은 skill 목록에 보이는 한 줄(약 50 token)뿐입니다. 대신 요약은 Claude나 사용자가 불러올 때만 보입니다.
+세션을 시작할 때 무엇이 자동으로 들어가는지는 hook 설치 여부와 vault-graph(`vg`) 유무에 달렸습니다.
+
+| 설치 상태 | 세션 시작 때 들어가는 것 |
+|---|---|
+| hook 없음 (`install`을 `--with-hooks` 없이 실행) | 아무것도 넣지 않습니다. 요약은 Claude나 사용자가 `/project-memory`로 불러올 때만 보입니다. 평소 비용은 skill 목록의 한 줄(약 50 token)뿐입니다. |
+| hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | vg 출력을 그대로 넣습니다. vault-graph가 vault 페이지에서 고른 기억이고, 이 절의 요약 페이지는 넣지 않습니다. 빈 출력이면 아무것도 넣지 않습니다. |
+| hook 있음, vg가 없거나 0이 아닌 코드로 끝나거나 시간을 넘김 | recall 스크립트 출력, 곧 `/project-memory`를 인자 없이 실행한 결과(17.5)를 넣습니다. |
+
+hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6).
 
 이 절의 `vault-builder ...` 명령은 설치 명령(1절)이 만든 `$HOME/.local/bin/vault-builder` 파일로 실행합니다. 이 파일은 builder checkout의 `tools/vault_migration/cli.py`를 실행하므로, builder checkout 폴더에서 `vault-builder` 대신 `python3 tools/vault_migration/cli.py`로 같은 명령을 실행할 수도 있습니다.
 
