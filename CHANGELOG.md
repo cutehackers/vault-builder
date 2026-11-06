@@ -35,6 +35,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ### Changed
 
+- 폐기한 페이지를 frontmatter만 바꾸는 `patch-page`로 되살릴 수 있다. `status`가 retired가 아니어도 `restored_at`(날짜)과 `restored_reason`이 함께 있으면 `retired_reason`, `retired_at`을 이력으로 남길 수 있다. 전에는 lint가 `retired-field-without-retired-status`로 거부했다(vault-graph 요청S12).
 - `docs/usage.md` 17절과 `docs/html/project-memory-structure.html`의 세션 시작 회상 설명을 실제 동작에 맞춘다. hook이 없으면 아무것도 넣지 않고, hook이 있으면 vg 출력을 넣으며, vg가 없거나 실패할 때만 프로젝트 요약을 넣는다.
 
 ## [4.1.0] - 2026-11-05
