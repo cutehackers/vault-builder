@@ -371,6 +371,18 @@ class NormalizedCaptureTests(unittest.TestCase):
         self.assertEqual(E1, frontmatter["last_exchange_id"])
         self.assertNotIn("Run tests", body)
 
+    def test_open_exchange_without_turns_stops_the_part(self):
+        lines = _lines(str(self.repo), e4_closed=True)
+        lines[6]["closed"] = False  # E2 is open and has no turn lines yet.
+        del lines[7:9]
+        self._write_normalized(lines)
+
+        self._normalized()
+
+        frontmatter, body = self._split(self._files()[0])
+        self.assertEqual(E1, frontmatter["last_exchange_id"])
+        self.assertNotIn("Run tests", body)
+
     def test_v1_part_then_v2_continues_after_last_turn_uuid_with_continued_exchange(self):
         v1 = self._write_v1_part(1, "a1000000-1", "2026-10-30T01:00:03.000Z")
         v1_bytes = v1.read_bytes()
