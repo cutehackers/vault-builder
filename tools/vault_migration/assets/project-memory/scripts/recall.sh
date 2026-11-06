@@ -11,6 +11,12 @@
 #
 # Limits and headings must match tools/wiki/lib/maps.py: PROJECT_SECTION_MAX_TOKENS,
 # PROJECT_MAP_MAX_TOKENS, PROJECT_SECTION_HEADINGS, and estimate_tokens.
+#
+# Project scope (vault-graph spec 4.4.2, request S4): a page whose `project` names this project is in
+# scope (the summary page wiki/maps/projects/<project id>.md). A page without `project` is in scope when
+# the vault is linked to this project only, or when it is linked to two or more projects and the vault
+# map sets vaults.<name>.sharable to true. Those pages are read with the vault's read-only
+# `tools/wiki/cli.py maps no-project-summary` command.
 PYTHON=@VAULT_BUILDER_PYTHON@
 # -I keeps the user's repository (the cwd) off sys.path.
 exec "$PYTHON" -I - "$@" <<'PY'
@@ -31,6 +37,7 @@ SECTION_HEADINGS = {
 }
 USAGE = "usage: recall.sh [open|decisions|corrections]"
 PREFIX = "project-memory: "
+NO_PROJECT_TIMEOUT_S = 10
 
 
 def estimate_tokens(text):
@@ -227,6 +234,59 @@ def linked_vaults(map_path, data, project_id):
     return linked
 
 
+def includes_no_project_pages(data, vault_name):
+    """Rules 2 and 3 of the project scope: one linked project, or sharable true. A missing or non-boolean sharable is false."""
+    linked = [
+        project_id
+        for project_id, entry in data["projects"].items()
+        if isinstance(entry, dict) and isinstance(entry.get("vaults"), list) and vault_name in entry["vaults"]
+    ]
+    if len(linked) <= 1:
+        return True
+    vault = data["vaults"].get(vault_name)
+    return isinstance(vault, dict) and vault.get("sharable") is True
+
+
+def no_project_text(name, vault_path):
+    """Return (summary text or None, notes) from the vault's read-only no-project-summary command."""
+    cli = vault_path / "tools" / "wiki" / "cli.py"
+    if not cli.is_file():
+        return None, []
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", str(cli), "maps", "no-project-summary"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=NO_PROJECT_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, [f"{PREFIX}vault {name}: pages without project are not shown ({type(exc).__name__})."]
+    if result.returncode != 0:
+        return None, [
+            f"{PREFIX}vault {name}: pages without project are not shown "
+            f"(maps no-project-summary ended with {result.returncode}; update the vault tools)."
+        ]
+    return result.stdout, []
+
+
+def merge_sections(first, second):
+    """Join two {key: block} maps. Item lines of second follow those of first; '- (none)' only when both are empty."""
+    merged = {}
+    for key in list(first) + [key for key in second if key not in first]:
+        heading = SECTION_HEADINGS[key]
+        items = [
+            line
+            for block in (first.get(key), second.get(key))
+            if block
+            for line in block[1:]
+            if line.strip() and line.strip() != "- (none)"
+        ]
+        merged[key] = [heading, "", *(items or ["- (none)"])]
+    return merged
+
+
 def page_body(text):
     if text.startswith("---\n"):
         end = text.find("\n---\n", 4)
@@ -254,24 +314,43 @@ def read_sections(text, wanted):
     return found
 
 
-def vault_block(name, vault_path, project_id, wanted):
-    """Return (header, sections, notes) for one vault, or (None, None, notes) when it is skipped."""
+def vault_block(name, vault_path, project_id, wanted, no_project=False):
+    """Return (header, sections, notes) for one vault, or (None, None, notes) when it is skipped.
+
+    With no_project, the items of pages without `project` are added after the summary page items.
+    """
     page = vault_path / "wiki" / "maps" / "projects" / f"{project_id}.md"
     if not vault_path.is_dir():
         return None, None, [f"{PREFIX}skipped vault {name}: {vault_path} does not exist."]
+    notes = []
+    extra = {}
+    if no_project:
+        extra_text, extra_notes = no_project_text(name, vault_path)
+        notes.extend(extra_notes)
+        if extra_text is not None:
+            extra = {
+                key: block
+                for key, block in read_sections(extra_text, wanted).items()
+                if any(line.strip() and line.strip() != "- (none)" for line in block[1:])
+            }
     try:
         text = page.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return None, None, [f"{PREFIX}skipped vault {name}: no summary page {page}; run maps build there."]
+        if not extra:
+            return None, None, notes + [f"{PREFIX}skipped vault {name}: no summary page {page}; run maps build there."]
+        text = ""
     sections = read_sections(text, wanted)
-    notes = [
+    if extra:
+        sections = merge_sections(sections, extra)
+    notes += [
         f"{PREFIX}vault {name}: section {SECTION_HEADINGS[key]} is missing from {page}."
         for key in wanted
         if key not in sections
     ]
     if not sections:
         return None, None, notes
-    return f"# vault {name}: {page}", [sections[key] for key in wanted if key in sections], notes
+    header = f"# vault {name}: {page}" if text else f"# vault {name}: pages without project"
+    return header, [sections[key] for key in wanted if key in sections], notes
 
 
 def render_block(header, sections):
@@ -323,7 +402,8 @@ def recall(arguments):
     notes = [note] if note else []
     blocks = []
     for name, vault_path in vaults:
-        header, sections, block_notes = vault_block(name, vault_path, project_id, wanted)
+        no_project = includes_no_project_pages(data, name)
+        header, sections, block_notes = vault_block(name, vault_path, project_id, wanted, no_project)
         notes.extend(block_notes)
         if header is not None:
             blocks.append((header, sections))

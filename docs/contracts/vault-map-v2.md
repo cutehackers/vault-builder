@@ -10,6 +10,7 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 - `link`, `unlink`: 프로젝트 항목과 그 `vaults` 목록을 바꾼다.
 - `set-role --vault <name> --role <role>`: Vault의 `role`을 바꾼다.
 - `set-default-write --project <id> (--vault <name> | --clear)`: 프로젝트의 `default_write_vault`를 정하거나 지운다.
+- `set-sharable --vault <name> (--value true|false | --clear)`: Vault의 `sharable`을 정하거나 지운다.
 
 모든 쓰기는 모르는 필드를 지우지 않는다. 같은 폴더에 임시 파일을 쓴 뒤 이름을 바꿔 파일을 교체한다. 내용이 같으면 파일을 다시 쓰지 않는다. 쓸 때 `version`은 2가 된다.
 
@@ -49,6 +50,7 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 | --- | --- | --- | --- |
 | `projects.<id>.remote` | 문자열 | 원격 비교 단계를 건너뛴다 | `link` 때의 `origin` URL. |
 | `projects.<id>.default_write_vault` | 문자열 | 기본 저장 Vault가 없다 | 이 프로젝트의 기본 저장 Vault. 값은 그 프로젝트 `vaults` 목록 안의 이름이어야 한다. |
+| `vaults.<name>.sharable` | 불리언 | false로 읽는다 | 둘 이상의 프로젝트에 연결된 Vault에서 `project`가 없는 페이지를 연결된 모든 프로젝트의 세션 기억에 넣을지 정한다. 검색 범위는 바꾸지 않는다. |
 
 `default_write_vault` 규칙:
 
@@ -57,6 +59,12 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 - `unlink`로 기본 저장 Vault를 프로젝트에서 빼면 `default_write_vault`도 지운다.
 - llm-wiki router는 이 필드를 무시한다. 쓰기 도구는 여전히 `vault` 인자를 받아야 한다.
 - vault-graph는 값이 문자열이 아니거나 프로젝트 `vaults`에 없으면 그 필드만 무시하고 경고한다. 파일 전체를 버리지 않는다.
+
+`sharable`과 프로젝트 범위 규칙(vault-graph spec 4.4.2). 세션 기억(`recall.sh`, vault-graph 회상)에 페이지를 넣을지 정할 때 쓴다.
+
+1. 페이지 `project`가 이 프로젝트면 넣는다. 다른 프로젝트만 적혀 있으면 넣지 않는다.
+2. `project`가 없고, 그 Vault를 연결한 프로젝트가 이 프로젝트 하나뿐이면 넣는다. 이때 `sharable`은 보지 않는다.
+3. `project`가 없고, 그 Vault를 연결한 프로젝트가 둘 이상이면 `sharable`이 true일 때만 넣는다. 필드가 없거나 불리언이 아니면 false로 읽는다. 불리언이 아니어도 파일 전체를 버리지 않는다.
 
 읽는 쪽은 모르는 필드를 오류로 보지 않고 무시한다.
 
