@@ -1,14 +1,16 @@
 """Lint rules for the optional memory frontmatter fields and the status `retired`.
 
-Fields: memory_schema, pin, memory_kind, retired_reason, retired_at. A page without
-any of them is checked by nothing here, so existing pages stay valid.
+Fields: memory_schema, pin, memory_kind, retired_reason, retired_at, restored_at, restored_reason.
+A page without any of them is checked by nothing here, so existing pages stay valid.
 
 Rules:
 1. pin or memory_kind needs memory_schema.
 2. memory_schema must be a known value.
 3. pin must be a boolean and memory_kind must be an allowed kind.
 4. status retired needs retired_reason and retired_at.
-5. retired_reason and retired_at appear only when status is retired.
+5. retired_reason and retired_at appear only when status is retired, or on a restored page.
+6. restored_at (ISO date) and restored_reason (non-empty) come together. A restored page keeps
+   retired_reason, retired_at, and superseded_by as history (vault-graph spec 4.4.13, request S12).
 
 This module imports only schema and frontmatter.
 """
@@ -23,6 +25,7 @@ ALLOWED_MEMORY_SCHEMAS = frozenset({"vault-memory/v1"})
 ALLOWED_MEMORY_KINDS = frozenset({"rule", "correction", "decision", "preference"})
 RETIRED_STATUS = "retired"
 _RETIRED_FIELDS = ("retired_reason", "retired_at")
+_RESTORED_FIELDS = ("restored_at", "restored_reason")
 
 
 def validate_memory_fields(page: Page) -> list[Issue]:
@@ -65,9 +68,20 @@ def validate_memory_fields(page: Page) -> list[Issue]:
         elif not _is_iso_date(frontmatter["retired_at"]):
             error("invalid-retired-at", f"retired_at must be an ISO date, not {frontmatter['retired_at']!r}.")
     else:
+        restored = all(field in frontmatter for field in _RESTORED_FIELDS)
         for field in _RETIRED_FIELDS:
-            if field in frontmatter:
-                error("retired-field-without-retired-status", f"{field} is allowed only when status is retired.")
+            if field in frontmatter and not restored:
+                error(
+                    "retired-field-without-retired-status",
+                    f"{field} is allowed only when status is retired, or with restored_at and restored_reason.",
+                )
+
+    if any(field in frontmatter for field in _RESTORED_FIELDS):
+        reason = frontmatter.get("restored_reason")
+        if "restored_at" not in frontmatter or not isinstance(reason, str) or not reason.strip():
+            error("restored-fields-incomplete", "restored_at and a non-empty restored_reason must be set together.")
+        elif not _is_iso_date(frontmatter["restored_at"]):
+            error("invalid-restored-at", f"restored_at must be an ISO date, not {frontmatter['restored_at']!r}.")
     return issues
 
 

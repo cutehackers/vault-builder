@@ -264,7 +264,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/memory_fields.py",
       "policy": "replace-if-unmodified",
-      "sha256": "8b83017c5ea38075d90b45e5fe07403e6af03dd8ac3c2a21e1cf8b1babb4439f"
+      "sha256": "b3fd11064b50ec8e3c71d8a3ea5003d93e9f79d7df232cba30b8c0db378e1feb"
     },
     "tools/wiki/lib/memory_proposal.py": {
       "mode": "0644",
