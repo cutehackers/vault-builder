@@ -25,6 +25,14 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-07
+
+vault-graph 요청S11로 대체 경로를 없앴다. vault-builder는 `/project-memory` skill, `recall.sh`, `memory-cleanup` skill, 프로젝트 요약 페이지를 더 만들지 않고, 세션 시작 회상과 기억 정리는 vault-graph가 맡는다. vault-graph가 없는 사용자는 세션 시작 회상과 기억 정리를 받지 못하고, ingest, update, query, 검증, 세션 수집은 그대로 동작한다. 명령 `maps no-project-summary`와 skill을 없애고 contract를 6으로 올렸으므로 MAJOR로 올렸다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 5.0.0 | 6 | 6 | 2 |
+
 ### Added
 
 - `sessions capture --normalized <file> [--rerender] --json`이 vault-graph 정규화 세션 파일(`vg-session-jsonl/1`)을 새 세션 파일 형식 `vault-session/v2`로 쓴다. 닫힌 교환만 쓰고, part 번호는 v1과 v2를 이어서 매긴다. 이전 part가 v1이면 `last_turn_uuid` 뒤부터, v2이면 `last_exchange_id` 뒤부터 쓴다. 훅 실행기 `vault_hooks.py capture --direct --normalized <file> [--rerender]`도 같은 일을 하고, vault 도구가 `--normalized`를 모르면 exit 2로 끝낸다. 기존 v1 파일과 v1 수집은 그대로다.
@@ -44,6 +52,32 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 - install이 `/project-memory` skill과 recall 스크립트(`<설정 폴더>/skills/project-memory/`)를 설치하지 않는다. asset 폴더 `tools/vault_migration/assets/project-memory/`를 지웠다. 이전 install이 쓴 두 파일은 install(`setup` 포함)이 지우고 manifest 기록에서도 뺀다. 파일이 manifest에 기록된 hash나 릴리스된 asset과 같을 때만 지우고, 사용자가 고친 파일은 남긴 뒤 목록에 적는다. uninstall도 같은 규칙으로 남은 파일을 지운다. doctor는 두 파일을 검사하지 않고, git 2.31 검사도 하지 않는다. 남은 builder 파일이 있으면 `vault-builder setup`으로 고치라고 알린다.
 - `maps build`가 프로젝트 요약 페이지(`wiki/maps/projects/<project id>.md`)를 만들지 않고, 명령 `maps no-project-summary`를 없앴다. topic, source, decision, review, lifecycle 지도는 그대로다. 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)는 다음 `maps build`가 지우고 `wiki/log.md`에 적는다. 그 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둔다. `maps build --check`는 남은 요약 페이지 때문에 실패하지 않으므로, migration apply가 실행하는 vault gate도 통과한다.
 - vault에 설치하던 `memory-cleanup` skill(`.agents/skills/memory-cleanup/SKILL.md`, `.claude/skills/memory-cleanup/SKILL.md`)을 지웠다. `AGENTS.md`의 안내도 뺐다. 읽기 전용 명령 `memory-scan`은 vault-graph가 쓰므로 남긴다.
+
+### Upgrade
+
+- Claude Code를 종료하고 설치 명령(`curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh | bash`)이나 `vault-builder setup`을 다시 실행한다. 사람 검토 항목이 없는 vault는 audit와 apply로 contract 6이 되고, install이 builder가 만든 `<설정 폴더>/skills/project-memory/` 파일을 지운다. 직접 하려면 vault마다 아래 순서로 실행한 뒤 `vault-builder install <vault 경로>`를 실행한다.
+
+  ```bash
+  python3 tools/vault_migration/cli.py audit --target /path/to/vault --plan-out /tmp/vault-migration-plan.json
+  ```
+
+  ```bash
+  python3 tools/vault_migration/cli.py apply --target /path/to/vault --plan /tmp/vault-migration-plan.json
+  ```
+
+- migration은 contract 6이 관리하지 않는 `memory-cleanup` skill 두 파일을 지우지 않는다. apply와 doctor가 끝나면 vault에서 지우고 commit한다.
+
+  ```bash
+  git -C /path/to/vault rm .agents/skills/memory-cleanup/SKILL.md .claude/skills/memory-cleanup/SKILL.md
+  ```
+
+  ```bash
+  git -C /path/to/vault commit -m "chore: remove memory-cleanup skill retired by contract 6"
+  ```
+
+- 이전 `maps build`가 만든 `wiki/maps/projects/*.md`는 migration 뒤에도 남는다. vault 폴더에서 `python3 tools/wiki/cli.py maps build --report`를 한 번 실행하면 지워지고 `wiki/log.md`에 적힌다. 그 뒤 commit한다. 사람이 쓴 파일과 잠긴 파일은 남는다.
+- 사용자가 고친 `<설정 폴더>/skills/project-memory/` 파일은 install이 남기고 경로를 출력한다. 필요 없으면 직접 지운다. doctor는 builder가 만든 파일이 남아 있을 때만 문제로 알린다.
+- doctor 첫 줄이 `vault-builder 5.0.0 (contract 6)`이고 `Problem:` 줄이 없으면 끝이다.
 
 ## [4.1.0] - 2026-11-05
 
