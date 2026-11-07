@@ -219,7 +219,7 @@ superseded_by: []
 project: vault-builder        # or [vault-builder, other-repo]
 ```
 
-`project` names the project ids a page belongs to. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value, including numbers, as an error. `maps build` no longer writes project summary pages. It removes the pages under `wiki/maps/projects/` that an earlier `maps build` wrote (frontmatter `generated_by: tools/wiki/cli.py maps build` and no page lock) and leaves any other file there as an ordinary wiki page.
+`project` names the project ids a page belongs to. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value, including numbers, as an error. `maps build` no longer writes project summary pages. It removes the pages under `wiki/maps/projects/` that an earlier `maps build` wrote (frontmatter `generated_by: tools/wiki/cli.py maps build` and no page lock) and leaves any other file there as an ordinary wiki page. `maps build --check` does not fail on the old pages, so the gate that migration apply runs still passes before they are removed.
 
 Source pages may add:
 

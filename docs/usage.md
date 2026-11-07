@@ -840,7 +840,7 @@ L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니�
 vault-builder는 `/project-memory` skill, recall 스크립트, `memory-cleanup` skill, 프로젝트 요약 페이지 `wiki/maps/projects/<project id>.md`를 더 만들지 않습니다(vault-graph 요청S11). 프로젝트 기억을 불러오고 정리하는 일은 vault-graph가 맡습니다.
 
 - install(`setup` 포함)은 이전 install이 만든 `<설정 폴더>/skills/project-memory/SKILL.md`와 `scripts/recall.sh`가 builder가 만든 파일일 때만 지웁니다. builder가 만든 파일은 manifest에 기록된 hash와 같거나 릴리스된 asset과 같은 파일입니다. recall 스크립트는 `PYTHON=` 줄만 달라도 같은 파일로 봅니다. 사용자가 고친 파일은 남기고 경로를 출력합니다.
-- `maps build`는 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)를 지우고 `wiki/log.md`에 적습니다. `wiki/maps/projects/` 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둡니다.
+- `maps build`는 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)를 지우고 `wiki/log.md`에 적습니다. `wiki/maps/projects/` 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둡니다. `maps build --check`는 남은 요약 페이지 때문에 실패하지 않으므로, migration apply가 실행하는 gate도 통과합니다.
 - 이전 contract의 vault에 남은 `.agents/skills/memory-cleanup/SKILL.md`와 `.claude/skills/memory-cleanup/SKILL.md`는 migration이 지우지 않습니다. 지우는 명령은 builder 저장소 `CHANGELOG.md`의 Upgrade 절에 있습니다.
 
 ### 17.6 setup, install, uninstall, doctor

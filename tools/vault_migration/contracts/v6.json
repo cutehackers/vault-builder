@@ -90,7 +90,7 @@
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "f3ccc7581723da792a78ad869eee35903b83ace75958a64d1d600cdc9e03032f"
+      "sha256": "e8fdbe7d35cb0bfea1f28196df8be0ec4812b41f2f5aa3b36fa41ae67a64d454"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -114,13 +114,13 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "1d0abd6f421a7a61c4cf50e419586f06fa081d30b548080f65de3d8fddc7327b"
+      "sha256": "ff40aabb3480b832e03fac2c57b091f263b889791db364239d4f1d6db478b3d4"
     },
     "docs/usage.md": {
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "146d7afef48d4a8c3a283c7f4ebeb59cd663c46e5bcafbd91964f153a2ac3ffa"
+      "sha256": "a17ad7d102670cfbbf411325f4341d18aadcb9f9d7ff28ba61341fb5de112558"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -174,7 +174,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "3aa5527dc0dbeae8ee73408418c3ac902c2641b9747c7871bbd14f6cc6c4125b"
+      "sha256": "1f10d6995b8aa3b845058437633c3275296f05446335a0cec2feea71bbfde847"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -246,7 +246,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/maps.py",
       "policy": "replace-if-unmodified",
-      "sha256": "2690bfa5a931213e5c69d4f6576da6f6927d5b0efcec0a8e5a155610278574e6"
+      "sha256": "4135f13b3d314b41126ed8456d442511bf67c623e20e0d18130ae5b8cbf98d70"
     },
     "tools/wiki/lib/memory_fields.py": {
       "mode": "0644",

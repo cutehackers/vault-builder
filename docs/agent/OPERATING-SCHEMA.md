@@ -364,7 +364,7 @@ raw_sha256: "..."
 project: project-id           # or [project-id, other-project-id]
 ```
 
-`project` is a project id or a list of project ids. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value as an error. `maps build` writes no project summary page. It removes the summary pages an earlier `maps build` wrote under `wiki/maps/projects/` (frontmatter `generated_by: tools/wiki/cli.py maps build`, no page lock) and leaves hand-written files there.
+`project` is a project id or a list of project ids. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value as an error. `maps build` writes no project summary page. It removes the summary pages an earlier `maps build` wrote under `wiki/maps/projects/` (frontmatter `generated_by: tools/wiki/cli.py maps build`, no page lock) and leaves hand-written files there. `maps build --check` does not fail on the old pages.
 
 ### 4.2 Quality Gate Rule
 

@@ -72,13 +72,19 @@ def build_navigation_maps(
 ) -> NavigationMapBuildResult:
     current_date = build_date or date.today()
     wiki_root = root / "wiki"
-    deleted_paths = _old_project_summary_paths(root)
-    deleted = set(deleted_paths)
-    pages = [page for page in _load_wiki_pages(wiki_root) if page.path not in deleted]
+    old_summaries = _old_project_summary_paths(root)
+    old = set(old_summaries)
+    all_pages = _load_wiki_pages(wiki_root)
+    # Like the maps build that wrote them, the other maps never list old summaries; only the topic map does.
+    pages = [page for page in all_pages if page.path not in old]
+    # --check leaves old summaries in the topic map, so a vault that still has them passes the gate that
+    # migration apply runs. A build or dry run removes them and drops them from the topic map.
+    deleted_paths = [] if check else old_summaries
+    kept_summaries = [page for page in all_pages if page.path in old] if check else []
     source_entries = build_source_registry(root, checked_at=current_date)
     review_items = list_review_items(root)
 
-    rendered_pages = _render_map_pages(root, pages, source_entries, review_items, current_date)
+    rendered_pages = _render_map_pages(root, pages, source_entries, review_items, current_date, kept_summaries)
     target_paths = [path for path, _content in rendered_pages]
     written_paths = _changed_paths(rendered_pages)
     changed_paths = written_paths + deleted_paths
@@ -164,9 +170,10 @@ def _render_map_pages(
     source_entries: list[SourceRegistryEntry],
     review_items: list[ReviewItem],
     current_date: date,
+    kept_summaries: list[Page] | None = None,
 ) -> list[tuple[Path, str]]:
     wiki_root = root / "wiki"
-    topic_pages = _pages_with_generated_map_pages(root, pages, current_date)
+    topic_pages = _pages_with_generated_map_pages(root, pages, current_date) + list(kept_summaries or [])
     bodies = {
         "topic-map": _render_topic_map(root, topic_pages),
         "source-map": _render_source_map(root, source_entries),

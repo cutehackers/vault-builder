@@ -9502,6 +9502,11 @@ class ContractV5MigrationTests(_RouterVaultTestCase):
 class ContractV6MigrationTests(_RouterVaultTestCase):
     """A Vault installed by release 4.1.0 (contract 5) reaches contract 6 (vault-graph request S11)."""
 
+    def _run_in_vault(self, target: Path, *command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(command), cwd=target, text=True, capture_output=True, check=False, env=self._env(), timeout=600
+        )
+
     def test_contract_5_vault_reaches_contract_6_and_install_removes_project_memory_files(self):
         builder = _extract_git_archive(ROOT, V5_INSTALL_COMMIT, self.tmp / "builder-contract-5")
         self.assertEqual(V5_CATALOG_SHA256, sha256_file(builder / "tools" / "vault_migration" / "contracts" / "v5.json"))
@@ -9524,6 +9529,20 @@ class ContractV6MigrationTests(_RouterVaultTestCase):
         self.assertTrue(self.skill.is_file())
         self.assertTrue(self.recall.is_file())
         retired_bytes = {relative: (target / relative).read_bytes() for relative in RETIRED_SKILL_FILES}
+        # Release 4.1.0 maps build writes a project summary page for an open inbox item with Project:.
+        inbox = target / "wiki" / "inbox.md"
+        inbox.write_text(
+            inbox.read_text(encoding="utf-8").replace(
+                "No open items.",
+                "## [2026-11-01] Ship the app\n\nStatus: deferred\nProject: demo\nSource: Human instruction.\n"
+                "Note: Open work for demo.\nNext action: Build it.",
+            ),
+            encoding="utf-8",
+        )
+        old_build = self._run_in_vault(target, sys.executable, "tools/wiki/cli.py", "maps", "build")
+        self.assertEqual(0, old_build.returncode, old_build.stdout + old_build.stderr)
+        summary = target / "wiki" / "maps" / "projects" / "demo.md"
+        self.assertTrue(summary.is_file())
 
         plan = audit_vault(ROOT, target)
 
@@ -9533,9 +9552,17 @@ class ContractV6MigrationTests(_RouterVaultTestCase):
         for relative in RETIRED_SKILL_FILES:
             self.assertNotIn(relative, actions)
 
-        manifest = apply_plan(ROOT, target, plan, run_gate=lambda _: None)
+        # The real vault release gate runs before and after the change, with the old summary page still there.
+        manifest = apply_plan(ROOT, target, plan)
 
         self.assertEqual((6, 6), (manifest.schema_version, manifest.contract_version))
+        self.assertTrue(summary.is_file())
+        build = self._run_in_vault(target, sys.executable, "tools/wiki/cli.py", "maps", "build")
+        self.assertEqual(0, build.returncode, build.stdout + build.stderr)
+        self.assertFalse(summary.exists())
+        self.assertIn("Removed `wiki/maps/projects/demo.md`", (target / "wiki" / "log.md").read_text(encoding="utf-8"))
+        gate = self._run_in_vault(target, "bash", "scripts/release_gate.sh")
+        self.assertEqual(0, gate.returncode, gate.stdout[-4000:] + gate.stderr[-4000:])
         for relative in RETIRED_SKILL_FILES:
             self.assertNotIn(relative, manifest.managed_files)
             # Migration leaves the retired skill in place; CHANGELOG Upgrade tells the owner to delete it.
