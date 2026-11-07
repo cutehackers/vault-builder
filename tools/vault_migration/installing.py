@@ -1,5 +1,5 @@
-"""Install a Vault plus its user-level files: project-memory skill, recall script, router, vault map,
-and the one shared MCP server entry `mcpServers.vault-wiki`. No Vault gets a .mcp.json.
+"""Install a Vault plus its user-level files: router, vault map, and the one shared MCP server entry
+`mcpServers.vault-wiki`. No Vault gets a .mcp.json.
 An entry of ours under the previous name `mcpServers.llm-wiki` is renamed in the same write.
 
 New Vault: precheck, assemble and self-check in a temporary sibling folder, one rename, then the
@@ -18,6 +18,11 @@ Outside files live beneath the config folder: CLAUDE_CONFIG_DIR when set, else $
 The MCP settings file is $HOME/.claude.json, or <config folder>/.claude.json when CLAUDE_CONFIG_DIR
 is set. Manifest records locate them relative to $HOME, so the config folder must be inside $HOME.
 The server entry is rewritten only when it changes, so a second Vault usually leaves that file alone.
+
+Install no longer writes the project-memory skill and its recall script (vault-graph request S11). When
+an earlier install left them and they are still builder output (a manifest records their hash, or they
+equal a released asset), install deletes them, drops their manifest records, and removes the folders
+they leave empty. A changed copy is kept and listed.
 
 --with-hooks also copies the hook launcher vault_hooks.py next to the router, records the vg path in
 <config folder>/vault-builder/vault-hooks.json, and adds the launcher hook entries to
@@ -63,8 +68,25 @@ LEGACY_MCP_SERVER_KEY = "llm-wiki"
 SERVER_KEY_PATHS = (f"mcpServers.{MCP_SERVER_KEY}", f"mcpServers.{LEGACY_MCP_SERVER_KEY}")
 # Entries named llm-wiki-<name> come from the previous builder version, which install refuses.
 MCP_ENTRY_PREFIX = "llm-wiki-"
-RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
-_ASSET_ROOT = Path("tools/vault_migration/assets/project-memory")
+# The project-memory skill and recall script that install wrote before vault-graph request S11.
+# Install and uninstall delete them only when they are builder output: a recorded hash or a released asset.
+LEGACY_RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
+_LEGACY_SKILL_SHA256 = frozenset(
+    {
+        "07644af358af7f197655879eef103643cf56adeb05c48d819240f6f6f33ff3fc",
+        "aa1c6e4a4724f0cd1a8b7e48c8f915198597bfa964450721f9062f14856bcf85",
+    }
+)
+# recall.sh assets with the placeholder still on their single PYTHON= line. Install replaced only that line.
+_LEGACY_RECALL_TEMPLATE_SHA256 = frozenset(
+    {
+        "f4a9ffa6fa83141c195ed3b1c78aeb870668623591565b6bb1a658a6e782cc0c",
+        "cf68cf87c893dea8c2e53508eaa5785c811ae2e6f8590ebba978671738f6f5e6",
+        "bcef1bc75f97bf67a2fc08bea662717741164b30dfcaf65f7c27b2c69677a50e",
+        "39e2da33f4e1a8c4d1ff501cc887136533e071861dc075fd257903dadf710030",
+        "7fecb92677fb30f31be89444a166384577b87a501138c340d5c834ebbe6d0f6f",
+    }
+)
 _ROUTER_ASSET = Path("tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py")
 _CATALOG_PATH = "tools/vault_migration/contracts/v5.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
@@ -75,7 +97,7 @@ _VAULT_MAP_READ_VERSIONS = (1, 2)
 
 
 def _vault_map_version_ok(version: object) -> bool:
-    """Only a JSON integer 1 or 2, as the router, recall and memory-scan read it (not true or 1.0)."""
+    """Only a JSON integer 1 or 2, as the router and memory-scan read it (not true or 1.0)."""
     return type(version) is int and version in _VAULT_MAP_READ_VERSIONS
 _PATCH_VERSION = re.compile(r"\d+\.\d+\.\d+")
 _PREVIOUS_VERSION_HINT = "Run uninstall with the previous vault-builder version, then run install again."
@@ -155,12 +177,18 @@ class UserPaths:
     mcp_config: Path
 
     @property
-    def skill(self) -> Path:
+    def legacy_skill(self) -> Path:
+        """The project-memory skill an earlier install wrote. Install now deletes it."""
         return self.config_dir / "skills" / "project-memory" / "SKILL.md"
 
     @property
-    def recall(self) -> Path:
+    def legacy_recall(self) -> Path:
+        """The recall script an earlier install wrote. Install now deletes it."""
         return self.config_dir / "skills" / "project-memory" / "scripts" / "recall.sh"
+
+    @property
+    def legacy_files(self) -> tuple[Path, Path]:
+        return (self.legacy_skill, self.legacy_recall)
 
     @property
     def vault_map(self) -> Path:
@@ -265,6 +293,7 @@ class _InstallPlan:
     remove_legacy_entry: bool = False  # mcpServers.llm-wiki is ours and goes in the same write
     restore_plan: MigrationPlan | None = None  # set for a Vault without a manifest
     hooks: _HooksPlan | None = None  # set by --with-hooks
+    legacy_deletes: list[Path] = field(default_factory=list)  # builder-owned project-memory files to delete
 
     @property
     def mcp_key(self) -> str:
@@ -366,7 +395,7 @@ def _precheck(
                 + ", ".join(missing)
                 + ". Create the vault without --with-stenc, or run --with-stenc from a template that includes Stenc."
             )
-    for path in (user.skill, user.recall, user.router, user.vault_map, user.mcp_config):
+    for path in (user.router, user.vault_map, user.mcp_config):
         _require_regular_or_absent(path)
     entry: dict[str, object] = {"command": python, "args": ["-I", str(user.router)]}
     notes: list[str] = []
@@ -452,13 +481,10 @@ def _precheck(
                 "Choose a different name with --name."
             )
 
-    skill_asset = (builder_root / _ASSET_ROOT / "SKILL.md").read_bytes()
     router_asset = (builder_root / _ROUTER_ASSET).read_bytes()
     # A router an earlier install wrote (a vault manifest records its hash) is replaced, so the new server name reaches it.
     router_hashes = _recorded_hashes(user, user.router, [target, *_vault_paths(vaults)])
     files = [
-        _file_plan(user.skill, skill_asset, 0o644, lambda current: current == skill_asset),
-        _file_plan(user.recall, _recall_bytes(builder_root, python), 0o755, _recall_is_known(builder_root)),
         _file_plan(
             user.router,
             router_asset,
@@ -469,6 +495,8 @@ def _precheck(
     for item in files:
         if item.action == "keep":
             notes.append(f"Kept existing file with unknown content (not replaced): {item.path}")
+
+    legacy_deletes = _legacy_plan(user, [target, *_vault_paths(vaults)], notes)
 
     hooks_plan = _hooks_precheck(user, builder_root, environ, python, notes) if with_hooks else None
 
@@ -497,6 +525,7 @@ def _precheck(
         remove_legacy_entry=remove_legacy,
         restore_plan=restore_plan,
         hooks=hooks_plan,
+        legacy_deletes=legacy_deletes,
     )
 
 
@@ -602,7 +631,7 @@ def _require_current_records(target: Path, user: UserPaths) -> None:
     manifest = load_manifest(target)
     assert manifest is not None
     expected = {
-        user.relative(path) for path in (user.skill, user.recall, user.router, user.vault_map, user.mcp_config)
+        user.relative(path) for path in (*user.legacy_files, user.router, user.vault_map, user.mcp_config)
     }
     for record in manifest.external_records:
         key_path = str(record.get("key_path", ""))
@@ -717,30 +746,59 @@ def _is_within(path: Path, root: Path) -> bool:
     return True
 
 
-def _recall_bytes(builder_root: Path, python: str) -> bytes:
-    text = (builder_root / _ASSET_ROOT / "scripts" / "recall.sh").read_text(encoding="utf-8")
-    if text.count(RECALL_PLACEHOLDER) != 1:
-        raise InstallError("recall.sh asset must contain exactly one interpreter placeholder.")
-    return text.replace(RECALL_PLACEHOLDER, shlex.quote(python)).encode("utf-8")
+def _legacy_plan(user: UserPaths, vaults: list[Path], notes: list[str]) -> list[Path]:
+    """Return the project-memory files to delete. A changed copy stays and gets a note."""
+    deletes: list[Path] = []
+    for path in user.legacy_files:
+        if not path.exists() and not path.is_symlink():
+            continue
+        if is_legacy_builder_file(path, _recorded_hashes(user, path, vaults)):
+            deletes.append(path)
+        else:
+            notes.append(
+                f"Kept {path}: it is not a file an earlier install wrote. vault-builder no longer installs the "
+                "project-memory skill; delete the file yourself when you no longer need it."
+            )
+    return deletes
 
 
-def _recall_is_known(builder_root: Path) -> Callable[[bytes], bool]:
-    template = (builder_root / _ASSET_ROOT / "scripts" / "recall.sh").read_text(encoding="utf-8")
-    placeholder_line = f"PYTHON={RECALL_PLACEHOLDER}"
+def is_legacy_builder_file(path: Path, recorded: set[str]) -> bool:
+    """True when the project-memory skill or recall script is a regular file an earlier install wrote."""
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            return False
+    except FileNotFoundError:
+        return False
+    current = path.read_bytes()
+    if hashlib.sha256(current).hexdigest() in recorded:
+        return True
+    if path.name == "SKILL.md":
+        return hashlib.sha256(current).hexdigest() in _LEGACY_SKILL_SHA256
+    return _legacy_recall_template_sha256(current) in _LEGACY_RECALL_TEMPLATE_SHA256
 
-    def known(current: bytes) -> bool:
-        # A builder recall.sh differs from the asset only in the interpreter on its PYTHON= line.
+
+def _legacy_recall_template_sha256(current: bytes) -> str | None:
+    """Put the single PYTHON= line back to the asset placeholder and hash the result."""
+    try:
+        lines = current.decode("utf-8").split("\n")
+    except UnicodeError:
+        return None
+    candidates = [index for index, line in enumerate(lines) if line.startswith("PYTHON=")]
+    if len(candidates) != 1:
+        return None
+    lines[candidates[0]] = f"PYTHON={LEGACY_RECALL_PLACEHOLDER}"
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def remove_legacy_directories(user: UserPaths) -> None:
+    """Remove the project-memory folders when deleting the legacy files left them empty."""
+    project_memory = user.config_dir / "skills" / "project-memory"
+    for directory in (project_memory / "scripts", project_memory):
         try:
-            lines = current.decode("utf-8").split("\n")
-        except UnicodeError:
-            return False
-        candidates = [index for index, line in enumerate(lines) if line.startswith("PYTHON=")]
-        if len(candidates) != 1:
-            return False
-        lines[candidates[0]] = placeholder_line
-        return "\n".join(lines) == template
-
-    return known
+            directory.rmdir()
+        except OSError:
+            continue
+        fsync_directory(directory.parent)
 
 
 def _file_plan(path: Path, contents: bytes, mode: int, is_known: Callable[[bytes], bool]) -> _FilePlan:
@@ -844,6 +902,7 @@ def _install_new_vault(plan: _InstallPlan, builder_root: Path) -> None:
         raise
     finally:
         changes.finish()
+    remove_legacy_directories(plan.user)
 
 
 def _install_restored_vault(plan: _InstallPlan, builder_root: Path) -> None:
@@ -877,6 +936,7 @@ def _install_existing_vault(
     changes = _OutsideChanges()
     try:
         records = _apply_outside_changes(plan, changes)
+        legacy_locations = {plan.user.relative(path) for path in plan.user.legacy_files}
         identities = {(str(record["location"]), str(record.get("key_path", ""))) for record in records}
         kept = [
             dict(record)
@@ -884,6 +944,8 @@ def _install_existing_vault(
             if (str(record["location"]), str(record.get("key_path", ""))) not in identities
             # The server entry record moves to the new key path.
             and not (record["kind"] == "json-entry" and str(record.get("key_path", "")) in SERVER_KEY_PATHS)
+            # Install no longer writes the project-memory files, so their records go.
+            and str(record["location"]) not in legacy_locations
         ]
         updated = dataclasses.replace(manifest, external_records=tuple([*kept, *records]))
         _before_write(plan.target / ".vault-builder" / "manifest.json")
@@ -895,6 +957,7 @@ def _install_existing_vault(
         raise
     finally:
         changes.finish()
+    remove_legacy_directories(plan.user)
 
 
 def _current_umask() -> int:
@@ -1099,7 +1162,7 @@ def _missing_directories(path: Path) -> list[Path]:
 
 
 def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list[dict[str, object]]:
-    """Write skill, recall script, router, vault map and server entry. Return the manifest external records.
+    """Write router, vault map and server entry, delete legacy project-memory files. Return the manifest records.
 
     The caller rolls back `changes` on any failure, including failures after this returns.
     """
@@ -1112,6 +1175,8 @@ def _apply_outside_changes(plan: _InstallPlan, changes: _OutsideChanges) -> list
             records.append(
                 {"kind": "file", "location": user.relative(item.path), "sha256": sha256_file(item.path), "shared": True}
             )
+    for path in plan.legacy_deletes:
+        changes.delete(path)
     if plan.vault_map_write:
         changes.write(user.vault_map, _json_bytes(plan.vault_map, indent=2), 0o644)
     records.append({"kind": "config", "location": user.relative(user.vault_map), "shared": True})
@@ -1200,6 +1265,8 @@ def _print_dry_run(plan: _InstallPlan, stream: TextIO) -> None:
         print("  apply the audit plan (release gate runs twice), which writes the manifest", file=stream)
     for item in plan.files:
         print(f"  {item.action} {item.path}", file=stream)
+    for path in plan.legacy_deletes:
+        print(f"  delete {path}: vault-builder no longer installs the project-memory skill", file=stream)
     print(f"  {plan.vault_map_action} vault {plan.name} in {plan.user.vault_map}", file=stream)
     if plan.mcp_entry_action == "rename":
         print(
@@ -1245,7 +1312,8 @@ def _print_result(plan: _InstallPlan, stream: TextIO) -> None:
     print(f"MCP server: mcpServers.{plan.mcp_key} ({plan.mcp_entry_action}) in {plan.user.mcp_config}", file=stream)
     print(f"Router: {plan.user.router}", file=stream)
     print(f"Vault map: {plan.user.vault_map}", file=stream)
-    print(f"Skill: {plan.user.skill}", file=stream)
+    for path in plan.legacy_deletes:
+        print(f"Deleted {path}: vault-builder no longer installs the project-memory skill.", file=stream)
     if plan.hooks is not None:
         print(
             f"Hooks: SessionStart, PreCompact, SessionEnd ({plan.hooks.settings_action}) in "

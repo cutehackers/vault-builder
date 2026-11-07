@@ -6516,31 +6516,34 @@ class FreshVaultClaudeIntegrationTest(unittest.TestCase):
             self.assertEqual("create", actions["scripts/release_gate.sh"].action)
 
 
-PROJECT_MEMORY_ASSET = ROOT / "tools" / "vault_migration" / "assets" / "project-memory"
-RECALL_ASSET = PROJECT_MEMORY_ASSET / "scripts" / "recall.sh"
-PROJECT_MEMORY_SKILL_ASSET = PROJECT_MEMORY_ASSET / "SKILL.md"
-RECALL_PYTHON_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
 ROUTER_ASSET = ROOT / "tools" / "vault_migration" / "assets" / "llm-wiki-router" / "llm_wiki_router.py"
-RECALL_SECTIONS = ("open", "decisions", "corrections")
+# Release 4.1.0, the last release that installed the project-memory skill and recall.sh (vault-graph request S11).
+LEGACY_ASSET_COMMIT = "2e464ac"
+LEGACY_ASSET_ROOT = "tools/vault_migration/assets/project-memory"
+LEGACY_RECALL_PLACEHOLDER = "@VAULT_BUILDER_PYTHON@"
 
 
-def _materialize_recall_script(destination: Path) -> Path:
-    """Fill the interpreter placeholder the way install does and make the script executable."""
-    text = RECALL_ASSET.read_text(encoding="utf-8")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(text.replace(RECALL_PYTHON_PLACEHOLDER, shlex.quote(sys.executable)), encoding="utf-8")
-    destination.chmod(0o755)
-    return destination
+def _legacy_asset(relative: str) -> bytes:
+    """Return the bytes of a project-memory asset as release 4.1.0 shipped it."""
+    return subprocess.run(
+        ["git", "show", f"{LEGACY_ASSET_COMMIT}:{LEGACY_ASSET_ROOT}/{relative}"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout
 
 
-def _recall_namespace() -> dict[str, object]:
-    """Load the Python embedded in recall.sh without running its main function."""
-    text = RECALL_ASSET.read_text(encoding="utf-8")
-    start = text.index("<<'PY'\n") + len("<<'PY'\n")
-    end = text.index("\nPY\n", start)
-    namespace: dict[str, object] = {"__name__": "recall_embedded"}
-    exec(compile(text[start:end], str(RECALL_ASSET), "exec"), namespace)
-    return namespace
+def _write_legacy_project_memory(config: Path, python: str = "/old/python3.11") -> tuple[Path, Path]:
+    """Write the skill and recall.sh the way release 4.1.0 install did. Returns (skill, recall)."""
+    skill = config / "skills" / "project-memory" / "SKILL.md"
+    recall = skill.parent / "scripts" / "recall.sh"
+    recall.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_bytes(_legacy_asset("SKILL.md"))
+    recall.write_bytes(
+        _legacy_asset("scripts/recall.sh").replace(LEGACY_RECALL_PLACEHOLDER.encode(), shlex.quote(python).encode())
+    )
+    recall.chmod(0o755)
+    return skill, recall
 
 
 def _git(cwd: Path, *arguments: str) -> None:
@@ -6561,514 +6564,6 @@ def _init_git_repo(path: Path) -> Path:
     _git(path, "add", "README.md")
     _git(path, "commit", "-q", "-m", "init")
     return path
-
-
-def _write_summary_page(vault: Path, project_id: str, sections: list[list[str]]) -> Path:
-    page = vault / "wiki" / "maps" / "projects" / f"{project_id}.md"
-    page.parent.mkdir(parents=True, exist_ok=True)
-    frontmatter = (
-        "---\n"
-        f'title: "Project Summary: {project_id}"\n'
-        "type: map\n"
-        "generated_by: tools/wiki/cli.py maps build\n"
-        f"project: {project_id}\n"
-        "---\n"
-    )
-    page.write_text(frontmatter + "\n" + _render_project_summary(project_id, sections), encoding="utf-8")
-    return page
-
-
-def _small_sections() -> list[list[str]]:
-    return [
-        ["- [[inbox]] — Fix login timeout (deferred)"],
-        ["- [[decisions/use-sqlite]] — Use SQLite for local state (wiki/decisions/use-sqlite.md)"],
-        ["- [[rules/no-force-push]] — Never force push shared branches (wiki/rules/no-force-push.md)"],
-    ]
-
-
-def _large_korean_sections(label: str) -> list[list[str]]:
-    def lines(kind: str) -> list[str]:
-        return [
-            f"- [[{kind}/{label}-{index:03d}]] — {label} 저장소의 배포 순서와 데이터 보존 기간을 정한 한국어 결정 요약 {index}번 "
-            f"(wiki/{kind}/{label}-{index:03d}.md)"
-            for index in range(60)
-        ]
-
-    return [
-        [f"- [[inbox]] — {label} 남은 일 {index}번: 배포 스크립트 점검 (deferred)" for index in range(60)],
-        lines("decisions"),
-        lines("rules"),
-    ]
-
-
-class ProjectMemoryRecallTest(unittest.TestCase):
-    """recall.sh runs with a temporary HOME and without CLAUDE_CONFIG_DIR (A-26)."""
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmpdir.cleanup)
-        self.tmp = Path(self._tmpdir.name).resolve()
-        self.home = self.tmp / "home"
-        self.config = self.home / ".claude"
-        self.script = _materialize_recall_script(
-            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
-        )
-        self.repo = _init_git_repo(self.tmp / "work" / "sample-app")
-        self.vault_a = self.tmp / "vaults" / "personal"
-        self.page_a = _write_summary_page(self.vault_a, "sample-app", _small_sections())
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
-            }
-        )
-
-    def _write_vault_map(self, data: object, *, config: Path | None = None) -> Path:
-        path = (config or self.config) / "vault-builder" / "vault-map.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data) if not isinstance(data, str) else data, encoding="utf-8")
-        return path
-
-    def _recall(self, cwd: Path, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        environment = {
-            "HOME": str(self.home),
-            "PATH": os.environ.get("PATH", ""),
-            "GIT_CEILING_DIRECTORIES": str(self.tmp),
-            **(env or {}),
-        }
-        # The environment is built from scratch, so CLAUDE_CONFIG_DIR is unset unless a test passes it.
-        return subprocess.run(
-            [str(self.script), *arguments],
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=environment,
-            timeout=30,
-        )
-
-    def _assert_one_reason_line(self, result: subprocess.CompletedProcess[str], *needles: str) -> str:
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertEqual(1, len(lines), result.stdout)
-        for needle in needles:
-            self.assertIn(needle, lines[0])
-        return lines[0]
-
-    def test_recall_prints_only_the_requested_section(self):
-        for index, section in enumerate(RECALL_SECTIONS):
-            with self.subTest(section=section):
-                result = self._recall(self.repo, section)
-                self.assertEqual(0, result.returncode, result.stderr)
-                self.assertEqual("", result.stderr)
-                headings = [line for line in result.stdout.splitlines() if line.startswith("## ")]
-                self.assertEqual([PROJECT_SECTION_HEADINGS[index]], headings)
-                self.assertIn(_small_sections()[index][0], result.stdout)
-                header = result.stdout.splitlines()[0]
-                self.assertIn("personal", header)
-                self.assertIn(str(self.page_a), header)
-
-        result = self._recall(self.repo)
-        self.assertEqual(0, result.returncode, result.stderr)
-        headings = [line for line in result.stdout.splitlines() if line.startswith("## ")]
-        self.assertEqual(list(PROJECT_SECTION_HEADINGS), headings)
-        self.assertNotIn("## Purpose", result.stdout)
-        self.assertNotIn("generated_by", result.stdout)
-        for lines in _small_sections():
-            self.assertIn(lines[0], result.stdout)
-
-    def test_recall_from_git_worktree_matches_main_worktree(self):
-        worktree = self.tmp / "work" / "feature-checkout"
-        _git(self.repo, "worktree", "add", "-q", "-b", "feature", str(worktree))
-        nested = worktree / "nested"
-        nested.mkdir()
-        for arguments in ((), *((section,) for section in RECALL_SECTIONS)):
-            with self.subTest(arguments=arguments):
-                main_result = self._recall(self.repo, *arguments)
-                for cwd in (worktree, nested):
-                    worktree_result = self._recall(cwd, *arguments)
-                    self.assertEqual(0, worktree_result.returncode, worktree_result.stderr)
-                    self.assertEqual(main_result.stdout, worktree_result.stdout)
-                    self.assertIn("## ", worktree_result.stdout)
-
-    def test_recall_outside_git_prints_one_reason_line(self):
-        outside = self.tmp / "outside"
-        outside.mkdir()
-        self._assert_one_reason_line(self._recall(outside), "git")
-        self._assert_one_reason_line(self._recall(outside, "open"), "git")
-
-    def test_recall_unlinked_repository_prints_reason_and_link_lines(self):
-        other = _init_git_repo(self.tmp / "work" / "other-app")
-        result = self._recall(other)
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertEqual(2, len(lines), result.stdout)
-        self.assertIn("other-app", lines[0])
-        self.assertTrue(lines[1].startswith("link: "), lines[1])
-
-    def test_recall_missing_or_damaged_link_config_prints_one_reason_line(self):
-        vault_map = self.config / "vault-builder" / "vault-map.json"
-        damaged = {
-            "invalid-json": "{not json",
-            "not-an-object": "[]",
-            "projects-not-object": json.dumps({"vaults": {}, "projects": []}),
-            "project-entry-not-object": json.dumps({"vaults": {}, "projects": {"sample-app": "personal"}}),
-            "unknown-vault": json.dumps(
-                {"vaults": {}, "projects": {"sample-app": {"root": str(self.repo), "vaults": ["ghost"]}}}
-            ),
-            "vault-without-path": json.dumps(
-                {"vaults": {"personal": {"role": "personal"}}, "projects": {"sample-app": {"root": "x", "vaults": ["personal"]}}}
-            ),
-        }
-        for name, content in damaged.items():
-            with self.subTest(case=name):
-                vault_map.write_text(content, encoding="utf-8")
-                self._assert_one_reason_line(self._recall(self.repo), "vault-map.json")
-        vault_map.unlink()
-        self._assert_one_reason_line(self._recall(self.repo), "vault-map.json")
-
-    def test_recall_rejects_unknown_arguments_with_exit_2(self):
-        for arguments in (("recent",), ("Open",), ("open", "decisions"), ("--help",)):
-            with self.subTest(arguments=arguments):
-                result = self._recall(self.repo, *arguments)
-                self.assertEqual(2, result.returncode)
-                self.assertEqual("", result.stdout)
-                self.assertEqual(1, len(result.stderr.splitlines()), result.stderr)
-                self.assertIn("usage: recall.sh [open|decisions|corrections]", result.stderr)
-
-    def test_recall_skips_missing_vaults_pages_and_sections(self):
-        missing_vault = self.tmp / "vaults" / "gone"
-        no_page_vault = self.tmp / "vaults" / "empty"
-        no_page_vault.mkdir(parents=True)
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {
-                    "gone": {"path": str(missing_vault), "role": "team"},
-                    "empty": {"path": str(no_page_vault), "role": "team"},
-                    "personal": {"path": str(self.vault_a), "role": "personal"},
-                },
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["gone", "empty", "personal"]}},
-            }
-        )
-        result = self._recall(self.repo, "open")
-        self.assertEqual(0, result.returncode, result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertIn("gone", lines[0])
-        self.assertIn("empty", lines[1])
-        self.assertIn(_small_sections()[0][0], result.stdout)
-
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {"gone": {"path": str(missing_vault), "role": "team"}},
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["gone"]}},
-            }
-        )
-        self._assert_one_reason_line(self._recall(self.repo), "gone")
-
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
-            }
-        )
-        self.page_a.write_text(
-            self.page_a.read_text(encoding="utf-8").replace("## Corrections and Rules", "## Other"),
-            encoding="utf-8",
-        )
-        result = self._recall(self.repo, "corrections")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("## Corrections and Rules", result.stdout)
-        self.assertNotIn("## Open Work", result.stdout)
-        self.assertNotIn("no-force-push", result.stdout)
-
-    def test_recall_caps_two_vault_output_with_one_truncation_line(self):
-        vault_b = self.tmp / "vaults" / "team"
-        _write_summary_page(self.vault_a, "sample-app", _large_korean_sections("개인"))
-        _write_summary_page(vault_b, "sample-app", _large_korean_sections("팀"))
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {
-                    "personal": {"path": str(self.vault_a), "role": "personal"},
-                    "team": {"path": str(vault_b), "role": "team"},
-                },
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal", "team"]}},
-            }
-        )
-        cases = [((section,), PROJECT_SECTION_MAX_TOKENS) for section in RECALL_SECTIONS]
-        cases.append(((), PROJECT_MAP_MAX_TOKENS))
-        for arguments, limit in cases:
-            with self.subTest(arguments=arguments):
-                result = self._recall(self.repo, *arguments)
-                self.assertEqual(0, result.returncode, result.stderr)
-                self.assertLessEqual(estimate_tokens(result.stdout), limit)
-                lines = result.stdout.splitlines()
-                self.assertEqual(1, sum("truncated" in line for line in lines), result.stdout)
-                self.assertTrue(lines[-1].startswith("project-memory: output truncated"), lines[-1])
-                self.assertEqual(2, sum(line.startswith("# vault ") for line in lines))
-                self.assertIn("개인", result.stdout)
-                self.assertIn("팀", result.stdout)
-                expected = [PROJECT_SECTION_HEADINGS[RECALL_SECTIONS.index(arguments[0])]] if arguments else list(
-                    PROJECT_SECTION_HEADINGS
-                )
-                headings = [line for line in lines if line.startswith("## ")]
-                self.assertEqual(expected * 2, headings)
-                self.assertEqual(result.stdout, self._recall(self.repo, *arguments).stdout)
-
-    def test_recall_small_output_has_no_truncation_line(self):
-        result = self._recall(self.repo)
-        self.assertNotIn("truncated", result.stdout)
-
-    def test_recall_reads_link_config_from_claude_config_dir(self):
-        custom = self.tmp / "custom-config"
-        (self.config / "vault-builder" / "vault-map.json").unlink()
-        self._write_vault_map(
-            {
-                "version": 1,
-                "vaults": {"personal": {"path": str(self.vault_a), "role": "personal"}},
-                "projects": {"sample-app": {"root": str(self.repo), "vaults": ["personal"]}},
-            },
-            config=custom,
-        )
-        result = self._recall(self.repo, "open", env={"CLAUDE_CONFIG_DIR": str(custom)})
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("## Open Work", result.stdout)
-
-    def test_recall_estimate_tokens_matches_maps(self):
-        recall_estimate = _recall_namespace()["estimate_tokens"]
-        samples = {
-            "korean": "프로젝트 요약은 필요한 섹션만 불러온다. 한글 자모 ㄱㅏ, 옛한글 각, 확장 ꥠ ힰ.",
-            "english": "Load only the requested section of the project summary.\n- [[decisions/x]] — y (wiki/x.md)",
-            "mixed": "- [[decisions/결정-001]] — SQLite를 local state 저장소로 쓴다 (wiki/decisions/결정-001.md)\n",
-        }
-        for name, sample in samples.items():
-            with self.subTest(sample=name):
-                self.assertEqual(estimate_tokens(sample), recall_estimate(sample))
-        for sample in ("", "a", "가", "ab가", "\n\n\n\n\n"):
-            self.assertEqual(estimate_tokens(sample), recall_estimate(sample))
-
-    def test_recall_constants_match_maps(self):
-        namespace = _recall_namespace()
-        self.assertEqual(PROJECT_SECTION_MAX_TOKENS, namespace["SECTION_MAX_TOKENS"])
-        self.assertEqual(PROJECT_MAP_MAX_TOKENS, namespace["ALL_MAX_TOKENS"])
-        self.assertEqual(
-            dict(zip(RECALL_SECTIONS, PROJECT_SECTION_HEADINGS)),
-            namespace["SECTION_HEADINGS"],
-        )
-
-    def test_recall_script_has_one_interpreter_placeholder_and_valid_syntax(self):
-        text = RECALL_ASSET.read_text(encoding="utf-8")
-        self.assertEqual(1, text.count(RECALL_PYTHON_PLACEHOLDER))
-        self.assertNotIn(RECALL_PYTHON_PLACEHOLDER, self.script.read_text(encoding="utf-8"))
-        subprocess.run(["bash", "-n", str(RECALL_ASSET)], check=True)
-        self.assertTrue(os.access(self.script, os.X_OK))
-
-    def test_project_memory_skill_frontmatter_and_body(self):
-        text = PROJECT_MEMORY_SKILL_ASSET.read_text(encoding="utf-8")
-        self.assertTrue(text.startswith("---\n"))
-        frontmatter_end = text.index("\n---\n", 4)
-        frontmatter = text[4:frontmatter_end]
-        body = text[frontmatter_end + 5 :]
-        self.assertLessEqual(len(frontmatter), 1536)
-        fields = dict(line.split(": ", 1) for line in frontmatter.splitlines())
-        self.assertEqual(["name", "description", "allowed-tools"], list(fields))
-        self.assertEqual("project-memory", fields["name"])
-        description = fields["description"]
-        for word in ("spec", "설계", "계획", "지난 결정", "남은 일"):
-            self.assertIn(word, description)
-        self.assertLessEqual(estimate_tokens(description), 60)
-        self.assertEqual("Bash(${CLAUDE_SKILL_DIR}/scripts/recall.sh *)", fields["allowed-tools"])
-        self.assertEqual(1, frontmatter.count("allowed-tools"))
-        self.assertIn("${CLAUDE_SKILL_DIR}/scripts/recall.sh", body)
-
-    def test_project_memory_skill_assets_have_no_home_path_and_stay_out_of_catalog(self):
-        for path in sorted(PROJECT_MEMORY_ASSET.rglob("*")):
-            if path.is_file():
-                text = path.read_text(encoding="utf-8")
-                self.assertNotIn("/Users/", text, path)
-                self.assertNotIn("/home/", text, path)
-                self.assertNotIn("~/", text, path)
-        catalog_paths = json.loads((ROOT / "tools" / "vault_migration" / "contracts" / "v5.json").read_text(encoding="utf-8"))
-        self.assertNotIn("assets/", json.dumps(catalog_paths))
-        self.assertFalse([path for path in MANAGED_PATHS if path.startswith("tools/vault_migration/")])
-
-
-class RecallProjectLookupTests(unittest.TestCase):
-    """recall.sh finds the project by root, origin remote, then folder name (spec 4.3, 4.4, A-11)."""
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmpdir.cleanup)
-        self.tmp = Path(self._tmpdir.name).resolve()
-        self.home = self.tmp / "home"
-        self.config = self.home / ".claude"
-        self.script = _materialize_recall_script(
-            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
-        )
-        self.vault = self.tmp / "vaults" / "personal"
-        self.team = self.tmp / "vaults" / "team"
-        _write_summary_page(self.vault, "sample-app", _small_sections())
-        self.vaults = {
-            "personal": {"path": str(self.vault), "role": "personal"},
-            "team": {"path": str(self.team), "role": "team"},
-        }
-
-    def _write_map(self, projects: dict[str, object], *, version: object = 2) -> None:
-        path = self.config / "vault-builder" / "vault-map.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data: dict[str, object] = {"vaults": self.vaults, "projects": projects}
-        if version is not None:
-            data["version"] = version
-        path.write_text(json.dumps(data), encoding="utf-8")
-
-    def _repo(self, name: str, origin: str | None = None) -> Path:
-        repo = _init_git_repo(self.tmp / "work" / name)
-        if origin is not None:
-            _git(repo, "remote", "add", "origin", origin)
-        return repo
-
-    def _recall(self, cwd: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.script), *arguments],
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-            env={"HOME": str(self.home), "PATH": os.environ.get("PATH", ""), "GIT_CEILING_DIRECTORIES": str(self.tmp)},
-            timeout=30,
-        )
-
-    def _relink_lines(self, stdout: str) -> list[str]:
-        return [line for line in stdout.splitlines() if "link" in line and "--repo" in line]
-
-    def test_unlinked_repository_prints_reason_and_link_line(self):
-        repo = self._repo("other-app")
-        self._write_map({"sample-app": {"root": str(self.tmp / "work" / "sample-app"), "vaults": ["personal"]}})
-        result = self._recall(repo, "open")
-        self.assertEqual(0, result.returncode, result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertEqual(2, len(lines), result.stdout)
-        self.assertTrue(lines[0].startswith("project-memory: "), lines[0])
-        self.assertIn(str(repo), lines[0])
-        self.assertEqual(
-            f"link: run vault-builder link <vault> --repo {repo} (vaults: personal, team)",
-            lines[1],
-        )
-
-    def test_root_stage_finds_renamed_folder_without_relink_line(self):
-        repo = self._repo("renamed-folder")
-        self._write_map({"sample-app": {"root": str(repo), "vaults": ["personal"]}})
-        result = self._recall(repo, "open")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("## Open Work", result.stdout)
-        self.assertIn("sample-app.md", result.stdout.splitlines()[0])
-        self.assertEqual([], self._relink_lines(result.stdout))
-
-    def test_moved_repository_found_by_remote_prints_section_and_one_relink_line(self):
-        cases = {
-            "scp": ("git@GitHub.com:acme/sample-app.git", "https://github.com/acme/sample-app"),
-            "https": ("https://user@github.com:443/acme/sample-app.git/", "ssh://git@github.com/acme/sample-app"),
-        }
-        for name, (origin, recorded) in cases.items():
-            with self.subTest(form=name):
-                repo = self._repo(f"moved-{name}", origin)
-                old_root = self.tmp / "old" / "sample-app"
-                self._write_map({"sample-app": {"root": str(old_root), "remote": recorded, "vaults": ["personal"]}})
-                result = self._recall(repo, "open")
-                self.assertEqual(0, result.returncode, result.stderr)
-                self.assertIn("## Open Work", result.stdout)
-                self.assertIn(_small_sections()[0][0], result.stdout)
-                relink = self._relink_lines(result.stdout)
-                self.assertEqual(1, len(relink), result.stdout)
-                self.assertIn(str(old_root), relink[0])
-                self.assertIn(f"--repo {repo}", relink[0])
-
-    def test_name_stage_without_origin_finds_project(self):
-        repo = self._repo("sample-app")
-        self._write_map({"sample-app": {"root": str(self.tmp / "elsewhere" / "sample-app"), "vaults": ["personal"]}}, version=1)
-        result = self._recall(repo, "decisions")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("## Current Decisions", result.stdout)
-        self.assertEqual(1, len(self._relink_lines(result.stdout)), result.stdout)
-
-    def test_name_stage_skips_entry_with_different_remote(self):
-        repo = self._repo("sample-app", "https://github.com/acme/sample-app.git")
-        self._write_map(
-            {
-                "sample-app": {
-                    "root": str(self.tmp / "elsewhere" / "sample-app"),
-                    "remote": "git@github.com:other/sample-app.git",
-                    "vaults": ["personal"],
-                }
-            }
-        )
-        lines = self._recall(repo).stdout.splitlines()
-        self.assertEqual(2, len(lines), lines)
-        self.assertTrue(lines[1].startswith("link: "), lines[1])
-
-    def test_two_projects_with_same_remote_stop_with_ids(self):
-        repo = self._repo("moved", "git@github.com:acme/sample-app.git")
-        remote = "https://github.com/acme/sample-app"
-        self._write_map(
-            {
-                "alpha": {"root": str(self.tmp / "a"), "remote": remote, "vaults": ["personal"]},
-                "beta": {"root": str(self.tmp / "b"), "remote": remote, "vaults": ["personal"]},
-            }
-        )
-        result = self._recall(repo)
-        self.assertEqual(0, result.returncode, result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertEqual(1, len(lines), result.stdout)
-        self.assertIn("alpha", lines[0])
-        self.assertIn("beta", lines[0])
-
-    def test_unsupported_vault_map_version_prints_one_reason_line(self):
-        repo = self._repo("sample-app")
-        for version in (3, "2", True, None):
-            with self.subTest(version=version):
-                self._write_map({"sample-app": {"root": str(repo), "vaults": ["personal"]}}, version=version)
-                lines = self._recall(repo).stdout.splitlines()
-                self.assertEqual(1, len(lines), lines)
-                self.assertIn("version", lines[0])
-                self.assertIn("damaged", lines[0])
-
-    def test_relative_local_remote_of_entry_is_read_against_its_stored_root(self):
-        old_root = self.tmp / "old" / "sample-app"
-        repo = self._repo("moved", str(self.tmp / "old" / "upstream.git"))
-        self._write_map({"sample-app": {"root": str(old_root), "remote": "../upstream.git", "vaults": ["personal"]}})
-        result = self._recall(repo, "open")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("## Open Work", result.stdout)
-        relink = self._relink_lines(result.stdout)
-        self.assertEqual(1, len(relink), result.stdout)
-        self.assertIn("Run link again", relink[0])
-
-    def test_normalize_remote_forms(self):
-        normalize = _recall_namespace()["normalize_remote"]
-        base = self.tmp / "work" / "repo"
-        expected = "github.com/acme/sample-app"
-        for url in (
-            "git@github.com:acme/sample-app.git",
-            " https://github.com/acme/sample-app/ ",
-            "ssh://git@GitHub.com:22/acme/sample-app.git",
-            "https://user@github.com/acme/sample-app.git/",
-        ):
-            with self.subTest(url=url):
-                self.assertEqual(expected, normalize(url, base))
-        self.assertEqual(expected, normalize("GitHub.com:acme/sample-app.git", base))
-        self.assertEqual(str(self.tmp / "remotes" / "x.git"), normalize(f"file://{self.tmp}/remotes/x.git", base))
-        self.assertEqual(str(self.tmp / "remotes" / "x.git"), normalize(f"{self.tmp}/remotes/x.git/", base))
-        self.assertEqual(str(self.tmp / "work" / "up.git"), normalize("../up.git", base))
-
-    def test_skill_tells_agent_to_pass_link_line_to_user(self):
-        text = PROJECT_MEMORY_SKILL_ASSET.read_text(encoding="utf-8")
-        reading = text[text.index("Reading the output:") :]
-        items = [line for line in reading.splitlines() if line.startswith("- ")]
-        self.assertTrue(any("`link:`" in item and "unchanged" in item for item in items), items)
 
 
 def _tree_snapshot(*roots: Path) -> dict[str, tuple[str, int]]:
@@ -7140,16 +6635,10 @@ class _UserHomeTestCase(unittest.TestCase):
         python = self._chosen_python()
         self.assertTrue((target / "tools" / "wiki" / "cli.py").is_file())
         self.assertTrue((target / "wiki" / "index.md").is_file())
-        skill = config / "skills" / "project-memory" / "SKILL.md"
-        recall = config / "skills" / "project-memory" / "scripts" / "recall.sh"
         vault_map_path = config / "vault-builder" / "vault-map.json"
         router = config / "vault-builder" / "llm_wiki_router.py"
-        self.assertIn("name: project-memory", skill.read_text(encoding="utf-8").splitlines())
-        self.assertEqual(PROJECT_MEMORY_SKILL_ASSET.read_bytes(), skill.read_bytes())
-        self.assertTrue(os.access(recall, os.X_OK))
-        recall_text = recall.read_text(encoding="utf-8")
-        self.assertNotIn(RECALL_PYTHON_PLACEHOLDER, recall_text)
-        self.assertIn(f"PYTHON={shlex.quote(python)}\n", recall_text)
+        # Install no longer writes the project-memory skill or recall.sh (vault-graph request S11).
+        self.assertFalse((config / "skills" / "project-memory").exists())
         self.assertEqual(ROUTER_ASSET.read_bytes(), router.read_bytes())
         vault_map = json.loads(vault_map_path.read_text(encoding="utf-8"))
         self.assertEqual(2, vault_map["version"])
@@ -7175,8 +6664,6 @@ class _UserHomeTestCase(unittest.TestCase):
 
         self.assertEqual(
             {
-                relative(skill): {"kind": "file", "location": relative(skill), "sha256": sha256_file(skill), "shared": True},
-                relative(recall): {"kind": "file", "location": relative(recall), "sha256": sha256_file(recall), "shared": True},
                 relative(router): {"kind": "file", "location": relative(router), "sha256": sha256_file(router), "shared": True},
                 relative(vault_map_path): {"kind": "config", "location": relative(vault_map_path), "shared": True},
                 relative(claude_json): {
@@ -7223,20 +6710,11 @@ class InstallTest(_UserHomeTestCase):
         self.assertTrue(commands, result.stdout)
         for command in commands:
             self.assertTrue(command.startswith(shlex.quote(self._chosen_python()) + " "), command)
-        # The installed vault is self-consistent: lint and the recall script both run.
+        # The installed vault is self-consistent: lint runs.
         lint = subprocess.run(
             [sys.executable, "tools/wiki/cli.py", "lint"], cwd=target, text=True, capture_output=True, check=False
         )
         self.assertEqual(0, lint.returncode, lint.stdout + lint.stderr)
-        recall = subprocess.run(
-            [str(self.config / "skills" / "project-memory" / "scripts" / "recall.sh")],
-            cwd=self.tmp,
-            text=True,
-            capture_output=True,
-            check=False,
-            env={**self._env(), "GIT_CEILING_DIRECTORIES": str(self.tmp)},
-        )
-        self.assertEqual(0, recall.returncode, recall.stdout + recall.stderr)
 
     @full_tier_only
     def test_install_creates_claude_json_when_absent_and_new_vault_git_status_omits_mcp_json(self):
@@ -7394,9 +6872,21 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(0o755, empty.stat().st_mode & 0o777)
 
     @full_tier_only
-    def test_install_keeps_unknown_user_skill_and_lists_it(self):
-        skill = self.config / "skills" / "project-memory" / "SKILL.md"
-        skill.parent.mkdir(parents=True)
+    def test_install_deletes_project_memory_files_an_earlier_release_wrote(self):
+        skill, recall = _write_legacy_project_memory(self.config)
+        target = self.work / "vault-a"
+
+        result = self._install(str(target), "--name", "a")
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self._assert_installed(target, "a", self.config, self.home / ".claude.json")
+        self.assertIn(f"Deleted {skill}", result.stdout)
+        self.assertIn(f"Deleted {recall}", result.stdout)
+        self.assertTrue((self.config / "skills").is_dir())
+
+    @full_tier_only
+    def test_install_keeps_changed_project_memory_skill_and_lists_it(self):
+        skill, recall = _write_legacy_project_memory(self.config)
         skill.write_text("my own skill\n", encoding="utf-8")
         target = self.work / "vault-a"
 
@@ -7404,21 +6894,30 @@ class InstallTest(_UserHomeTestCase):
 
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual("my own skill\n", skill.read_text(encoding="utf-8"))
-        self.assertIn(str(skill), result.stdout)
+        self.assertFalse(recall.exists())
+        self.assertFalse(recall.parent.exists())
+        self.assertIn(f"Kept {skill}", result.stdout)
         manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text(encoding="utf-8"))
         locations = [record["location"] for record in manifest["external_records"]]
-        self.assertNotIn(".claude/skills/project-memory/SKILL.md", locations)
-        self.assertIn(".claude/skills/project-memory/scripts/recall.sh", locations)
+        self.assertFalse([location for location in locations if "project-memory" in location], locations)
 
     @full_tier_only
-    def test_install_replaces_recall_script_built_for_another_interpreter(self):
-        recall = self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
-        recall.parent.mkdir(parents=True)
-        recall.write_text(
-            RECALL_ASSET.read_text(encoding="utf-8").replace(RECALL_PYTHON_PLACEHOLDER, "/old/python3.10"),
-            encoding="utf-8",
-        )
+    def test_install_existing_vault_deletes_recorded_project_memory_files_and_records(self):
         target = self.work / "vault-a"
+        self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
+        skill = self.config / "skills" / "project-memory" / "SKILL.md"
+        recall = skill.parent / "scripts" / "recall.sh"
+        recall.parent.mkdir(parents=True)
+        skill.write_text("skill an older branch build installed\n", encoding="utf-8")
+        recall.write_text("#!/bin/sh\necho recall an older branch build installed\n", encoding="utf-8")
+        manifest_path = target / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for path in (skill, recall):
+            location = path.relative_to(self.home).as_posix()
+            manifest["external_records"].append(
+                {"kind": "file", "location": location, "sha256": sha256_file(path), "shared": True}
+            )
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
         result = self._install(str(target), "--name", "a")
 
@@ -7440,10 +6939,12 @@ class InstallTest(_UserHomeTestCase):
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
         self.assertEqual(0, self._install(str(target), "--name", "a").returncode)
-        (self.config / "skills" / "project-memory" / "SKILL.md").unlink()
+        (self.config / "vault-builder" / "llm_wiki_router.py").unlink()
+        skill, _recall = _write_legacy_project_memory(self.config)
         before = _tree_snapshot(self.tmp)
         result = self._install(str(target), "--name", "a", "--dry-run")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"delete {skill}", result.stdout)
         self.assertEqual(before, _tree_snapshot(self.tmp))
 
     @full_tier_only
@@ -7536,14 +7037,10 @@ class InstallTest(_UserHomeTestCase):
                 self.home = home
                 self.config = home / ".claude"
                 self.assertEqual(0, installing.install(self.work / f"first-{failing}", name="first", out=io.StringIO()))
-                # Every outside file now needs a write: create the skill and the router, replace recall.sh,
-                # add a vault to the vault map, and replace the server entry's interpreter.
-                (self.config / "skills" / "project-memory" / "SKILL.md").unlink()
+                # Every outside file now needs a write: create the router, delete the skill and recall.sh an
+                # earlier release wrote, add a vault to the vault map, and replace the server entry's interpreter.
                 (self.config / "vault-builder" / "llm_wiki_router.py").unlink()
-                (self.config / "skills" / "project-memory" / "scripts" / "recall.sh").write_text(
-                    RECALL_ASSET.read_text(encoding="utf-8").replace(RECALL_PYTHON_PLACEHOLDER, "/old/python3.11"),
-                    encoding="utf-8",
-                )
+                _write_legacy_project_memory(self.config)
                 claude = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
                 claude["mcpServers"]["vault-wiki"]["command"] = "/old/python3.11"
                 (home / ".claude.json").write_text(json.dumps(claude), encoding="utf-8")
@@ -7710,10 +7207,6 @@ class InstallRouterTests(_UserHomeTestCase):
         claude = self._assert_installed(target, "a", self.config, self.home / ".claude.json")
         entry = claude["mcpServers"]["vault-wiki"]
         self.assertTrue(os.path.isabs(entry["command"]), entry)
-        recall_lines = (self.config / "skills" / "project-memory" / "scripts" / "recall.sh").read_text(
-            encoding="utf-8"
-        ).splitlines()
-        self.assertIn(f"PYTHON={shlex.quote(entry['command'])}", recall_lines)
         self.assertNotIn(".mcp.json", result.stdout)
         self.assertIn(str(self.router), result.stdout)
         self.assertIn("mcpServers.vault-wiki ", result.stdout)
@@ -8015,7 +7508,7 @@ class InstallAfterUninstallTests(_UserHomeTestCase):
 
 @full_tier_only
 class VaultMapVersionStrictTests(_UserHomeTestCase):
-    """install and uninstall accept only an int version 1 or 2, like the router, recall and memory-scan."""
+    """install and uninstall accept only an int version 1 or 2, like the router and memory-scan."""
 
     BAD_VERSIONS = {"true": True, "1.0": 1.0, "string 2": "2", "missing": None}
 
@@ -8098,6 +7591,22 @@ class UninstallDoctorTest(_UserHomeTestCase):
     def vault_map(self) -> Path:
         return self.config / "vault-builder" / "vault-map.json"
 
+    def _add_legacy_records(self, vault: Path, python: str = "/old/python3.11") -> None:
+        """Leave the project-memory files and their manifest records the way a release 4.1.0 install did."""
+        _write_legacy_project_memory(self.config, python)
+        manifest_path = vault / ".vault-builder" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for path in (self.skill, self.recall):
+            manifest["external_records"].append(
+                {
+                    "kind": "file",
+                    "location": path.relative_to(self.home).as_posix(),
+                    "sha256": sha256_file(path),
+                    "shared": True,
+                }
+            )
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
     def _claude(self) -> dict[str, object]:
         return json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))
 
@@ -8131,12 +7640,12 @@ class UninstallDoctorTest(_UserHomeTestCase):
         second = self.work / "vault-b"
         self.assertEqual(0, self._install(str(first), "--name", "a").returncode)
         self.assertEqual(0, self._install(str(second), "--name", "b").returncode)
-        # A later install from another interpreter rewrites the shared recall.sh, so neither
-        # vault's recorded hash matches; it is still the builder asset form.
-        self.recall.write_text(
-            RECALL_ASSET.read_text(encoding="utf-8").replace(RECALL_PYTHON_PLACEHOLDER, "/other/python3.11"),
-            encoding="utf-8",
-        )
+        # Both vaults were installed by release 4.1.0, which wrote the project-memory files. A later install
+        # from another interpreter rewrote the shared recall.sh, so neither vault's recorded hash matches;
+        # it is still a released asset form.
+        self._add_legacy_records(first)
+        self._add_legacy_records(second)
+        _write_legacy_project_memory(self.config, "/other/python3.11")
         vault_map = json.loads(self.vault_map.read_text(encoding="utf-8"))
         vault_map["projects"] = {
             "app": {"root": str(self.work / "app"), "vaults": ["a", "b"]},
@@ -8200,6 +7709,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
         claude = self._claude()
         claude["mcpServers"]["vault-wiki"]["env"] = {"DEBUG": "1"}
         self._write_claude_json(claude)
+        self._add_legacy_records(target)
         with self.recall.open("a", encoding="utf-8") as handle:
             handle.write("# my change\n")
 
@@ -8328,8 +7838,7 @@ class UninstallDoctorTest(_UserHomeTestCase):
 
         claude_json = self.home / ".claude.json"
         problems = {
-            "skill": (self.skill, lambda: self.skill.unlink(), "SKILL.md"),
-            "recall": (self.recall, lambda: self.recall.unlink(), "recall.sh"),
+            "router": (self.config / "vault-builder" / "llm_wiki_router.py", lambda: (self.config / "vault-builder" / "llm_wiki_router.py").unlink(), "llm_wiki_router.py"),
             "vault map": (self.vault_map, lambda: self.vault_map.write_text("{broken", encoding="utf-8"), "vault-map.json"),
             "mcp entry": (
                 claude_json,
@@ -8355,6 +7864,16 @@ class UninstallDoctorTest(_UserHomeTestCase):
                 finally:
                     path.write_bytes(saved)
                     path.chmod(mode)
+        self.assertEqual(0, self._cli("doctor", str(target)).returncode)
+
+        with self.subTest(problem="project-memory skill left by an earlier install"):
+            _write_legacy_project_memory(self.config)
+            result = self._cli("doctor", str(target))
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            problem_lines = [line for line in result.stdout.splitlines() if line.startswith("Problem:")]
+            self.assertEqual(2, len([line for line in problem_lines if "project-memory" in line]), result.stdout)
+            self.assertTrue(all("vault-builder setup" in line for line in problem_lines), result.stdout)
+            shutil.rmtree(self.config / "skills")
         self.assertEqual(0, self._cli("doctor", str(target)).returncode)
 
     @full_tier_only
@@ -9112,7 +8631,6 @@ class LinkingTests(unittest.TestCase):
 
 _ROUTER = _router_tests.router
 _VAULT_MAP_SEVERAL_IDS = re.compile(r"by \w+: ([^;]+?)(?:;|\. \(vault map|\.$)", re.MULTILINE)
-_RECALL_PAGE_ID = re.compile(r"wiki/maps/projects/(.+?)\.md")
 
 
 def _several(text: str) -> tuple[str, ...]:
@@ -9122,7 +8640,7 @@ def _several(text: str) -> tuple[str, ...]:
 
 
 class _ProjectLookupCase(_UserHomeTestCase):
-    """Runs the three project lookups on one link config (spec 4.3, decision 36).
+    """Runs the two project lookups on one link config (spec 4.3, decision 36).
 
     Each answer is ("found", id, relink line shown), ("none",), ("several", ids), or ("damaged",).
     The link config names this checkout as vault "builder", because memory-scan --repo runs from
@@ -9135,9 +8653,6 @@ class _ProjectLookupCase(_UserHomeTestCase):
         ceiling.start()
         self.addCleanup(ceiling.stop)
         self.vault_map_path = self.config / "vault-builder" / "vault-map.json"
-        self.recall_script = _materialize_recall_script(
-            self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
-        )
 
     def _write_vault_map(self, projects: dict[str, dict[str, object]], version: object = 2) -> None:
         data: dict[str, object] = {
@@ -9165,29 +8680,6 @@ class _ProjectLookupCase(_UserHomeTestCase):
             return ("several", tuple(sorted(found.ids))) if found.ids else ("none",)
         return ("found", found.project_id, found.note is not None)
 
-    def _recall_answer(self, start: Path) -> tuple[object, ...]:
-        result = subprocess.run(
-            [str(self.recall_script), "open"],
-            cwd=start,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=self._env(),
-            timeout=60,
-        )
-        self.assertEqual(0, result.returncode, result.stderr)
-        output = result.stdout
-        if "is damaged" in output:
-            return ("damaged",)
-        if "Several projects" in output:
-            return ("several", _several(output))
-        if "is not linked to a project" in output or "is not inside a git repository" in output:
-            return ("none",)
-        match = _RECALL_PAGE_ID.search(output)
-        self.assertIsNotNone(match, output)
-        assert match is not None
-        return ("found", match.group(1), "Run link again" in output)
-
     def _memory_scan_answer(self, start: Path) -> tuple[object, ...]:
         result = subprocess.run(
             [sys.executable, "tools/wiki/cli.py", "memory-scan", "--repo", str(start), "--json"],
@@ -9214,13 +8706,12 @@ class _ProjectLookupCase(_UserHomeTestCase):
     def _answers(self, start: Path) -> dict[str, tuple[object, ...]]:
         return {
             "router": self._router_answer(start),
-            "recall": self._recall_answer(start),
             "memory-scan": self._memory_scan_answer(start),
         }
 
 
 class ProjectLookupParityTests(_ProjectLookupCase):
-    """One fixture table for router find_project, recall, and memory-scan --repo (A-10, version rule)."""
+    """One fixture table for router find_project and memory-scan --repo (A-10, version rule)."""
 
     def _cases(self) -> list[tuple[str, Callable[[Path], tuple[Path, dict[str, dict[str, object]], object]], tuple[object, ...]]]:
         """(name, build(case folder) -> (start folder, projects, version), expected answer)."""
@@ -9285,22 +8776,22 @@ class ProjectLookupParityTests(_ProjectLookupCase):
             ("version 3", version(3), ("damaged",)),
         ]
 
-    def test_three_lookups_give_the_same_answer_for_every_case(self):
+    def test_both_lookups_give_the_same_answer_for_every_case(self):
         for index, (name, build, expected) in enumerate(self._cases()):
             with self.subTest(case=name):
                 start, projects, version = build(self.tmp / f"case-{index}")
                 self._write_vault_map(projects, version=version)
                 answers = self._answers(start)
                 self.assertEqual(
-                    {"router": expected, "recall": expected, "memory-scan": expected},
+                    {"router": expected, "memory-scan": expected},
                     answers,
                 )
 
 
 class VaultMapV1CompatTests(_ProjectLookupCase):
-    """A version 1 link config without remote is read by all three, and install rewrites it as version 2 (A-20)."""
+    """A version 1 link config without remote is read by both lookups, and install rewrites it as version 2 (A-20)."""
 
-    def test_version_1_map_without_remote_is_read_by_router_recall_and_memory_scan(self):
+    def test_version_1_map_without_remote_is_read_by_router_and_memory_scan(self):
         by_root = self._repo(self.tmp / "work" / "checkout")
         by_name = self._repo(self.tmp / "work" / "named-app", "git@github.com:acme/named-app.git")
         self._write_vault_map(
@@ -9317,7 +8808,7 @@ class VaultMapV1CompatTests(_ProjectLookupCase):
         for start, expected in ((by_root, ("found", "app", False)), (by_name, ("found", "named-app", True))):
             with self.subTest(start=start.name):
                 self.assertEqual(
-                    {"router": expected, "recall": expected, "memory-scan": expected},
+                    {"router": expected, "memory-scan": expected},
                     self._answers(start),
                 )
 

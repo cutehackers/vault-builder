@@ -209,7 +209,8 @@ class FullSetupTests(_SetupCase):
             self.assertEqual(1, len(hooks[event]), event)
             self.assertIn("vault_hooks.py", hooks[event][0]["hooks"][0]["command"])
         self.assertFalse(self.hooks_config.exists())
-        self.assertIn("recall.sh", output)
+        self.assertIn("SessionStart adds nothing", output)
+        self.assertNotIn("recall.sh", output)
         for text in ("uv tool", "vg setup", "vault-graph:"):
             self.assertNotIn(text, output)
         # last lines
