@@ -146,6 +146,32 @@ class InstallWithHooksTests(_HooksCase):
         self.assertEqual(LAUNCHER_ASSET.read_bytes(), self.launcher.read_bytes())
         self.assertEqual(ROUTER_ASSET.read_bytes(), (self.launcher.parent / "llm_wiki_router.py").read_bytes())
 
+    def test_replaces_a_launcher_that_an_earlier_release_installed(self) -> None:
+        import subprocess
+
+        old = subprocess.run(
+            ["git", "show", "85b71f8:tools/vault_migration/assets/vault-hooks/vault_hooks.py"],
+            cwd=ROOT, capture_output=True, check=False,
+        ).stdout or None
+        self.launcher.parent.mkdir(parents=True, exist_ok=True)
+        if old is None:
+            self.skipTest("git history with the v3.0.0 launcher is not available")
+        self.launcher.write_bytes(old)
+
+        output = self.install()
+
+        self.assertEqual(LAUNCHER_ASSET.read_bytes(), self.launcher.read_bytes())
+        self.assertNotIn("unknown content", output)
+
+    def test_keeps_a_launcher_with_unknown_content(self) -> None:
+        self.launcher.parent.mkdir(parents=True, exist_ok=True)
+        self.launcher.write_bytes(b"# edited by hand\n")
+
+        output = self.install()
+
+        self.assertEqual(b"# edited by hand\n", self.launcher.read_bytes())
+        self.assertIn(f"Kept existing file with unknown content (not replaced): {self.launcher}", output)
+
     def test_records_the_absolute_vg_path(self) -> None:
         vg = self.fake_vg()
 
