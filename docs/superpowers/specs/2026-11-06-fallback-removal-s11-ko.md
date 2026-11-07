@@ -1,7 +1,8 @@
 # 요청S11 대체 경로 제거: 바꿀 곳 목록
 
 **Date:** 2026-11-06
-**Status:** 메모만 있다. 구현하지 않았다. vault-graph spec `2026-11-05-session-memory-indexing` §4.4.9, 묶음 S12에서 사람이 제거를 한 번 더 확인한 뒤 시작한다.
+**Status:** 구현했다(2026-11-07, 릴리스 5.0.0, contract 6). 사람이 2026-11-07에 제거를 승인했다(vault-graph spec `2026-11-05-session-memory-indexing` §4.4.9, vault-graph A-28에서 지표1과 지표2가 0).
+**결정:** §2의 열린 결정은 이렇게 정했다. `maps build`는 `wiki/maps/projects/*.md` 가운데 frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일만 지운다. 사람이 쓴 파일과 잠긴 파일은 일반 페이지로 남긴다. `maps build --check`는 남은 요약 페이지 때문에 실패하지 않는다. 그래야 migration apply가 실행하는 vault gate가 통과한다. migration은 retired 관리 파일인 `memory-cleanup` skill 두 파일을 지우지 않고, `CHANGELOG.md` Upgrade 절이 지우는 명령을 안내한다.
 **보낸 쪽:** vault-graph spec §4.5 요청S11
 
 ## 1. 제거 조건
