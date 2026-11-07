@@ -41,6 +41,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 ### Removed
 
 - 훅 실행기 `vault_hooks.py session-start`가 vg가 없거나 실패하거나 시간을 넘기면 아무것도 출력하지 않는다. 전에는 `recall.sh` 출력을 넣었다(vault-graph 요청S11). 세션 수집의 대체 경로(`capture --direct`)는 그대로다.
+- install이 `/project-memory` skill과 recall 스크립트(`<설정 폴더>/skills/project-memory/`)를 설치하지 않는다. asset 폴더 `tools/vault_migration/assets/project-memory/`를 지웠다. 이전 install이 쓴 두 파일은 install(`setup` 포함)이 지우고 manifest 기록에서도 뺀다. 파일이 manifest에 기록된 hash나 릴리스된 asset과 같을 때만 지우고, 사용자가 고친 파일은 남긴 뒤 목록에 적는다. uninstall도 같은 규칙으로 남은 파일을 지운다. doctor는 두 파일을 검사하지 않고, git 2.31 검사도 하지 않는다. 남은 builder 파일이 있으면 `vault-builder setup`으로 고치라고 알린다.
 
 ## [4.1.0] - 2026-11-05
 

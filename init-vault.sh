@@ -12,7 +12,7 @@ usage() {
 Usage: ./init-vault.sh [--with-stenc] [--name NAME] [target-dir]
 
 Create a ready-to-use LLM Wiki vault and register it for Claude Code
-(project-memory skill, vault map, and the user MCP entry vault-wiki).
+(router, vault map, and the user MCP entry vault-wiki).
 
 Options:
   --with-stenc  Include optional Stenc fixed-format spec/plan docs and tools.
@@ -129,7 +129,7 @@ PY
 PYTHON_BIN="$(choose_python)"
 
 # install assembles the vault in a temporary sibling folder, renames it into place, installs the
-# user-level project-memory files and MCP entry, and prints next steps that start with ${PYTHON_BIN}'s path.
+# user-level router, vault map and MCP entry, and prints next steps that start with ${PYTHON_BIN}'s path.
 install_args=(install "${TARGET_DIR}")
 if [[ -n "${VAULT_NAME_ARG}" ]]; then
   install_args+=(--name "${VAULT_NAME_ARG}")

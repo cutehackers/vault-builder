@@ -5,7 +5,8 @@ list, and never commits. Inside the Vault it deletes managed files whose bytes s
 manifest, except .gitignore, then a .mcp.json of the previous builder form and the manifest.
 Outside the Vault (schema 2 only) it removes the Vault from the vault map (and every project
 whose vault list becomes empty). When no Vault remains it also deletes the vault map, the shared
-files (skill, recall script, router), the mcpServers.vault-wiki server entry (and an mcpServers.llm-wiki
+files (router, and the project-memory skill and recall script an earlier install wrote), the
+mcpServers.vault-wiki server entry (and an mcpServers.llm-wiki
 entry of ours left from before the rename), and the folders
 those files leave empty. The mcpServers key stays.
 
@@ -17,12 +18,12 @@ is left unchanged with a note.
 uninstall --all runs uninstall for every Vault in the vault map, then deletes the marked vault-builder
 command file and the default builder checkout it records (builder_command.py).
 
-A shared `file` record counts as builder-owned when the file matches the recorded hash or the
-current builder asset form that install also accepts: SKILL.md and the router equal to the asset,
-recall.sh equal to the asset except its single PYTHON= line. The server entry counts as
-builder-owned when its normalized hash matches the record or it has the form install writes
-(an absolute command and args ["-I", <router>]). A later install from another interpreter
-rewrites recall.sh and the server entry, so the first Vault's recorded hashes can go stale.
+A shared `file` record counts as builder-owned when the file matches the recorded hash or a form
+install accepts: the router equal to the asset, and the project-memory SKILL.md and recall.sh equal to a
+released asset (recall.sh except its single PYTHON= line; installing.is_legacy_builder_file). The
+server entry counts as builder-owned when its normalized hash matches the record or it has the form
+install writes (an absolute command and args ["-I", <router>]). A later install from another
+interpreter rewrites the server entry, so the first Vault's recorded hash can go stale.
 
 doctor reports problems and exits 1 when it finds any. It writes no file. Each problem line ends with
 one fix command. Without a path it checks every vault in the vault map and the shared items once. It
@@ -62,7 +63,6 @@ from .installing import (
     SERVER_KEY_PATHS,
     InstallError,
     UserPaths,
-    _ASSET_ROOT,
     _OutsideChanges,
     _PATCH_VERSION,
     _PREVIOUS_VERSION_HINT,
@@ -74,9 +74,9 @@ from .installing import (
     _entry_server,
     _json_bytes,
     _load_json_object,
-    _recall_is_known,
     _same_path,
     choose_interpreter,
+    is_legacy_builder_file,
     is_legacy_entry,
     require_python,
     resolve_user_paths,
@@ -86,7 +86,6 @@ from .models import VaultManifest
 
 
 _KEEP_INSIDE = frozenset({".gitignore"})
-_MINIMUM_GIT = (2, 31)
 _PYTHON_CHECK = "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
 _SERVER_KEY_PATH = f"mcpServers.{MCP_SERVER_KEY}"
 _START_TIMEOUT_SECONDS = 30
@@ -126,13 +125,13 @@ def _record_problem(record: Mapping[str, object], user: UserPaths) -> str:
     """Return why a record is unexpected, or "" when install writes exactly this location.
 
     The manifest is tracked by git and editable, so uninstall and doctor accept only the paths
-    install resolves from HOME and CLAUDE_CONFIG_DIR: the skill, the recall script, the router,
-    the vault map, and the shared mcpServers.vault-wiki entry in the MCP settings file. A record of the
+    install resolves from HOME and CLAUDE_CONFIG_DIR: the router, the project-memory skill and recall
+    script an earlier install wrote, the vault map, and the shared mcpServers.vault-wiki entry in the MCP settings file. A record of the
     previous name mcpServers.llm-wiki is accepted: install renames it on its next run.
     """
     kind, location = str(record["kind"]), str(record["location"])
     if kind == "file":
-        files = sorted({user.relative(user.skill), user.relative(user.recall), user.relative(user.router)})
+        files = sorted({*(user.relative(path) for path in user.legacy_files), user.relative(user.router)})
         if location not in files:
             return f"Unexpected file record {location}: expected {' or '.join(files)}."
     elif kind == "config":
@@ -154,12 +153,10 @@ def _record_problem(record: Mapping[str, object], user: UserPaths) -> str:
     return ""
 
 
-def _is_skill(path: Path) -> bool:
-    return path.name == "SKILL.md" and path.parent.name == "project-memory"
-
-
-def _is_recall(path: Path) -> bool:
-    return path.name == "recall.sh" and path.parent.name == "scripts"
+def _is_legacy(path: Path) -> bool:
+    return (path.name == "SKILL.md" and path.parent.name == "project-memory") or (
+        path.name == "recall.sh" and path.parent.name == "scripts" and path.parent.parent.name == "project-memory"
+    )
 
 
 def _is_router(path: Path) -> bool:
@@ -175,13 +172,10 @@ def _builder_owned(path: Path, recorded_sha256: str | None, builder_root: Path) 
         return False
     if recorded_sha256 is not None and sha256_file(path) == recorded_sha256:
         return True
-    current = path.read_bytes()
-    if _is_skill(path):
-        return current == (builder_root / _ASSET_ROOT / "SKILL.md").read_bytes()
-    if _is_recall(path):
-        return _recall_is_known(builder_root)(current)
+    if _is_legacy(path):
+        return is_legacy_builder_file(path, set())
     if _is_router(path):
-        return current == (builder_root / _ROUTER_ASSET).read_bytes()
+        return path.read_bytes() == (builder_root / _ROUTER_ASSET).read_bytes()
     return False
 
 
@@ -721,8 +715,8 @@ def doctor(
 ) -> int:
     """Report problems of one installed Vault, or of every Vault in the vault map when target is None.
 
-    Shared items (skill, recall script, router, MCP entries, hooks, vg, the vault-builder command)
-    are checked once. Writes no file; exits 1 when it finds a problem.
+    Shared items (router, MCP entries, hooks, vg, the vault-builder command, a left project-memory
+    skill) are checked once. Writes no file; exits 1 when it finds a problem.
     """
     stream = out if out is not None else sys.stdout
     require_python(tuple(sys.version_info))
@@ -749,13 +743,9 @@ def doctor(
             )
     report.prefix = ""
 
-    for path in (user.skill, user.recall):
-        if not path.exists():
-            report.problem(f"Missing {path}.")
-        elif not _owned_by_any(path, recorded.get(path, set()), builder_root):
-            report.problem(f"{path} differs from the manifest record and the builder asset.")
-    if user.recall.is_file():
-        _doctor_recall(report, user.recall, environment)
+    for path in user.legacy_files:
+        if is_legacy_builder_file(path, recorded.get(path, set())):
+            report.problem(f"{path} is left from an earlier install; vault-builder no longer installs the project-memory skill.")
     if not user.router.exists():
         report.problem(f"Missing router {user.router}.")
     elif not _owned_by_any(user.router, recorded.get(user.router, set()), builder_root):
@@ -766,7 +756,6 @@ def doctor(
         _doctor_server(report, entry, targets[0][1] if targets else user.home, builder_root, environment)
     if environment.get("CLAUDE_CONFIG_DIR"):
         _doctor_claude_mcp_list(report, MCP_SERVER_KEY, user.mcp_config, environment)
-    _doctor_git(report)
     _doctor_hooks(report, user, builder_root, environment)
     _doctor_builder_command(report, user, builder_root)
 
@@ -897,39 +886,6 @@ def _doctor_targets(
     if not vaults:
         report.problem(f"Vault map {path} has no vaults.")
     return targets
-
-
-def _doctor_recall(report: _DoctorReport, recall: Path, environment: Mapping[str, str]) -> None:
-    if not os.access(recall, os.X_OK):
-        report.problem(f"{recall} is not executable.")
-        return
-    lines = [line for line in recall.read_text(encoding="utf-8", errors="replace").splitlines() if line.startswith("PYTHON=")]
-    try:
-        words = shlex.split(lines[0][len("PYTHON="):]) if len(lines) == 1 else []
-    except ValueError:
-        words = []
-    if len(words) != 1 or not _python_ok(words[0]):
-        report.problem(f"The interpreter in {recall} does not run Python 3.10 or newer.")
-        return
-    with tempfile.TemporaryDirectory(prefix="vault-doctor-") as scratch:
-        outside = Path(scratch).resolve()
-        try:
-            result = subprocess.run(
-                [str(recall)],
-                cwd=outside,
-                env={**environment, "GIT_CEILING_DIRECTORIES": str(outside.parent)},
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            report.problem(f"{recall} failed outside a git repository: {exc}")
-            return
-    if result.returncode != 0:
-        report.problem(
-            f"{recall} exited {result.returncode} outside a git repository: {(result.stdout + result.stderr).strip()}"
-        )
 
 
 def _doctor_mcp_entry(
@@ -1087,20 +1043,6 @@ def _doctor_claude_mcp_list(report: _DoctorReport, key: str, path: Path, environ
             f"a different settings file than {path}.",
             fix="claude mcp list",
         )
-
-
-def _doctor_git(report: _DoctorReport) -> None:
-    fix = "install git 2.31 or newer (macOS: brew install git)"
-    try:
-        result = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        report.problem("git is not available; recall.sh needs git 2.31 or newer.", fix=fix)
-        return
-    match = re.search(r"(\d+)\.(\d+)", result.stdout)
-    if result.returncode != 0 or match is None:
-        report.problem("Could not read the git version; recall.sh needs git 2.31 or newer.", fix=fix)
-    elif (int(match.group(1)), int(match.group(2))) < _MINIMUM_GIT:
-        report.problem(f"git {match.group(0)} is older than 2.31; recall.sh needs git 2.31 or newer.", fix=fix)
 
 
 def _doctor_hooks(report: _DoctorReport, user: UserPaths, builder_root: Path, environment: Mapping[str, str]) -> None:
