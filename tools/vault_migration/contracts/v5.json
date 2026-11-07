@@ -102,7 +102,7 @@
       "mode": "0644",
       "path": "docs/LLM-WIKI.md",
       "policy": "replace-if-unmodified",
-      "sha256": "5ae30ae16ffea0c87e4304c25b84f695032221d05e5e4c8638dc558dbab2cf0b"
+      "sha256": "f3ccc7581723da792a78ad869eee35903b83ace75958a64d1d600cdc9e03032f"
     },
     "docs/USER_PROMPTS.md": {
       "mode": "0644",
@@ -126,7 +126,7 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "2d9e4c0095e097b9e671be433ea005d0ff1f2edab4dced51cd2abcfcd10f059b"
+      "sha256": "1d0abd6f421a7a61c4cf50e419586f06fa081d30b548080f65de3d8fddc7327b"
     },
     "docs/usage.md": {
       "mode": "0644",
@@ -156,7 +156,7 @@
       "mode": "0644",
       "path": "tests/test_memory_fields.py",
       "policy": "replace-if-unmodified",
-      "sha256": "bcd5b1a7ec9d04cd6bb2820c77b2ae71a78e1f44a3edc57e3aa7b4491f3e9841"
+      "sha256": "c98b19a2746a121addd385ae62c50e8bebe2c8066a6bad0618fbd0f5f5e7d291"
     },
     "tests/test_memory_proposal.py": {
       "mode": "0644",
@@ -186,13 +186,13 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "d06436282c6f7450f35f16f35604c361650c7eaf0f4e80e0060c23ef629f1ff4"
+      "sha256": "7194d4a4bae46b4398866016133100d8c94423f1dee1f94dceaaacba48cac9fa"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "0f1081e04bbcafd05f8b85c3853034ce86a45694c9413bb40d8caaa302bf882c"
+      "sha256": "9bdee8b1925b24a39b8de178292e119b568a00477a738340ee8a7f0bcda9c018"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -258,7 +258,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/maps.py",
       "policy": "replace-if-unmodified",
-      "sha256": "2666d26af851cc1f85387fbb42732b38367dfe1087e349190041f703683294c2"
+      "sha256": "2690bfa5a931213e5c69d4f6576da6f6927d5b0efcec0a8e5a155610278574e6"
     },
     "tools/wiki/lib/memory_fields.py": {
       "mode": "0644",

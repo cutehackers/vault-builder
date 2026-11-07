@@ -29,9 +29,8 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 - `sessions capture --normalized <file> [--rerender] --json`이 vault-graph 정규화 세션 파일(`vg-session-jsonl/1`)을 새 세션 파일 형식 `vault-session/v2`로 쓴다. 닫힌 교환만 쓰고, part 번호는 v1과 v2를 이어서 매긴다. 이전 part가 v1이면 `last_turn_uuid` 뒤부터, v2이면 `last_exchange_id` 뒤부터 쓴다. 훅 실행기 `vault_hooks.py capture --direct --normalized <file> [--rerender]`도 같은 일을 하고, vault 도구가 `--normalized`를 모르면 exit 2로 끝낸다. 기존 v1 파일과 v1 수집은 그대로다.
 - `vault-map.json`에 선택 필드 `vaults.<name>.sharable`과 설정 명령 `vault-builder set-sharable --vault <name> (--value true|false | --clear)`를 더한다. 필드가 없으면 false다.
-- `/project-memory`(`recall.sh`)가 vault-graph spec 4.4.2 범위 규칙을 따른다. `project`가 없는 페이지와 남은 일은 그 vault를 연결한 프로젝트가 하나뿐이거나 `sharable`이 true일 때 함께 출력한다. 이 항목은 새 읽기 전용 명령 `maps no-project-summary`로 읽고, `maps build`가 쓰는 요약 페이지는 바뀌지 않는다. `memory-cleanup` skill에 같은 범위 규칙을 적는다.
 - `import-source <file> --into raw/imports/<kind>/ [--json]`이 vault 밖 파일을 `raw/imports/<kind>/<stem>--<sha256 앞 8자><확장자>`에 바이트 그대로 복사하고 source page를 만든다. 같은 sha256의 source page가 있으면 아무것도 만들지 않고 기존 경로를 돌려준다. `AGENTS.md` 규칙1에 이 명령의 예외를 적는다.
-- 페이지 종류 `project`를 더한다. project brief는 `wiki/projects/<project>.md`에만 두고 frontmatter `project`가 그 파일 이름과 같아야 하며, 어긋나면 검증이 `project-page-path`로 거부한다. `publish-draft`로 쓸 수 있다. `/project-memory`(`recall.sh`)는 인자 없이 실행하면 brief 본문을 먼저 출력한다.
+- 페이지 종류 `project`를 더한다. project brief는 `wiki/projects/<project>.md`에만 두고 frontmatter `project`가 그 파일 이름과 같아야 하며, 어긋나면 검증이 `project-page-path`로 거부한다. `publish-draft`로 쓸 수 있다.
 
 ### Changed
 
@@ -42,6 +41,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 - 훅 실행기 `vault_hooks.py session-start`가 vg가 없거나 실패하거나 시간을 넘기면 아무것도 출력하지 않는다. 전에는 `recall.sh` 출력을 넣었다(vault-graph 요청S11). 세션 수집의 대체 경로(`capture --direct`)는 그대로다.
 - install이 `/project-memory` skill과 recall 스크립트(`<설정 폴더>/skills/project-memory/`)를 설치하지 않는다. asset 폴더 `tools/vault_migration/assets/project-memory/`를 지웠다. 이전 install이 쓴 두 파일은 install(`setup` 포함)이 지우고 manifest 기록에서도 뺀다. 파일이 manifest에 기록된 hash나 릴리스된 asset과 같을 때만 지우고, 사용자가 고친 파일은 남긴 뒤 목록에 적는다. uninstall도 같은 규칙으로 남은 파일을 지운다. doctor는 두 파일을 검사하지 않고, git 2.31 검사도 하지 않는다. 남은 builder 파일이 있으면 `vault-builder setup`으로 고치라고 알린다.
+- `maps build`가 프로젝트 요약 페이지(`wiki/maps/projects/<project id>.md`)를 만들지 않고, 명령 `maps no-project-summary`를 없앴다. topic, source, decision, review, lifecycle 지도는 그대로다. 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)는 다음 `maps build`가 지우고 `wiki/log.md`에 적는다. 그 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둔다. 그래서 요약 페이지가 남은 vault에서는 `maps build --check`가 바뀔 지도가 있다고 실패하고, `maps build`를 한 번 실행하면 통과한다.
 
 ## [4.1.0] - 2026-11-05
 

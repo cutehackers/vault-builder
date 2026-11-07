@@ -7,8 +7,7 @@ from typing import Any
 
 from .frontmatter import Page, parse_page, render_page
 from .hash_source import display_path
-from .inbox import InboxItem, load_inbox_items
-from .lint import find_human_locks, project_ids
+from .lint import find_human_locks
 from .paths import resolve_report_path
 from .review import ReviewItem, list_review_items
 from .schema import NOT_CURRENT_STATUSES
@@ -52,32 +51,6 @@ MAP_DEFINITIONS = {
 
 
 MAP_GENERATED_BY = "tools/wiki/cli.py maps build"
-PROJECT_SECTION_MAX_TOKENS = 750
-PROJECT_MAP_MAX_TOKENS = 1500
-PROJECT_SECTION_HEADINGS = ("## Open Work", "## Current Decisions", "## Corrections and Rules")
-PROJECT_CORRECTION_TAGS = frozenset({"correction", "rule"})
-
-
-def estimate_tokens(text: str) -> int:
-    """Return estimated tokens: Hangul characters / 2 + all other characters / 4, rounded up.
-
-    Characters are Unicode code points, spaces and newlines included. Hangul characters are the code points
-    in U+1100-U+11FF, U+3130-U+318F, U+A960-U+A97F, U+AC00-U+D7A3, and U+D7B0-U+D7FF.
-    """
-    hangul = sum(1 for char in text if _is_hangul(char))
-    other = len(text) - hangul
-    return (2 * hangul + other + 3) // 4
-
-
-def _is_hangul(char: str) -> bool:
-    code = ord(char)
-    return (
-        0x1100 <= code <= 0x11FF
-        or 0x3130 <= code <= 0x318F
-        or 0xA960 <= code <= 0xA97F
-        or 0xAC00 <= code <= 0xD7A3
-        or 0xD7B0 <= code <= 0xD7FF
-    )
 
 
 @dataclass(frozen=True)
@@ -99,14 +72,13 @@ def build_navigation_maps(
 ) -> NavigationMapBuildResult:
     current_date = build_date or date.today()
     wiki_root = root / "wiki"
-    project_dir = _project_map_dir(root)
-    pages = [page for page in _load_wiki_pages(wiki_root) if page.path.parent != project_dir]
+    deleted_paths = _old_project_summary_paths(root)
+    deleted = set(deleted_paths)
+    pages = [page for page in _load_wiki_pages(wiki_root) if page.path not in deleted]
     source_entries = build_source_registry(root, checked_at=current_date)
     review_items = list_review_items(root)
-    project_pages = _project_summary_pages(root, pages, load_inbox_items(root), current_date)
-    deleted_paths = _stale_project_map_paths(root, project_pages)
 
-    rendered_pages = _render_map_pages(root, pages, source_entries, review_items, current_date, project_pages)
+    rendered_pages = _render_map_pages(root, pages, source_entries, review_items, current_date)
     target_paths = [path for path, _content in rendered_pages]
     written_paths = _changed_paths(rendered_pages)
     changed_paths = written_paths + deleted_paths
@@ -123,13 +95,9 @@ def build_navigation_maps(
         for entry in index_entries
         if render_index_entry_update(wiki_root / "index.md", entry) is not None
     ]
-    # Project summaries can be removed later, so log their path instead of a wiki link that would break.
-    log_items = [
-        f"Updated `{display_path(path, root)}`." if path.parent == project_dir else f"Updated [[maps/{path.stem}]]."
-        for path in written_paths
-    ]
+    log_items = [f"Updated [[maps/{path.stem}]]." for path in written_paths]
     log_items.extend(
-        f"Removed `{display_path(path, root)}`: project `{path.stem}` has no pages or open work."
+        f"Removed `{display_path(path, root)}`: maps build no longer writes project summary pages."
         for path in deleted_paths
     )
     log_items.extend(f"Registered [[{target}]] in index." for target in index_changed_targets)
@@ -149,6 +117,8 @@ def build_navigation_maps(
         _write_map_pages(root, rendered_pages)
         for path in deleted_paths:
             path.unlink()
+        if deleted_paths:
+            _remove_empty_project_map_dir(root)
         for index_entry in index_entries:
             apply_index_entry(wiki_root / "index.md", index_entry)
         if log_items:
@@ -194,11 +164,9 @@ def _render_map_pages(
     source_entries: list[SourceRegistryEntry],
     review_items: list[ReviewItem],
     current_date: date,
-    project_pages: list[Page] | None = None,
 ) -> list[tuple[Path, str]]:
     wiki_root = root / "wiki"
-    project_pages = project_pages or []
-    topic_pages = _pages_with_generated_map_pages(root, pages, current_date, project_pages)
+    topic_pages = _pages_with_generated_map_pages(root, pages, current_date)
     bodies = {
         "topic-map": _render_topic_map(root, topic_pages),
         "source-map": _render_source_map(root, source_entries),
@@ -219,8 +187,6 @@ def _render_map_pages(
                 _render_stable_map_page(target, frontmatter, body),
             )
         )
-    for page in project_pages:
-        rendered.append((page.path, _render_stable_map_page(page.path, page.frontmatter or {}, page.body)))
     return rendered
 
 
@@ -228,12 +194,9 @@ def _pages_with_generated_map_pages(
     root: Path,
     pages: list[Page],
     current_date: date,
-    project_pages: list[Page] | None = None,
 ) -> list[Page]:
     wiki_root = root / "wiki"
-    project_pages = project_pages or []
     generated_paths = {wiki_root / "maps" / f"{slug}.md" for slug in MAP_DEFINITIONS}
-    generated_paths.update(page.path for page in project_pages)
     navigable_pages = [page for page in pages if page.path not in generated_paths]
     for slug, definition in MAP_DEFINITIONS.items():
         target = wiki_root / "maps" / f"{slug}.md"
@@ -244,7 +207,6 @@ def _pages_with_generated_map_pages(
                 body="",
             )
         )
-    navigable_pages.extend(project_pages)
     return navigable_pages
 
 
@@ -252,177 +214,32 @@ def _project_map_dir(root: Path) -> Path:
     return root / "wiki" / "maps" / "projects"
 
 
-def _project_summary_pages(
-    root: Path,
-    pages: list[Page],
-    inbox_items: list[InboxItem],
-    current_date: date,
-) -> list[Page]:
-    """Render one summary page per project id found in page frontmatter or open inbox items."""
-    open_work: dict[str, list[InboxItem]] = {}
-    decisions: dict[str, list[Page]] = {}
-    corrections: dict[str, list[Page]] = {}
-    ids: set[str] = set()
-    for item in inbox_items:
-        if not item.is_open:
-            continue
-        for project_id in project_ids(item.project):
-            ids.add(project_id)
-            open_work.setdefault(project_id, []).append(item)
-    for page in pages:
-        frontmatter = page.frontmatter or {}
-        page_ids = project_ids(frontmatter.get("project"))
-        ids.update(page_ids)
-        is_decision = _page_type(page) == "decision" and str(frontmatter.get("status")) not in NOT_CURRENT_STATUSES
-        is_correction = bool(PROJECT_CORRECTION_TAGS & set(_as_string_list(frontmatter.get("tags", []))))
-        for project_id in page_ids:
-            if is_decision:
-                decisions.setdefault(project_id, []).append(page)
-            if is_correction:
-                corrections.setdefault(project_id, []).append(page)
+def _old_project_summary_paths(root: Path) -> list[Path]:
+    """Return the project summary pages an earlier maps build wrote under wiki/maps/projects/.
 
-    summaries: list[Page] = []
-    for project_id in sorted(ids):
-        target = _project_map_dir(root) / f"{project_id}.md"
-        _assert_generated_project_map(root, target)
-        open_items = sorted(
-            sorted(open_work.get(project_id, []), key=lambda item: item.line),
-            key=lambda item: item.date,
-            reverse=True,
-        )
-        sections = [
-            [f"- [[inbox]] — {item.title} ({item.status})" for item in open_items],
-            _project_page_lines(root, decisions.get(project_id, [])),
-            _project_page_lines(root, corrections.get(project_id, [])),
-        ]
-        summaries.append(
-            Page(
-                path=target,
-                frontmatter=_project_frontmatter(project_id, target, current_date),
-                body=_render_project_summary(project_id, sections),
-            )
-        )
-    return summaries
-
-
-def render_no_project_summary(root: Path) -> str:
-    """Render the project summary sections for open inbox items and pages that have no `project`.
-
-    Read-only. maps build does not write this text, so its output never depends on the vault map.
-    recall.sh prints it for a project when the vault map puts this vault's pages without `project`
-    in that project's scope (vault-graph spec 4.4.2, request S4).
+    maps build no longer writes them (vault-graph request S11), so it removes them. A page counts only
+    when its frontmatter has the maps build generated_by marker and it has no page lock. Any other file
+    there was written by a person and stays an ordinary wiki page.
     """
-    project_dir = _project_map_dir(root)
-    pages = [page for page in _load_wiki_pages(root / "wiki") if page.path.parent != project_dir]
-    open_items = [item for item in load_inbox_items(root) if item.is_open and not project_ids(item.project)]
-    decisions: list[Page] = []
-    corrections: list[Page] = []
-    for page in pages:
-        frontmatter = page.frontmatter or {}
-        if project_ids(frontmatter.get("project")):
-            continue
-        if _page_type(page) == "decision" and str(frontmatter.get("status")) not in NOT_CURRENT_STATUSES:
-            decisions.append(page)
-        if PROJECT_CORRECTION_TAGS & set(_as_string_list(frontmatter.get("tags", []))):
-            corrections.append(page)
-    open_items = sorted(sorted(open_items, key=lambda item: item.line), key=lambda item: item.date, reverse=True)
-    sections = [
-        [f"- [[inbox]] — {item.title} ({item.status})" for item in open_items],
-        _project_page_lines(root, decisions),
-        _project_page_lines(root, corrections),
-    ]
-    return _render_project_summary("(no project)", sections)
-
-
-def _project_page_lines(root: Path, pages: list[Page]) -> list[str]:
-    ordered = sorted(
-        sorted(pages, key=lambda page: display_path(page.path, root)),
-        key=lambda page: str((page.frontmatter or {}).get("updated", "")),
-        reverse=True,
-    )
-    return [
-        f"- [[{_wiki_target(root, page.path)}]] — {_page_summary(page)} ({display_path(page.path, root)})"
-        for page in ordered
-    ]
-
-
-def _project_frontmatter(project_id: str, target: Path, current_date: date) -> dict[str, Any]:
-    definition = {
-        "title": f"Project Summary: {project_id}",
-        "summary": f"Generated summary of open work, current decisions, and corrections and rules for project {project_id}.",
-        "tags": ["project-map"],
-    }
-    frontmatter = _map_frontmatter(f"projects/{project_id}", definition, target, current_date)
-    frontmatter["project"] = project_id
-    return frontmatter
-
-
-def _render_project_summary(project_id: str, sections: list[list[str]]) -> str:
-    """Render the fixed sections, dropping trailing lines until both token limits hold."""
-    header = [
-        f"# Project Summary: {project_id}",
-        "",
-        "## Purpose",
-        "",
-        "This generated page lists open work, current decisions, and corrections and rules for this project.",
-        "",
-        "Source: Deterministic map build from wiki frontmatter `project` values and `wiki/inbox.md` items.",
-        "",
-    ]
-    kept = [list(lines) for lines in sections]
-    omitted = [0 for _lines in sections]
-
-    def section_block(index: int) -> list[str]:
-        items = list(kept[index])
-        if omitted[index]:
-            items.append(f"- {omitted[index]} more items omitted by the size limit; see [[maps/topic-map]].")
-        return [PROJECT_SECTION_HEADINGS[index], "", *(items or ["- (none)"]), ""]
-
-    def section_tokens(index: int) -> int:
-        return estimate_tokens("\n".join(section_block(index)) + "\n")
-
-    def body() -> str:
-        lines = list(header)
-        for index in range(len(kept)):
-            lines.extend(section_block(index))
-        return "\n".join(lines).rstrip() + "\n"
-
-    def drop_last(index: int) -> None:
-        kept[index].pop()
-        omitted[index] += 1
-
-    for index in range(len(kept)):
-        while kept[index] and section_tokens(index) > PROJECT_SECTION_MAX_TOKENS:
-            drop_last(index)
-    # The page body as parsed starts with the blank line that follows the frontmatter.
-    while estimate_tokens("\n" + body()) > PROJECT_MAP_MAX_TOKENS:
-        candidates = [index for index in range(len(kept)) if kept[index]]
-        if not candidates:
-            break
-        drop_last(max(candidates, key=lambda index: (section_tokens(index), -index)))
-    return body()
-
-
-def _assert_generated_project_map(root: Path, path: Path) -> None:
-    if not path.exists():
-        return
-    page = parse_page(path)
-    if find_human_locks(page).page_locked:
-        raise ValueError(f"Project summary page is human-locked: {display_path(path, root)}")
-    if (page.frontmatter or {}).get("generated_by") != MAP_GENERATED_BY:
-        raise ValueError(f"Project summary page was not generated by maps build: {display_path(path, root)}")
-
-
-def _stale_project_map_paths(root: Path, project_pages: list[Page]) -> list[Path]:
-    """Return generated summary pages whose project no longer has pages or open work."""
     project_dir = _project_map_dir(root)
     if not project_dir.is_dir():
         return []
-    current = {page.path for page in project_pages}
-    stale = [path for path in sorted(project_dir.glob("*.md")) if path not in current]
-    for path in stale:
-        _assert_generated_project_map(root, path)
-    return stale
+    paths: list[Path] = []
+    for path in sorted(project_dir.glob("*.md")):
+        page = parse_page(path)
+        if (page.frontmatter or {}).get("generated_by") != MAP_GENERATED_BY:
+            continue
+        if find_human_locks(page).page_locked:
+            continue
+        paths.append(path)
+    return paths
+
+
+def _remove_empty_project_map_dir(root: Path) -> None:
+    try:
+        _project_map_dir(root).rmdir()
+    except OSError:
+        pass
 
 
 def _render_stable_map_page(target: Path, frontmatter: dict[str, Any], body: str) -> str:
@@ -662,7 +479,7 @@ def _render_maps_report(
     lines.extend(["", "## Changed Pages", ""])
     lines.extend(f"- `{display_path(path, root)}`" for path in changed_paths) if changed_paths else lines.append("- None.")
     if deleted_paths:
-        lines.extend(["", "## Removed Project Summaries", ""])
+        lines.extend(["", "## Removed Project Summary Pages", ""])
         lines.extend(f"- `{display_path(path, root)}`" for path in deleted_paths)
     lines.append("")
     return "\n".join(lines)

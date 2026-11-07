@@ -5851,26 +5851,38 @@ Next action: Later.
 """
 
 
-class ProjectSummaryMapTest(unittest.TestCase):
+def _old_project_summary(root: Path, project_id: str, *, locked: bool = False) -> Path:
+    """Write a project summary page the way maps build wrote it before vault-graph request S11."""
+    frontmatter = _frontmatter(f"Project Summary: {project_id}", "map")
+    frontmatter.update(
+        {
+            "summary": f"Generated summary of open work for project {project_id}.",
+            "tags": ["project-map"],
+            "related": ["index"],
+            "generated_by": "tools/wiki/cli.py maps build",
+            "map_slug": f"projects/{project_id}",
+            "project": project_id,
+        }
+    )
+    body = f"# Project Summary: {project_id}\n\nSource: Deterministic map build.\n"
+    if locked:
+        body += "\n<!-- human-locked -->\n"
+    path = root / "wiki" / "maps" / "projects" / f"{project_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_page(frontmatter, body))
+    return path
+
+
+class ProjectFieldAndOldSummaryTest(unittest.TestCase):
+    """maps build writes no project summary pages and removes the ones it wrote before (vault-graph request S11)."""
+
     def _a6_vault(self, root: Path) -> None:
         _project_fixture_vault(root)
         _write_project_page(root, "wiki/decisions/alpha-storage.md", "Alpha Storage", "decision", "alpha", ["storage"])
         _write_project_page(
             root, "wiki/concepts/alpha-naming-rule.md", "Alpha Naming Rule", "concept", ["alpha"], ["correction"]
         )
-        _write_project_page(root, "wiki/concepts/alpha-background.md", "Alpha Background", "concept", "alpha", ["notes"])
         _write_inbox_items(root, A6_INBOX_ITEMS)
-
-    def test_estimate_tokens_counts_korean_as_half_and_other_as_quarter_rounded_up(self):
-        from tools.wiki.lib.maps import estimate_tokens
-
-        self.assertEqual(0, estimate_tokens(""))
-        self.assertEqual(1, estimate_tokens("abcd"))
-        self.assertEqual(2, estimate_tokens("abcde"))
-        self.assertEqual(1, estimate_tokens("가나"))
-        self.assertEqual(2, estimate_tokens("가나다"))
-        self.assertEqual(1, estimate_tokens("가a"))
-        self.assertEqual(3, estimate_tokens("결정 rule"))
 
     def test_project_field_lint_accepts_string_and_list_and_rejects_bad_values(self):
         cases = {
@@ -5909,7 +5921,7 @@ class ProjectSummaryMapTest(unittest.TestCase):
         self.assertTrue(items[0].is_open)
         self.assertFalse(items[1].is_open)
 
-    def test_project_summary_build_passes_check_lint_and_metrics_without_orphans(self):
+    def test_maps_build_writes_no_project_summary_pages(self):
         from tools.wiki.lib.metrics import build_maintenance_metrics
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5921,8 +5933,7 @@ class ProjectSummaryMapTest(unittest.TestCase):
             lint_code, lint_output = _run_wiki_cli(root, "lint")
             metrics_code, metrics_output = _run_wiki_cli(root, "metrics", "--check")
             orphan_pages = build_maintenance_metrics(root).metrics.orphan_pages
-            summary_exists = (root / "wiki" / "maps" / "projects" / "alpha.md").exists()
-            beta_exists = (root / "wiki" / "maps" / "projects" / "beta-2.md").exists()
+            project_dir_exists = (root / "wiki" / "maps" / "projects").exists()
             topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
 
         self.assertEqual(0, build_code, build_output)
@@ -5930,205 +5941,68 @@ class ProjectSummaryMapTest(unittest.TestCase):
         self.assertEqual(0, lint_code, lint_output)
         self.assertEqual(0, metrics_code, metrics_output)
         self.assertEqual(0, orphan_pages)
-        self.assertTrue(summary_exists)
-        self.assertTrue(beta_exists)
-        self.assertIn("[[maps/projects/alpha]]", topic_map)
+        self.assertFalse(project_dir_exists)
+        self.assertNotIn("maps/projects/", topic_map)
 
-    def test_project_summary_sections_match_heading_order_and_lines(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._a6_vault(root)
-            build_navigation_maps(root, build_date=date(2026, 5, 31))
-            page = parse_page(root / "wiki" / "maps" / "projects" / "alpha.md")
-
-        headings = [line for line in page.body.splitlines() if line.startswith("## ")]
-        self.assertEqual(["## Purpose", "## Open Work", "## Current Decisions", "## Corrections and Rules"], headings)
-        self.assertEqual("alpha", page.frontmatter["project"])
-        self.assertEqual(["project-map"], page.frontmatter["tags"])
-        self.assertEqual("tools/wiki/cli.py maps build", page.frontmatter["generated_by"])
-
-        def items(heading: str) -> list[str]:
-            return [line for line in _section_text(page.body, heading).splitlines() if line.startswith("- ")]
-
-        self.assertEqual(["- [[inbox]] — Ship the summary page (deferred)"], items("## Open Work"))
-        self.assertEqual(
-            ["- [[decisions/alpha-storage]] — Alpha Storage summary. (wiki/decisions/alpha-storage.md)"],
-            items("## Current Decisions"),
-        )
-        self.assertEqual(
-            ["- [[concepts/alpha-naming-rule]] — Alpha Naming Rule summary. (wiki/concepts/alpha-naming-rule.md)"],
-            items("## Corrections and Rules"),
-        )
-        self.assertNotIn("alpha-background", page.body)
-        self.assertNotIn("Already handled", page.body)
-        self.assertNotIn("Other project work", page.body)
-
-    def test_project_summary_shows_none_for_empty_sections_and_orders_by_updated(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            _project_fixture_vault(root)
-            _write_project_page(root, "wiki/decisions/b-old.md", "B Old", "decision", "gamma", [], updated="2026-05-01")
-            _write_project_page(root, "wiki/decisions/a-new.md", "A New", "decision", "gamma", [], updated="2026-05-20")
-            _write_project_page(root, "wiki/decisions/c-new.md", "C New", "decision", "gamma", [], updated="2026-05-20")
-            _write_project_page(
-                root,
-                "wiki/decisions/d-gone.md",
-                "D Gone",
-                "decision",
-                "gamma",
-                [],
-                status="deprecated",
-            )
-            build_navigation_maps(root, build_date=date(2026, 5, 31))
-            body = parse_page(root / "wiki" / "maps" / "projects" / "gamma.md").body
-
-        decisions = [line for line in _section_text(body, "## Current Decisions").splitlines() if line.startswith("- ")]
-        self.assertEqual(
-            ["[[decisions/a-new]]", "[[decisions/c-new]]", "[[decisions/b-old]]"],
-            [line.split(" ")[1] for line in decisions],
-        )
-        self.assertEqual("## Open Work\n\n- (none)\n\n", _section_text(body, "## Open Work"))
-        self.assertTrue(_section_text(body, "## Corrections and Rules").startswith("## Corrections and Rules\n\n- (none)\n"))
-
-    def test_project_summary_removed_when_project_disappears(self):
+    def test_maps_build_removes_summary_pages_an_earlier_build_wrote(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._a6_vault(root)
             self.assertEqual(0, _run_wiki_cli(root, "maps", "build")[0])
-            inbox = root / "wiki" / "inbox.md"
-            inbox.write_text(inbox.read_text().replace("Project: beta-2\n", ""))
-            beta = root / "wiki" / "maps" / "projects" / "beta-2.md"
+            alpha = _old_project_summary(root, "alpha")
+            beta = _old_project_summary(root, "beta-2")
 
             check_code, check_output = _run_wiki_cli(root, "maps", "build", "--check")
-            beta_kept_by_check = beta.exists()
+            kept_by_check = alpha.exists() and beta.exists()
             build_code, build_output = _run_wiki_cli(root, "maps", "build")
             recheck_code, recheck_output = _run_wiki_cli(root, "maps", "build", "--check")
             lint_code, lint_output = _run_wiki_cli(root, "lint")
             log = (root / "wiki" / "log.md").read_text()
-            beta_exists = beta.exists()
-            alpha_exists = (root / "wiki" / "maps" / "projects" / "alpha.md").exists()
+            project_dir_exists = (root / "wiki" / "maps" / "projects").exists()
             topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
 
         self.assertEqual(1, check_code, check_output)
-        self.assertTrue(beta_kept_by_check)
+        self.assertTrue(kept_by_check)
         self.assertEqual(0, build_code, build_output)
         self.assertEqual(0, recheck_code, recheck_output)
         self.assertEqual(0, lint_code, lint_output)
-        self.assertFalse(beta_exists)
-        self.assertTrue(alpha_exists)
-        self.assertIn("Removed `wiki/maps/projects/beta-2.md`", log)
-        self.assertNotIn("maps/projects/beta-2", topic_map)
-
-    def test_project_summary_removed_when_project_field_removed_from_every_page(self):
-        # A-8: remove `project` from every page of one project, including the inbox Project: lines.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._a6_vault(root)
-            self.assertEqual(0, _run_wiki_cli(root, "maps", "build")[0])
-            alpha = root / "wiki" / "maps" / "projects" / "alpha.md"
-            self.assertTrue(alpha.exists())
-            for relative in (
-                "wiki/decisions/alpha-storage.md",
-                "wiki/concepts/alpha-naming-rule.md",
-                "wiki/concepts/alpha-background.md",
-            ):
-                page = parse_page(root / relative)
-                frontmatter = dict(page.frontmatter)
-                del frontmatter["project"]
-                (root / relative).write_text(render_page(frontmatter, page.body))
-            inbox = root / "wiki" / "inbox.md"
-            inbox.write_text(inbox.read_text().replace("Project: alpha\n", ""))
-
-            check_code, check_output = _run_wiki_cli(root, "maps", "build", "--check")
-            alpha_kept_by_check = alpha.exists()
-            build_code, build_output = _run_wiki_cli(root, "maps", "build")
-            recheck_code, recheck_output = _run_wiki_cli(root, "maps", "build", "--check")
-            log = (root / "wiki" / "log.md").read_text()
-            alpha_exists = alpha.exists()
-            beta_exists = (root / "wiki" / "maps" / "projects" / "beta-2.md").exists()
-            topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
-
-        self.assertEqual(1, check_code, check_output)
-        self.assertTrue(alpha_kept_by_check)
-        self.assertEqual(0, build_code, build_output)
-        self.assertEqual(0, recheck_code, recheck_output)
-        self.assertFalse(alpha_exists)
-        self.assertTrue(beta_exists)
+        self.assertFalse(project_dir_exists)
         self.assertIn("Removed `wiki/maps/projects/alpha.md`", log)
-        self.assertNotIn("maps/projects/alpha", topic_map)
+        self.assertIn("Removed `wiki/maps/projects/beta-2.md`", log)
+        self.assertNotIn("maps/projects/", topic_map)
 
-    def test_project_summary_build_refuses_to_delete_unmarked_or_locked_project_files(self):
-        for name, content in {
-            "unmarked": render_page(_frontmatter("Hand Written", "map"), "# Hand Written\n\nSource: Human.\n"),
-            "locked": None,
-        }.items():
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                _minimal_vault(root)
-                _write_project_page(root, "wiki/decisions/old.md", "Old", "decision", "old", [])
-                build_navigation_maps(root, build_date=date(2026, 5, 30))
-                target = root / "wiki" / "maps" / "projects" / "old.md"
-                if content is None:
-                    content = target.read_text() + "\n<!-- human-locked -->\n"
-                target.write_text(content)
-                (root / "wiki" / "decisions" / "old.md").unlink()
-
-                with self.assertRaisesRegex(ValueError, "wiki/maps/projects/old.md"):
-                    build_navigation_maps(root, build_date=date(2026, 5, 31))
-
-                self.assertEqual(content, target.read_text())
-
-    def test_project_summary_caps_korean_sections_deterministically(self):
-        from tools.wiki.lib.maps import PROJECT_MAP_MAX_TOKENS, PROJECT_SECTION_MAX_TOKENS, estimate_tokens
-
-        def build_once(root: Path) -> bytes:
-            _project_fixture_vault(root)
-            for number in range(60):
-                _write_project_page(
-                    root,
-                    f"wiki/decisions/korean-{number:02d}.md",
-                    f"한글 결정 {number:02d}",
-                    "decision",
-                    "hangul",
-                    ["rule"] if number % 2 else [],
-                    updated=f"2026-05-{(number % 28) + 1:02d}",
-                    summary=f"저장소의 기억 요약은 필요한 섹션만 불러오고 정리 단계에서 근거 페이지를 남긴다 {number:02d}.",
-                )
-            build_navigation_maps(root, build_date=date(2026, 5, 31))
-            return (root / "wiki" / "maps" / "projects" / "hangul.md").read_bytes()
-
-        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
-            first_bytes = build_once(Path(first))
-            second_bytes = build_once(Path(second))
-            body = parse_page(Path(first) / "wiki" / "maps" / "projects" / "hangul.md").body
-            lint_codes = {issue.code for issue in lint_repo(Path(first)).issues if issue.severity == "error"}
-
-        self.assertEqual(first_bytes, second_bytes)
-        self.assertLessEqual(estimate_tokens(body), PROJECT_MAP_MAX_TOKENS)
-        omission_lines = 0
-        for heading in ("## Open Work", "## Current Decisions", "## Corrections and Rules"):
-            section = _section_text(body, heading)
-            self.assertLessEqual(estimate_tokens(section), PROJECT_SECTION_MAX_TOKENS, heading)
-            omitted = [line for line in section.splitlines() if "[[maps/topic-map]]" in line]
-            self.assertLessEqual(len(omitted), 1, heading)
-            omission_lines += len(omitted)
-        self.assertGreaterEqual(omission_lines, 1)
-        self.assertIn("more items omitted", _section_text(body, "## Current Decisions"))
-        self.assertEqual(set(), lint_codes)
-
-    def test_maps_build_check_counts_project_summary_pages(self):
-        from tools.wiki.lib.maps import MAP_DEFINITIONS
-
+    def test_maps_build_keeps_hand_written_and_locked_files_in_the_project_folder(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             _minimal_vault(root)
-            _write_project_page(root, "wiki/decisions/one.md", "One", "decision", "solo", [])
+            hand = root / "wiki" / "maps" / "projects" / "notes.md"
+            hand.parent.mkdir(parents=True)
+            hand_text = render_page(_frontmatter("Hand Written", "map"), "# Hand Written\n\nSource: Human.\n")
+            hand.write_text(hand_text)
+            locked = _old_project_summary(root, "kept", locked=True)
+            locked_text = locked.read_text()
+            removed = _old_project_summary(root, "gone")
 
-            code, output = _run_wiki_cli(root, "maps", "build", "--check")
+            result = build_navigation_maps(root, build_date=date(2026, 5, 31))
+            hand_after = hand.read_text()
+            locked_after = locked.read_text()
+            removed_exists = removed.exists()
+            topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
 
-        self.assertEqual(1, code)
-        self.assertIn(f"Navigation maps: {len(MAP_DEFINITIONS) + 1}", output)
-        self.assertIn(f"Changed maps: {len(MAP_DEFINITIONS) + 1}", output)
+        self.assertEqual([removed], result.deleted_paths)
+        self.assertFalse(removed_exists)
+        self.assertEqual(hand_text, hand_after)
+        self.assertEqual(locked_text, locked_after)
+        self.assertIn("[[maps/projects/notes]]", topic_map)
+
+    def test_maps_command_has_no_project_summary_subcommand(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _minimal_vault(root)
+            with self.assertRaises(SystemExit) as raised:
+                _run_wiki_cli(root, "maps", "no-project-summary")
+
+        self.assertEqual(2, raised.exception.code)
 
 
 MEMORY_NOTE_FEEDBACK = """---
