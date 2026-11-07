@@ -2,7 +2,7 @@
 
 `vault-map.json`은 어떤 Vault가 있고 어느 저장소가 어느 Vault에 연결되는지 적는 파일이다. 위치는 `$HOME/.claude/vault-builder/vault-map.json`이고, `CLAUDE_CONFIG_DIR`가 있으면 `$CLAUDE_CONFIG_DIR/vault-builder/vault-map.json`이다.
 
-vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault-graph는 이 문서대로 읽는다.
+vault-builder가 이 형식을 소유한다. llm-wiki router, 세션 수집 hook, vault-graph는 이 문서대로 읽는다.
 
 ## 쓰는 곳
 
@@ -60,7 +60,7 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 - llm-wiki router는 이 필드를 무시한다. 쓰기 도구는 여전히 `vault` 인자를 받아야 한다.
 - vault-graph는 값이 문자열이 아니거나 프로젝트 `vaults`에 없으면 그 필드만 무시하고 경고한다. 파일 전체를 버리지 않는다.
 
-`sharable`과 프로젝트 범위 규칙(vault-graph spec 4.4.2). 세션 기억(`recall.sh`, vault-graph 회상)에 페이지를 넣을지 정할 때 쓴다.
+`sharable`과 프로젝트 범위 규칙(vault-graph spec 4.4.2). vault-graph가 세션 기억에 페이지를 넣을지 정할 때 쓴다.
 
 1. 페이지 `project`가 이 프로젝트면 넣는다. 다른 프로젝트만 적혀 있으면 넣지 않는다.
 2. `project`가 없고, 그 Vault를 연결한 프로젝트가 이 프로젝트 하나뿐이면 넣는다. 이때 `sharable`은 보지 않는다.
@@ -70,7 +70,7 @@ vault-builder가 이 형식을 소유한다. llm-wiki router, `recall.sh`, vault
 
 ## 프로젝트 찾기 규칙
 
-저장소가 어느 프로젝트인지 정하는 규칙은 llm-wiki router의 `find_project`(`tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py`)가 소유한다. `link`, `unlink`, `list`는 이 함수를 불러 쓴다. `recall.sh`와 vault-graph처럼 따로 구현한 쪽은 이 함수와 같은 결과를 내야 한다.
+저장소가 어느 프로젝트인지 정하는 규칙은 llm-wiki router의 `find_project`(`tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py`)가 소유한다. `link`, `unlink`, `list`는 이 함수를 불러 쓴다. vault-graph처럼 따로 구현한 쪽은 이 함수와 같은 결과를 내야 한다.
 
 순서는 아래와 같다. 하나만 맞는 첫 단계가 이긴다. 한 단계에서 둘 이상 맞으면 멈추고 그 id들을 알린다.
 

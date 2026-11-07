@@ -2351,9 +2351,12 @@ class WikiToolCliTest(unittest.TestCase):
             self.assertFalse((target / "docs" / "stenc").exists())
             self.assertFalse((target / "tools" / "stenc").exists())
             manifest = json.loads((target / ".vault-builder" / "manifest.json").read_text())
-            self.assertEqual(5, manifest["schema_version"])
-            self.assertEqual(5, manifest["contract_version"])
+            self.assertEqual(6, manifest["schema_version"])
+            self.assertEqual(6, manifest["contract_version"])
             self.assertIn("tools/wiki/cli.py", manifest["managed_files"])
+            for relative in (".agents/skills/memory-cleanup/SKILL.md", ".claude/skills/memory-cleanup/SKILL.md"):
+                self.assertFalse((target / relative).exists(), relative)
+                self.assertNotIn(relative, manifest["managed_files"])
             for relative in (
                 "tools/wiki/lib/session_archive.py",
                 "tools/wiki/lib/session_capture.py",
@@ -6088,7 +6091,7 @@ class MemoryScanTest(unittest.TestCase):
         return json.loads(output)
 
     def _run_procedure(self, scan: dict) -> None:
-        """The deterministic part of the memory-cleanup skill: copy new notes to raw and register them."""
+        """Import new notes the way an agent would: copy them to raw and register them."""
         for project in scan["projects"]:
             for note in project["notes"]:
                 if note["imported"]:
@@ -6215,33 +6218,6 @@ class MemoryScanTest(unittest.TestCase):
         other_vault.mkdir()
         code, output = _run_wiki_cli(other_vault, "memory-scan")
         self.assertEqual(1, code)
-
-    def test_memory_cleanup_skill_documents_required_rules(self):
-        root = Path(__file__).resolve().parents[1]
-        skill = (root / ".agents" / "skills" / "memory-cleanup" / "SKILL.md").read_text(encoding="utf-8")
-        pointer = (root / ".claude" / "skills" / "memory-cleanup" / "SKILL.md").read_text(encoding="utf-8")
-
-        for required in (
-            "memory-scan",
-            "MEMORY.md",
-            "<project id>--<note stem>--<sha256 first 8>.md",
-            "raw/imports/claude-memory/",
-            "personal",
-            "team",
-            "`project`",
-            "type: decision",
-            "`correction`",
-            "`rule`",
-            "supersede-claim",
-            "review create --type contradiction",
-            "gh pr create",
-            "maps build --report",
-            "search",
-        ):
-            self.assertIn(required, skill, required)
-        self.assertIn("Never edit, move, or delete L1", skill)
-        self.assertEqual(skill.split("\n---\n", 1)[0], pointer.split("\n---\n", 1)[0])
-        self.assertIn(".agents/skills/memory-cleanup/SKILL.md", pointer)
 
 
 def _shared_json_entry_manifest() -> dict[str, object]:
@@ -6766,14 +6742,15 @@ class UsageDocTests(unittest.TestCase):
         self.assertNotIn("사용자가 직접 편집하는 파일", section)
 
     def test_memory_scan_documents_repo_option(self):
-        section = self._section("### 17.4 L1 메모리 정리하기 (memory-cleanup, memory-scan)")
+        section = self._section("### 17.4 L1 메모리 목록 보기 (memory-scan)")
         self.assertIn("memory-scan --repo", section)
         self.assertIn("함께 쓸 수 없습니다", section)
 
-    def test_recall_unlinked_row_mentions_link_line(self):
-        section = self._section("### 17.5 요약 불러오기 (/project-memory)")
-        row = next(line for line in section.splitlines() if line.startswith("| 연결되지 않은 저장소"))
-        self.assertIn("`link: run vault-builder link ", row)
+    def test_project_memory_section_says_the_fallback_paths_are_gone(self):
+        section = self._section("### 17.5 프로젝트 기억 불러오기")
+        self.assertIn("vault-graph", section)
+        self.assertIn("generated_by: tools/wiki/cli.py maps build", section)
+        self.assertNotIn("no-project-summary", self._text())
 
     def test_command_summary_lists_link_commands(self):
         section = self._section("## 19. 전체 명령 요약")

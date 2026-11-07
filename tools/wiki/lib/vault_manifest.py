@@ -1,4 +1,4 @@
-"""Shared Vault manifest schema validation for schema versions 1, 2, 3, 4, and 5."""
+"""Shared Vault manifest schema validation for schema versions 1, 2, 3, 4, 5, and 6."""
 from __future__ import annotations
 
 import hashlib
@@ -17,12 +17,10 @@ _MANAGED_MODES = frozenset({"0644", "0755"})
 _MANAGED_POLICIES = frozenset({"replace-if-unmodified"})
 MANAGED_EXACT_PATH_SCOPE = frozenset(
     {
-        ".agents/skills/memory-cleanup/SKILL.md",
         ".agents/skills/session-capture/SKILL.md",
         ".agents/skills/wiki-ingest/SKILL.md",
         ".agents/skills/wiki-query/SKILL.md",
         ".agents/skills/wiki-update/SKILL.md",
-        ".claude/skills/memory-cleanup/SKILL.md",
         ".claude/skills/session-capture/SKILL.md",
         ".claude/skills/wiki-ingest/SKILL.md",
         ".claude/skills/wiki-query/SKILL.md",
@@ -85,9 +83,18 @@ MANAGED_EXACT_PATH_SCOPE = frozenset(
     }
 )
 MANAGED_TREE_ROOT_SCOPE: tuple[str, ...] = ()
-# Paths earlier contracts managed. Only manifests below schema 5 may list them.
-RETIRED_MANAGED_PATHS = frozenset({".github/workflows/release-gate.yml"})
-_RETIRED_PATHS_LAST_SCHEMA = 4
+# Paths earlier contracts managed, each with the last manifest schema (and contract) that may list it.
+# Contract 5 retired the release-gate workflow; contract 6 retired the memory-cleanup skill (vault-graph request S11).
+RETIRED_MANAGED_PATHS: dict[str, int] = {
+    ".github/workflows/release-gate.yml": 4,
+    ".agents/skills/memory-cleanup/SKILL.md": 5,
+    ".claude/skills/memory-cleanup/SKILL.md": 5,
+}
+
+
+def retired_path_is_allowed(path: str, version: int) -> bool:
+    """True when a manifest schema (or journal contract) version may still list this retired path."""
+    return version <= RETIRED_MANAGED_PATHS.get(path, 0)
 _REQUIRED_MANIFEST_KEYS = frozenset(
     {
         "builder_revision",
@@ -101,10 +108,10 @@ _OPTIONAL_MANIFEST_KEYS = frozenset({"last_migration_id"})
 _MANAGED_FILE_KEYS = frozenset({"mode", "path", "policy", "sha256"})
 
 # Written manifests always use the current schema; older schemas stay readable.
-MANIFEST_SCHEMA_VERSION = 5
-MANIFEST_CONTRACT_VERSION = 5
+MANIFEST_SCHEMA_VERSION = 6
+MANIFEST_CONTRACT_VERSION = 6
 # Each readable schema version has exactly one contract version.
-_SUPPORTED_VERSIONS = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
+_SUPPORTED_VERSIONS = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}
 EXTERNAL_RECORDS_KEY = "external_records"
 # Records of files and entries created outside the Vault, located relative to $HOME.
 EXTERNAL_RECORD_KEYS = {
@@ -353,12 +360,11 @@ def _managed_files(
         raise ValueError(
             "Vault builder manifest managed_files must be an object."
         )
-    retired_allowed = schema_version <= _RETIRED_PATHS_LAST_SCHEMA
     managed: dict[str, dict[str, str]] = {}
     for raw_path, raw_entry in value.items():
         path = _safe_path(raw_path, "managed_files path")
-        if not managed_path_is_in_contract_scope(path) and not (
-            retired_allowed and path in RETIRED_MANAGED_PATHS
+        if not managed_path_is_in_contract_scope(path) and not retired_path_is_allowed(
+            path, schema_version
         ):
             raise ValueError(
                 "Vault builder manifest managed file is outside the "

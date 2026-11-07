@@ -17,7 +17,7 @@ from .manifests import load_manifest
 from .models import ContractCatalog, ManagedFile, MigrationAction, MigrationPlan
 
 
-_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v5.json"
+_CURRENT_CATALOG_PATH = "tools/vault_migration/contracts/v6.json"
 # Released catalogs whose hashes prove a file is unmodified builder output.
 _PRIOR_CATALOG_PATHS = (
     "tools/vault_migration/contracts/v0.json",
@@ -25,9 +25,10 @@ _PRIOR_CATALOG_PATHS = (
     "tools/vault_migration/contracts/v2.json",
     "tools/vault_migration/contracts/v3.json",
     "tools/vault_migration/contracts/v4.json",
+    "tools/vault_migration/contracts/v5.json",
 )
 # Manifest contract versions whose recorded hashes are trusted for planning.
-_SUPPORTED_MANIFEST_CONTRACTS = frozenset({1, 2, 3, 4, 5})
+_SUPPORTED_MANIFEST_CONTRACTS = frozenset({1, 2, 3, 4, 5, 6})
 _REQUIRED_TOPOLOGY = (
     "AGENTS.md",
     "wiki/index.md",

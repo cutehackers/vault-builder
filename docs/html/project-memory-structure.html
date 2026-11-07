@@ -205,6 +205,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
     <div class="eyebrow">VAULT · 프로젝트 메모리 설계</div>
     <h1>프로젝트 메모리 구조</h1>
     <p class="lead">프로젝트 세션은 저장소 밖 자동 메모리에만 기록합니다. vault가 그 기록을 검증해 정리하고, 프로젝트별 요약으로 만들어 다음 세션이 시작될 때 돌려줍니다. 프로젝트 저장소의 파일은 하나도 바꾸지 않습니다.</p>
+    <p class="note">2026-11-07 변경(vault-graph 요청S11): vault-builder는 프로젝트 요약 페이지(L3), <code>/project-memory</code> skill, <code>recall.sh</code>, memory-cleanup skill을 더 만들지 않습니다. 세션 시작 회상과 기억 정리는 vault-graph가 맡고, vg가 없거나 실패하면 hook은 아무것도 넣지 않습니다. 아래 설계 중 이 경로를 다룬 부분은 이전 설계 기록입니다.</p>
     <div class="facts">
       <div class="fact"><b>0개</b><span>프로젝트 저장소에서 바꾸는 파일. CLAUDE.md 포함</span></div>
       <div class="fact"><b>3 계층</b><span>L1 빠른 메모리 · L2 vault 장기 메모리 · L3 프로젝트 요약</span></div>
@@ -224,7 +225,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       <div class="step" data-step="3" data-zone="z3"><span class="n">3 · 정리할 때</span><h3>검증 후 반영</h3><p>ingest-source, publish-draft로 vault에 반영</p><span><span class="chip have">있음</span></span></div>
       <div class="step" data-step="4" data-zone="z3"><span class="n">4 · 정리할 때</span><h3>요약 생성</h3><p>프로젝트별 요약 페이지를 다시 만듦</p><span><span class="chip new">신규</span></span></div>
       <div class="step" data-step="5" data-zone="z2"><span class="n">5 · 세션 시작</span><h3>요약 읽기</h3><p>/project-memory skill, 또는 <code>install --with-hooks</code>로 넣은 SessionStart hook이 연결된 vault의 요약을 읽음</p><span><span class="chip have">있음 · hook은 선택</span></span></div>
-      <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 hook 출력(vg 회상, 또는 vg가 없을 때 요약)이 세션 맥락으로 들어감</p><span><span class="chip have">있음</span></span></div>
+      <div class="step" data-step="6" data-zone="z1"><span class="n">6 · 세션 시작</span><h3>세션 주입</h3><p>MEMORY.md와 hook 출력(vg 회상)이 세션 맥락으로 들어감. vg가 없으면 hook 출력은 비어 있음</p><span><span class="chip have">있음</span></span></div>
     </div>
     <div class="legend">
       <span><i style="background:var(--z1)"></i>프로젝트 저장소</span>
@@ -246,7 +247,7 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
       </button>
       <button type="button" class="card" id="sc2" data-steps="5,6" aria-pressed="false">
         <div class="top"><h3>다음 날 이어서</h3><span class="chip have">매일</span></div>
-        <dl class="who"><dt>사용자</dt><dd>설명 없이 세션을 시작한다</dd><dt>자동</dt><dd class="auto">MEMORY.md 로드. hook을 설치했으면 vg 출력을, vg가 없거나 실패하면 프로젝트 요약을 넣음</dd></dl>
+        <dl class="who"><dt>사용자</dt><dd>설명 없이 세션을 시작한다</dd><dt>자동</dt><dd class="auto">MEMORY.md 로드. hook을 설치했으면 vg 출력을 넣음. vg가 없거나 실패하면 아무것도 넣지 않음</dd></dl>
         <div class="steps-used"><span>5</span><span>6</span></div>
       </button>
       <button type="button" class="card" id="sc3" data-steps="2,3,4" aria-pressed="false">
@@ -542,11 +543,11 @@ td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; mar
         { f: 1, t: 2, l: '메모 쓰기', d: '~/.claude/projects/<저장소>/memory/에 메모를 씁니다. 저장소 파일은 바뀌지 않습니다.' },
         { div: '다음 날 세션 시작' },
         { f: 1, t: 3, l: 'SessionStart 이벤트', d: 'install --with-hooks로 넣은 항목이 있으면 Claude Code가 세션을 시작하면서 vault_hooks.py session-start를 실행합니다.' },
-        { f: 3, t: 4, l: '요약 파일 읽기', d: '실행기는 먼저 vg hook session-start를 실행하고, 종료 코드 0이면 그 출력을 그대로 씁니다(빈 출력도 정상). vg가 없거나 실패하면 recall.sh가 연결 vault마다 wiki/maps/projects/<p>.md를 읽습니다.' },
+        { f: 3, t: 4, l: 'vg 회상', d: '실행기는 먼저 vg hook session-start를 실행하고, 종료 코드 0이면 그 출력을 그대로 씁니다(빈 출력도 정상). vg가 없거나 실패하면 아무것도 출력하지 않습니다.' },
         { f: 3, t: 1, l: 'stdout = 맥락', d: 'hook의 출력이 세션 맥락으로 들어갑니다.' },
         { f: 2, t: 1, l: 'MEMORY.md 자동 로드', d: 'L1 메모리 색인은 Claude Code가 원래 자동으로 읽습니다.' }
       ],
-      notes: ['hook은 <code>install --with-hooks</code>를 줄 때만 생깁니다. 없으면 <code>/project-memory</code> skill이 같은 <code>recall.sh</code>를 부릅니다.', 'vg는 <code>VAULT_GRAPH_BIN</code>, install이 기록한 <code>~/.claude/vault-builder/vault-hooks.json</code>의 절대 경로, <code>PATH</code> 순서로 찾습니다.', '<code>recall.sh</code>는 <code>~/.claude/vault-builder/vault-map.json</code>에서 연결된 vault를 찾아 각 vault의 <code>wiki/maps/projects/&lt;p&gt;.md</code>를 출력합니다.', '실행기는 어떤 경우에도 종료 코드 0으로 끝납니다. hook이 세션을 막지 않게 하기 위해서입니다.']
+      notes: ['hook은 <code>install --with-hooks</code>를 줄 때만 생깁니다.', 'vg는 <code>VAULT_GRAPH_BIN</code>, install이 기록한 <code>~/.claude/vault-builder/vault-hooks.json</code>의 절대 경로, <code>PATH</code> 순서로 찾습니다.', '실행기는 어떤 경우에도 종료 코드 0으로 끝납니다. hook이 세션을 막지 않게 하기 위해서입니다.']
     },
     b: {
       lanes: ['사용자', '정리 skill', 'memory/', 'vault CLI', 'wiki · git'], kinds: ['', 'new', '', '', ''],
