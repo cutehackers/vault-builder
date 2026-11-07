@@ -38,6 +38,10 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 - 폐기한 페이지를 frontmatter만 바꾸는 `patch-page`로 되살릴 수 있다. `status`가 retired가 아니어도 `restored_at`(날짜)과 `restored_reason`이 함께 있으면 `retired_reason`, `retired_at`을 이력으로 남길 수 있다. 전에는 lint가 `retired-field-without-retired-status`로 거부했다(vault-graph 요청S12).
 - `docs/usage.md` 17절과 `docs/html/project-memory-structure.html`의 세션 시작 회상 설명을 실제 동작에 맞춘다. hook이 없으면 아무것도 넣지 않고, hook이 있으면 vg 출력을 넣으며, vg가 없거나 실패할 때만 프로젝트 요약을 넣는다.
 
+### Removed
+
+- 훅 실행기 `vault_hooks.py session-start`가 vg가 없거나 실패하거나 시간을 넘기면 아무것도 출력하지 않는다. 전에는 `recall.sh` 출력을 넣었다(vault-graph 요청S11). 세션 수집의 대체 경로(`capture --direct`)는 그대로다.
+
 ## [4.1.0] - 2026-11-05
 
 이전 릴리스로 만든 vault가 있어도 설치 명령 한 번으로 설치가 끝난다. 기존 설치와 함께 쓸 수 있는 새 동작이라 MINOR로 올렸다. contract와 manifest schema는 5 그대로다.

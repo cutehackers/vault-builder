@@ -116,12 +116,6 @@ class LauncherCase(unittest.TestCase):
         )
         return write_program(self.bin / name, body)
 
-    def fake_recall(self, output: str = "RECALL-OUT\n") -> Path:
-        recall = self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
-        recall.parent.mkdir(parents=True)
-        recall.write_text(f"#!/bin/sh\nprintf '%s' '{output}'\npwd > {self.tmp / 'recall-cwd'}\n", encoding="utf-8")
-        return recall
-
     def write_map(self, vaults: dict[str, tuple[Path, str]], project_vaults: list[str], **project: object) -> None:
         entry = {"root": str(self.repo), "vaults": project_vaults}
         entry.update(project)
@@ -186,9 +180,10 @@ class FindVgTests(LauncherCase):
 
 
 class SessionStartTests(LauncherCase):
+    """vg output goes in as is. Without a working vg the hook prints nothing (vault-graph request S11)."""
+
     def test_vg_exit_zero_output_is_printed_as_is(self) -> None:
         self.fake_vg(output="VG-OUT\n")
-        self.fake_recall()
         data = self.hook("SessionStart", source="startup")
         result = self.run_script(["session-start"], data)
         self.assertEqual(result.returncode, 0)
@@ -200,40 +195,43 @@ class SessionStartTests(LauncherCase):
 
     def test_vg_exit_zero_with_empty_output_stays_empty(self) -> None:
         self.fake_vg(output="")
-        self.fake_recall()
         result = self.run_script(["session-start"], self.hook("SessionStart", source="resume"))
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b"")
 
-    def test_vg_failure_prints_recall_output(self) -> None:
+    def write_old_recall(self) -> Path:
+        """A recall.sh left by an earlier install. The launcher must not run it."""
+        recall = self.config / "skills" / "project-memory" / "scripts" / "recall.sh"
+        recall.parent.mkdir(parents=True)
+        recall.write_text(f"#!/bin/sh\nprintf 'RECALL-OUT'\ntouch {self.tmp / 'recall-ran'}\n", encoding="utf-8")
+        return recall
+
+    def test_vg_failure_prints_nothing(self) -> None:
         self.fake_vg(exit_code=3, output="partial")
-        self.fake_recall()
+        self.write_old_recall()
         result = self.run_script(["session-start"], self.hook("SessionStart"))
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, b"RECALL-OUT\n")
-        self.assertEqual(Path((self.tmp / "recall-cwd").read_text().strip()).resolve(), self.repo)
+        self.assertEqual(result.stdout, b"")
+        self.assertIn(b"ended with 3", result.stderr)
+        self.assertFalse((self.tmp / "recall-ran").exists())
 
-    def test_missing_vg_prints_recall_output(self) -> None:
-        self.fake_recall()
+    def test_missing_vg_prints_nothing(self) -> None:
+        self.write_old_recall()
         result = self.run_script(["session-start"], self.hook("SessionStart"))
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, b"RECALL-OUT\n")
+        self.assertEqual(result.stdout, b"")
+        self.assertIn(b"vg was not found", result.stderr)
+        self.assertFalse((self.tmp / "recall-ran").exists())
 
-    def test_vg_timeout_prints_recall_output(self) -> None:
+    def test_vg_timeout_prints_nothing(self) -> None:
         self.fake_vg(output="late", sleep=30)
-        self.fake_recall()
         started = time.monotonic()
         with mock.patch.object(launcher, "VG_SESSION_START_TIMEOUT_S", 0.5):
             code, out, err = self.run_in_process(["session-start"], self.hook("SessionStart"))
         self.assertLess(time.monotonic() - started, 10)
         self.assertEqual(code, 0)
-        self.assertEqual(out, b"RECALL-OUT\n")
+        self.assertEqual(out, b"")
         self.assertIn(b"timed out", err)
-
-    def test_no_vg_and_no_recall_exits_zero_with_empty_output(self) -> None:
-        result = self.run_script(["session-start"], self.hook("SessionStart"))
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, b"")
 
 
 class CaptureTests(LauncherCase):

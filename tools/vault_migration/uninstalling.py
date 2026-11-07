@@ -1147,7 +1147,7 @@ def _doctor_hooks(report: _DoctorReport, user: UserPaths, builder_root: Path, en
 
 def _doctor_hooks_vg(report: _DoctorReport, config_path: Path, environment: Mapping[str, str]) -> None:
     without_vg = (
-        f"{config_path} records no vg path, so the hooks use recall.sh and direct capture."
+        f"{config_path} records no vg path, so SessionStart adds nothing and the capture hooks use direct capture."
     )
     if not config_path.exists():
         report.note(without_vg)
