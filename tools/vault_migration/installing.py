@@ -527,8 +527,9 @@ def _hooks_precheck(
     config_delete = False
     if vg is None:
         notes.append(
-            "vg was not found (VAULT_GRAPH_BIN or PATH), so no vg path was recorded. The hooks use recall.sh "
-            "and direct capture until vg is on PATH or install --with-hooks runs again with vg available."
+            "vg was not found (VAULT_GRAPH_BIN or PATH), so no vg path was recorded. Until vg is on PATH or "
+            "install --with-hooks runs again with vg available, SessionStart adds nothing and the capture hooks "
+            "use direct capture."
         )
         config_delete = _hooks.recorded_vg_is_gone(config_path)
     else:

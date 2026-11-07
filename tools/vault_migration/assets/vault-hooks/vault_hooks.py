@@ -9,7 +9,7 @@ vault-graph can fall back to `capture --direct` (vault-graph spec 4.2.5): bad ar
 `capture --direct`, and a vault CLI that exits 2 because it does not know --normalized.
 
 - session-start: run `vg hook session-start`. On exit 0 print its stdout as is (empty output too).
-  Otherwise print the output of the installed project-memory recall.sh.
+  When vg is missing, fails, or runs long, print nothing.
 - capture: run `vg hook capture`. On exit 0 stop. Otherwise do what `capture --direct` does.
 - capture --direct: pick the one role project vault of the hook cwd project and pass the hook JSON
   to that vault's `tools/wiki/cli.py sessions capture --json`. The vault choice must stay the same
@@ -44,7 +44,6 @@ USAGE = "usage: vault_hooks.py session-start | capture [--direct [--normalized F
 
 # Claude Code gives the capture hook entries 60 seconds (contract 6). vg and the direct capture share it.
 VG_SESSION_START_TIMEOUT_S = 20.0
-RECALL_TIMEOUT_S = 20.0
 VG_CAPTURE_TIMEOUT_S = 25.0
 DIRECT_CAPTURE_TIMEOUT_S = 30.0
 
@@ -182,14 +181,9 @@ def session_start(data: bytes, environ: Mapping[str, str], out, err) -> None:
         if code == 0:
             out.write(stdout)
             return
-        err.write(f"{PREFIX}vg hook session-start ended with {code}; using recall.sh.\n".encode())
-    recall = config_dir(environ) / "skills" / "project-memory" / "scripts" / "recall.sh"
-    if not recall.is_file():
-        err.write(f"{PREFIX}no recall.sh at {recall}; nothing to recall.\n".encode())
+        err.write(f"{PREFIX}vg hook session-start ended with {code}; nothing to recall.\n".encode())
         return
-    code, stdout, stderr = run_process(["/bin/sh", str(recall)], b"", cwd, RECALL_TIMEOUT_S, environ)
-    err.write(stderr)
-    out.write(stdout)
+    err.write(f"{PREFIX}vg was not found; nothing to recall.\n".encode())
 
 
 def capture(data: bytes, environ: Mapping[str, str], out, err) -> None:

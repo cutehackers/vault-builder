@@ -253,7 +253,7 @@ class HookTests(_DoctorCase):
         code, output = self.doctor()
 
         self.assertEqual(0, code, output)
-        self.assertTrue(any("recall.sh" in line for line in self.notes(output)), output)
+        self.assertTrue(any("SessionStart adds nothing" in line for line in self.notes(output)), output)
         self.assertFalse(any("mcpServers.vault-graph" in line for line in self.notes(output)), output)
 
     def test_without_hooks_exits_zero_with_a_note(self) -> None:
