@@ -697,22 +697,15 @@ python3 tools/wiki/mcp_server.py
 
 ## 17. 여러 vault를 저장소에 연결하기 (project memory)
 
-Claude Code 세션에서 나온 결정, 교정, 남은 일은 세션이 끝나면 Claude Code auto memory(이하 L1 메모리)에만 남습니다. 이 절의 기능은 그 내용을 vault에 검증된 지식으로 옮기고, 다른 저장소의 세션에서 필요할 때 요약의 필요한 부분만 불러오게 합니다.
+이 절은 vault를 저장소에 연결하는 방법을 설명합니다. 연결 설정은 MCP 라우터, 세션 수집 hook, vault-graph가 읽습니다. 세션에서 나온 결정, 교정, 남은 일을 기억으로 다시 꺼내 쓰는 일은 vault-graph(`vg`)가 맡습니다. vault-graph가 없으면 세션 시작 회상과 기억 정리는 없고, ingest, update, query, 검증, 세션 수집은 그대로 동작합니다.
 
-```text
-L1 메모리
--> memory-cleanup skill: vault의 raw/와 wiki/로 옮김
--> maps build: project마다 요약 페이지 wiki/maps/projects/<project id>.md 생성
--> /project-memory: 현재 저장소에 연결된 vault들의 요약 페이지에서 요청한 섹션만 출력
-```
-
-세션을 시작할 때 무엇이 자동으로 들어가는지는 hook 설치 여부와 vault-graph(`vg`) 유무에 달렸습니다.
+세션을 시작할 때 무엇이 자동으로 들어가는지는 hook 설치 여부와 vault-graph 유무에 달렸습니다.
 
 | 설치 상태 | 세션 시작 때 들어가는 것 |
 |---|---|
-| hook 없음 (`install`을 `--with-hooks` 없이 실행) | 아무것도 넣지 않습니다. 요약은 Claude나 사용자가 `/project-memory`로 불러올 때만 보입니다. 평소 비용은 skill 목록의 한 줄(약 50 token)뿐입니다. |
-| hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | vg 출력을 그대로 넣습니다. vault-graph가 vault 페이지에서 고른 기억이고, 이 절의 요약 페이지는 넣지 않습니다. 빈 출력이면 아무것도 넣지 않습니다. |
-| hook 있음, vg가 없거나 0이 아닌 코드로 끝나거나 시간을 넘김 | recall 스크립트 출력, 곧 `/project-memory`를 인자 없이 실행한 결과(17.5)를 넣습니다. |
+| hook 없음 (`install`을 `--with-hooks` 없이 실행) | 아무것도 넣지 않습니다. |
+| hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | vg 출력을 그대로 넣습니다. vault-graph가 vault 페이지에서 고른 기억입니다. 빈 출력이면 아무것도 넣지 않습니다. |
+| hook 있음, vg가 없거나 0이 아닌 코드로 끝나거나 시간을 넘김 | 아무것도 넣지 않습니다. 이유는 hook의 stderr에 한 줄로 남깁니다. |
 
 hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6).
 
@@ -725,10 +718,9 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 | 경로 | 내용 |
 |---|---|
 | `<설정 폴더>/vault-builder/vault-map.json` | 연결 설정. 어떤 vault가 있고 어떤 저장소가 어느 vault를 쓰는지 적습니다. |
-| `<설정 폴더>/skills/project-memory/SKILL.md` | 불러오기 skill `project-memory` |
-| `<설정 폴더>/skills/project-memory/scripts/recall.sh` | 불러오기 skill이 실행하는 recall 스크립트 |
+| `<설정 폴더>/vault-builder/llm_wiki_router.py` | MCP 라우터(16절) |
 
-세 파일은 여러 vault가 함께 씁니다. install이 처음 만들고, 마지막 vault를 uninstall할 때만 지웁니다.
+두 파일은 여러 vault가 함께 씁니다. install이 처음 만들고, 마지막 vault를 uninstall할 때만 지웁니다. 이전 릴리스의 install이 만든 `<설정 폴더>/skills/project-memory/` 폴더(불러오기 skill과 recall 스크립트)는 더 설치하지 않으며, install이 지웁니다(17.5).
 
 연결 설정 형식은 다음과 같습니다.
 
@@ -758,11 +750,11 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 
 저장소가 어느 project 항목에 해당하는지는 17.3의 project 찾기 순서(root 경로, remote URL, 폴더 이름)로 정합니다. `link` 명령으로 새 항목을 만들면 project id는 기본으로 저장소 root 폴더 이름입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다.
 
-저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. 여러 저장소에 연결된 vault의 `project` 없는 페이지를 모든 연결 저장소의 요약에 넣으려면 `vault-builder set-sharable --vault <이름> --value true` 명령으로 `sharable` 값을 정합니다(17.5). 상한 값 같은 다른 설정 key는 두지 않습니다.
+저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. vault 항목의 선택 key `sharable`은 `vault-builder set-sharable --vault <이름> --value true|false` 명령으로 정하고 `--clear` 옵션으로 지웁니다. vault-graph가 이 값을 읽고, 뜻은 `docs/contracts/vault-map-v2.md`에 있습니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
 
 ### 17.2 vault 역할
 
-역할은 memory-cleanup skill이 note를 어느 vault로 보낼지 정할 때 씁니다. 이름 없는 `link`(17.3)는 역할을 보고 어느 vault를 연결할지 고릅니다.
+이름 없는 `link`(17.3)는 역할을 보고 어느 vault를 연결할지 고릅니다.
 
 알려진 역할은 builder의 `tools/vault_migration/roles.py` 표와 같습니다.
 
@@ -815,7 +807,7 @@ vault-builder list --repo /path/to/my-app
 
 #### project 찾기 순서
 
-`link`, `unlink`, `list` 명령, recall 스크립트, `memory-scan --repo` 명령, MCP 라우터는 같은 순서로 저장소의 project 항목을 찾습니다. 먼저 저장소의 main worktree root를 구합니다. 같은 저장소의 `git worktree` 폴더도 같은 root가 됩니다.
+`link`, `unlink`, `list` 명령, `memory-scan --repo` 명령, MCP 라우터는 같은 순서로 저장소의 project 항목을 찾습니다. 먼저 저장소의 main worktree root를 구합니다. 같은 저장소의 `git worktree` 폴더도 같은 root가 됩니다.
 
 1. root 경로: `projects[*].root` 값이 현재 저장소 root와 같은 항목
 2. remote URL: 저장소에 `origin` remote가 있으면 그 URL과 `projects[*].remote` 값이 같은 항목. `git@host:path`, `https://host/path` 형태와 끝의 `.git` 차이는 무시하고 비교합니다.
@@ -825,13 +817,11 @@ vault-builder list --repo /path/to/my-app
 
 2단계나 3단계로 찾았는데 연결 설정의 `root` 값이 현재 위치와 다르면 "`link`를 다시 실행하라"는 줄이 출력에 붙습니다. `link` 명령을 다시 실행하면 `root` 값이 현재 위치로 바뀝니다.
 
-연결한 뒤 그 vault에서 memory-cleanup skill을 실행하면 요약 페이지가 생깁니다. 요약 페이지가 생기기 전에는 `/project-memory`가 "요약 페이지 없음" 한 줄만 출력합니다.
-
-### 17.4 L1 메모리 정리하기 (memory-cleanup, memory-scan)
+### 17.4 L1 메모리 목록 보기 (memory-scan)
 
 L1 메모리는 `<설정 폴더>/projects/<key>/memory/` 폴더입니다. `<key>` 부분은 저장소 root 절대 경로의 영숫자가 아닌 문자를 모두 `-`로 바꾼 값입니다. `MEMORY.md` 파일은 목록이고, 나머지 note 파일은 주제당 하나입니다.
 
-먼저 읽기 전용 명령으로 대상을 확인합니다. 연결 설정에 등록된 vault 폴더에서 실행합니다.
+읽기 전용 명령으로 note 목록을 확인합니다. 연결 설정에 등록된 vault 폴더에서 실행합니다.
 
 ```bash
 python3 tools/wiki/cli.py memory-scan
@@ -843,79 +833,19 @@ python3 tools/wiki/cli.py memory-scan --repo /path/to/my-app --json
 
 `memory-scan` 명령은 이 vault에 연결된 project마다 L1 note 목록, note별 sha256과 type, 그리고 같은 project에 연결된 모든 vault에 이미 들어왔는지(`imported` 또는 `new`)를 출력합니다. 파일은 하나도 쓰지 않습니다. 연결 설정이 없거나 이 vault가 `vaults` 항목에 없으면 이유 한 줄과 함께 exit 1로 끝납니다. 이 경우 17.1과 17.3을 따라 연결 설정을 먼저 만듭니다.
 
-정리는 vault 세션에서 agent에게 요청합니다.
+L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니다. vault-graph도 이 명령을 읽기 전용으로 실행합니다.
 
-```text
-메모리 정리해주세요.
-```
+### 17.5 프로젝트 기억 불러오기
 
-agent는 `.agents/skills/memory-cleanup/SKILL.md` 절차를 따릅니다.
+vault-builder는 `/project-memory` skill, recall 스크립트, `memory-cleanup` skill, 프로젝트 요약 페이지 `wiki/maps/projects/<project id>.md`를 더 만들지 않습니다(vault-graph 요청S11). 프로젝트 기억을 불러오고 정리하는 일은 vault-graph가 맡습니다.
 
-1. `memory-scan` 결과에서 이미 들어온 note는 건너뜁니다. 별도 상태 파일은 만들지 않습니다.
-2. 새 note는 역할 기준으로 대상 vault를 하나 골라 `raw/imports/claude-memory/<project id>--<note 이름>--<sha256 앞 8자>.md` 경로로 bytes 그대로 복사합니다. 내용이 바뀐 note는 새 raw 파일이 되고, 이전 파일은 그대로 남습니다.
-3. `ingest-source`, draft 작성, `publish-draft --report` 순서로 반영합니다. project 지식에는 frontmatter `project: <project id>` 값을 넣습니다. 결정은 `type: decision` 페이지로, 사용자 교정과 작업 규칙은 `tags` 목록에 `correction` 또는 `rule` 값이 있는 페이지로 만듭니다.
-4. 기존 지식과 충돌하는 note는 publish하지 않습니다. 나머지를 모두 반영하고 commit한 뒤 contradiction review를 만들고, 같은 세션에서 사용자에게 판단을 묻습니다. 판단을 미루면 review가 남고, 가장 오래된 review가 14일을 넘으면 `metrics --check`가 실패합니다.
-5. 팀 vault는 `memory-cleanup/<YYYY-MM-DD>` branch에서 작업하고 `gh pr create` 명령으로 PR을 엽니다.
-6. 바뀐 vault마다 `maps build --report` 명령과 `scripts/release_gate.sh` 스크립트를 실행합니다. 개인 vault와 project vault는 gate가 통과하면 commit합니다.
-
-L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니다.
-
-요약 페이지 `wiki/maps/projects/<project id>.md` 파일은 `maps build` 명령이 만들고, 섹션 3개를 항상 이 순서로 가집니다.
-
-| 섹션 | heading | 들어가는 것 |
-|---|---|---|
-| `open` | `## Open Work` | `wiki/inbox.md` item 가운데 `Project: <project id>` 줄이 있고 `Status` 값이 `unprocessed` 또는 `deferred`인 남은 일 |
-| `decisions` | `## Current Decisions` | `type` 값이 `decision`이고 deprecated가 아닌 페이지 |
-| `corrections` | `## Corrections and Rules` | `tags` 목록에 `correction` 또는 `rule` 값이 있는 페이지 |
-
-섹션 하나는 추정 token 750 이하, 페이지 본문 전체는 1,500 이하입니다. 추정 token은 한글 글자 수를 2로, 나머지 글자 수를 4로 나눈 값의 합입니다. 넘는 섹션은 끝 줄부터 생략하고 생략한 항목 수를 한 줄로 적습니다.
-
-### 17.5 요약 불러오기 (/project-memory)
-
-연결된 저장소의 Claude Code 세션에서 불러오기 skill을 직접 호출합니다.
-
-```text
-/project-memory
-/project-memory open
-/project-memory decisions
-/project-memory corrections
-```
-
-| 인자 | 출력 |
-|---|---|
-| 없음 | 섹션 3개 전부. 전체 추정 token 1,500 이하. vault에 project brief `wiki/projects/<project id>.md`가 있으면 그 본문을 `## Project Brief` 아래 먼저 출력합니다(추정 token 400 이하, 줄 단위로 자름) |
-| `open` | 남은 일 |
-| `decisions` | 현재 결정 |
-| `corrections` | 교정과 작업 규칙 |
-
-요약에 들어가는 페이지는 vault마다 아래 규칙으로 정합니다(`docs/contracts/vault-map-v2.md`).
-
-1. frontmatter `project` 값이 이 저장소의 project id인 페이지와 남은 일은 요약 페이지 `wiki/maps/projects/<project id>.md`에서 읽습니다.
-2. `project`가 없는 페이지와 남은 일은 그 vault를 연결한 project가 이 저장소 하나뿐일 때 넣습니다.
-3. 그 vault를 연결한 project가 둘 이상이면 연결 설정의 `sharable` 값이 `true`일 때만 넣습니다. 값이 없으면 넣지 않습니다. `vault-builder set-sharable --vault <이름> --value true|false` 명령으로 정하고, `--clear` 옵션으로 지웁니다.
-
-2와 3의 항목은 recall 스크립트가 그 vault의 읽기 전용 명령 `python3 tools/wiki/cli.py maps no-project-summary`를 실행해 읽고, 같은 섹션의 1 항목 뒤에 붙입니다. 이 명령이 없는 이전 vault 도구이면 그 사실을 한 줄로 알리고 1 항목만 출력합니다. `maps build`가 쓰는 요약 페이지는 연결 설정과 상관없이 같습니다.
-
-섹션 하나만 요청하면 출력은 추정 token 750 이하입니다. 연결된 vault가 여러 개면 vault마다 vault 이름과 요약 페이지 경로를 담은 머리 줄이 붙습니다. 합계가 상한을 넘으면 상한을 vault 수로 나눠 vault마다 줄 단위로 자르고, 잘렸다는 줄을 하나 붙입니다. 각 줄 끝의 `wiki/...` 경로는 근거 페이지이며, 필요할 때만 열어 읽습니다.
-
-Claude는 spec, 설계, 계획을 쓸 때나 지난 결정과 남은 일을 물을 때 이 skill을 스스로 호출할 수 있습니다. 다만 호출 여부는 Claude가 판단하므로 보장되지 않습니다. 필요하면 위처럼 직접 호출하세요. skill은 recall 스크립트 실행만 미리 허용하므로 호출할 때 권한 확인이 뜨지 않습니다.
-
-recall 스크립트는 세션의 현재 작업 폴더로 저장소를 찾습니다. 세션 안에서 다른 저장소로 `cd` 명령으로 이동한 뒤 호출하면 그 저장소의 요약이 나옵니다.
-
-출력할 내용이 없으면 이유 한 줄을 출력하고 exit 0으로 끝납니다.
-
-| 상황 | 출력 |
-|---|---|
-| git 저장소 밖 | git 저장소가 아니라는 줄 |
-| 연결되지 않은 저장소 | 찾지 못한 이유 한 줄과 `link: run vault-builder link <vault> --repo <root> (vaults: a, b)` 형식의 연결 명령 한 줄(17.3) |
-| 연결 설정이 없거나 손상됨 | 그 사실을 담은 줄 |
-| 연결된 vault 폴더나 요약 페이지가 없음 | 그 vault를 건너뛰었다는 줄 |
-| 요청한 섹션 heading이 요약 페이지에 없음 | 그 vault의 섹션이 없다는 줄 |
-| 인자가 `open`, `decisions`, `corrections`, 없음 외의 값 | 사용법 한 줄, exit 2 |
+- install(`setup` 포함)은 이전 install이 만든 `<설정 폴더>/skills/project-memory/SKILL.md`와 `scripts/recall.sh`가 builder가 만든 파일일 때만 지웁니다. builder가 만든 파일은 manifest에 기록된 hash와 같거나 릴리스된 asset과 같은 파일입니다. recall 스크립트는 `PYTHON=` 줄만 달라도 같은 파일로 봅니다. 사용자가 고친 파일은 남기고 경로를 출력합니다.
+- `maps build`는 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)를 지우고 `wiki/log.md`에 적습니다. `wiki/maps/projects/` 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둡니다.
+- 이전 contract의 vault에 남은 `.agents/skills/memory-cleanup/SKILL.md`와 `.claude/skills/memory-cleanup/SKILL.md`는 migration이 지우지 않습니다. 지우는 명령은 builder 저장소 `CHANGELOG.md`의 Upgrade 절에 있습니다.
 
 ### 17.6 setup, install, uninstall, doctor
 
-불러오기 skill, recall 스크립트, 라우터, hook, 연결 설정, MCP 서버 항목은 `vault-builder` 명령으로 설치하고 지웁니다. 이 명령은 Python 3.10 이상으로 실행됩니다.
+라우터, hook, 연결 설정, MCP 서버 항목은 `vault-builder` 명령으로 설치하고 지웁니다. 이 명령은 Python 3.10 이상으로 실행됩니다.
 
 setup, install, uninstall은 user scope MCP 설정 파일 `$HOME/.claude.json` 파일을 고칩니다(`CLAUDE_CONFIG_DIR` 값이 있으면 `<설정 폴더>/.claude.json` 파일). Claude Code는 실행 중에 이 파일을 자주 씁니다. 파일 교체는 원자적이라 파일이 깨지지는 않지만, 두 쓰기가 겹치면 한쪽 변경이 사라질 수 있습니다. 이 경합을 피하려면 아래 순서로 실행합니다.
 
@@ -953,7 +883,7 @@ vault-builder uninstall --all
 - `--role NAME=ROLE`은 vault마다 역할을 정합니다. 없으면 새 vault는 `personal`이고, 이미 있는 vault는 지금 역할을 유지합니다(17.2).
 - 같은 명령을 다시 실행해도 결과가 같습니다. 중간에 실패하면 원인을 고치고 같은 명령을 다시 실행합니다. vault를 나중에 더할 때도 위 예시처럼 새 vault만 넘깁니다.
 - 대화 모드는 터미널(`/dev/tty`)이 있고 `--yes`가 없을 때입니다. `--vault`, `--repo`, `--project-vault`를 하나도 주지 않으면 개인 vault 경로, 연결할 저장소, project vault 생성 여부, 다른 vault 추가 여부를 차례로 묻습니다. 실행 전에는 항상 계획을 보여 주고 진행할지 묻습니다.
-- vg를 찾지 못하면 `vault-hooks.json`에 vg 경로가 적히지 않고, hook은 recall 스크립트와 직접 세션 수집을 씁니다.
+- vg를 찾지 못하면 `vault-hooks.json`에 vg 경로가 적히지 않습니다. 이때 SessionStart hook은 아무것도 넣지 않고, 수집 hook은 직접 세션 수집을 씁니다.
 - 종료 코드: 0은 성공, 1은 실패(사전 검사, install, link 실패, doctor가 문제를 찾음), 2는 옵션이 빠졌거나 잘못됨(터미널이 없는데 `--yes`와 `--dry-run`이 모두 없을 때 포함), 3은 Claude Code가 실행 중이라 멈춤입니다. 대화 모드는 Claude Code가 실행 중이면 종료할 때까지 Enter를 기다립니다.
 
 `install <path> [--name NAME] [--role ROLE] [--with-stenc] [--with-hooks] [--dry-run]`
@@ -961,11 +891,12 @@ vault-builder uninstall --all
 - 대상 폴더가 없거나 비어 있으면 새 vault를 만듭니다. 임시 폴더에서 vault를 조립하고 lint로 검사한 뒤 한 번에 대상 경로로 옮깁니다. 중간에 실패하면 대상 폴더는 생기지 않습니다.
 - 대상이 이미 vault이면 vault 밖 파일만 설치합니다. 이때 audit 결과에 `create`, `replace`, `review-required`, `invalid` 항목이 하나라도 있으면 거부합니다. `vault-builder setup`을 실행하면 사람 검토 항목이 없는 vault는 업그레이드한 뒤 설치합니다(17.6). 직접 하려면 1.1절의 audit/apply를 먼저 실행하세요.
 - uninstall한 vault(manifest는 없고 `wiki/index.md` 파일은 있는 폴더)는 install 한 번으로 다시 설치됩니다. install이 audit 계획을 만들고, `review-required`나 `invalid` 항목이 없으면 apply와 같은 방법으로 managed 파일과 manifest를 되돌린 뒤 vault 밖 파일을 설치합니다. 계획에 그런 항목이 있으면 경로 목록과 audit/apply 안내를 출력하고 아무것도 쓰지 않습니다. `--dry-run` 옵션을 주면 audit 계획 요약과 vault 밖 계획만 출력합니다. vault 밖 설치가 실패하면 vault 밖 변경만 되돌리고, 되돌린 managed 파일과 manifest는 남습니다. 이때 install을 다시 실행하면 vault 밖 설치부터 이어갑니다.
-- 불러오기 skill, recall 스크립트, 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
+- 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
+- 이전 install이 만든 불러오기 skill과 recall 스크립트(`<설정 폴더>/skills/project-memory/`)가 builder가 만든 파일이면 지우고, 이 vault manifest의 기록에서도 뺍니다. 비게 된 폴더도 지웁니다. 사용자가 고친 파일은 남기고 목록에 적습니다(17.5).
 - 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 `--role` 값(없으면 `personal`)으로 더합니다. 저장소 연결은 `link` 명령(17.3)으로 합니다.
 - `--with-hooks` 옵션을 주면 `<설정 폴더>/settings.json`의 `hooks.SessionStart`, `hooks.PreCompact`, `hooks.SessionEnd`에 launcher `<설정 폴더>/vault-builder/vault_hooks.py`를 실행하는 항목을 하나씩 더합니다. 그리고 `<설정 폴더>/vault-builder/vault-hooks.json`에 vg 절대 경로를 적습니다. vg는 환경 변수 `VAULT_GRAPH_BIN` 값, 없으면 `PATH`에서 찾습니다. vg를 찾지 못하면 vg 경로 없이 설치하고 한 줄로 알립니다. 이때 `vault-hooks.json`에 적힌 vg가 더 이상 실행 파일이 아니면(vg를 지운 경우) 그 파일을 지웁니다. 아직 실행되는 vg 경로는 그대로 둡니다. install 명령의 기본값은 hook 없음이고, `setup`은 항상 이 옵션을 붙여 install을 실행합니다.
 - MCP 설정 파일의 `mcpServers` 객체 아래에 서버 항목 `vault-wiki` 하나를 둡니다. 값은 `{"command": <interpreter>, "args": ["-I", <라우터 경로>]}` 형태입니다. 모든 vault가 이 항목 하나를 함께 쓰므로, 두 번째 vault부터는 항목이 이미 같으면 MCP 설정 파일을 다시 쓰지 않습니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다.
-- interpreter 경로는 install을 실행한 Python과 같은 파일을 가리키는 경로 가운데 patch version(`3.12.4` 같은 형태)이 없는 경로를 고릅니다. 그런 경로가 없으면 실행한 경로를 그대로 쓰고, Python을 올리면 install을 다시 실행하라는 알림을 출력합니다. 서버 항목과 recall 스크립트의 `PYTHON=` 줄에 같은 경로를 씁니다.
+- interpreter 경로는 install을 실행한 Python과 같은 파일을 가리키는 경로 가운데 patch version(`3.12.4` 같은 형태)이 없는 경로를 고릅니다. 그런 경로가 없으면 실행한 경로를 그대로 쓰고, Python을 올리면 install을 다시 실행하라는 알림을 출력합니다. 서버 항목에 이 경로를 씁니다.
 - 이미 있는 `vault-wiki` 항목이 이 설정 폴더의 라우터를 가리키지 않으면 다른 프로그램의 항목으로 보고 아무것도 쓰지 않고 거부합니다.
 - 이전 이름의 서버 항목 `llm-wiki`가 있고 `args` 값이 `["-I", <이 설정 폴더의 라우터 경로>]`이면 builder가 만든 항목입니다. install은 같은 한 번의 쓰기로 이 항목을 지우고 `vault-wiki` 항목을 씁니다. `--dry-run`은 이 이름 변경을 출력합니다. `args` 값이 다른 `llm-wiki` 항목은 다른 프로그램의 것으로 보고 그대로 둡니다. 이름이 바뀌면 도구 이름도 `mcp__llm-wiki__<도구>`에서 `mcp__vault-wiki__<도구>`로 바뀝니다. 권한 허용 규칙이나 skill에 옛 도구 이름이 있으면 직접 고치고, Claude Code를 다시 시작합니다.
 - 이전 버전 builder가 만든 MCP 등록(vault 이름이 붙은 서버 항목이나 vault 안의 MCP 설정 파일)이 있으면 고치지 않고 거부합니다. 이전 버전 builder로 uninstall한 뒤 이 버전으로 install합니다.
@@ -978,9 +909,9 @@ vault-builder uninstall --all
 
 - vault 안에서는 기록된 hash와 같은 managed 파일과 manifest를 지웁니다. `.gitignore` 파일은 남깁니다. 사용자가 고친 managed 파일은 남기고 경로 목록을 출력합니다.
 - `raw/`, `wiki/`, `scratch/`, `.git` 폴더와 manifest에 없는 파일은 어떤 경우에도 지우지 않습니다. commit도 하지 않습니다.
-- 다른 vault가 남으면 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 빼고, `vaults` 목록이 빈 project 항목을 지웁니다. 서버 항목, 라우터, skill, recall 스크립트는 그대로 둡니다.
-- 마지막 vault이면 서버 항목, 라우터, 불러오기 skill, recall 스크립트, 연결 설정을 지우고, 비게 된 `<설정 폴더>/vault-builder/` 폴더와 `<설정 폴더>/skills/project-memory/` 폴더를 지웁니다. builder가 만든 이전 이름의 `llm-wiki` 항목이 남아 있으면 함께 지웁니다. `mcpServers` key는 비어도 남깁니다. hook도 이때 지웁니다. `settings.json`에서는 launcher를 실행하는 hook 항목만 빼고, launcher 파일과 `vault-hooks.json`은 install이 쓴 내용과 같을 때만 지웁니다.
-- 공유 파일은 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. 서버 항목은 `command` 값이 다른 interpreter여도 `args` 값이 `["-I", <라우터 경로>]`이면 같은 형태로 보고, recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
+- 다른 vault가 남으면 연결 설정의 `vaults` 항목과 모든 `projects` 항목의 `vaults` 목록에서 이 vault를 빼고, `vaults` 목록이 빈 project 항목을 지웁니다. 서버 항목과 라우터는 그대로 둡니다.
+- 마지막 vault이면 서버 항목, 라우터, 연결 설정, 이전 install이 남긴 불러오기 skill과 recall 스크립트를 지우고, 비게 된 `<설정 폴더>/vault-builder/` 폴더와 `<설정 폴더>/skills/project-memory/` 폴더를 지웁니다. builder가 만든 이전 이름의 `llm-wiki` 항목이 남아 있으면 함께 지웁니다. `mcpServers` key는 비어도 남깁니다. hook도 이때 지웁니다. `settings.json`에서는 launcher를 실행하는 hook 항목만 빼고, launcher 파일과 `vault-hooks.json`은 install이 쓴 내용과 같을 때만 지웁니다.
+- 공유 파일은 기록된 hash와 같거나 지금 builder가 설치하는 형태와 같을 때만 지웁니다. 불러오기 skill과 recall 스크립트는 릴리스된 asset과 같을 때도 지웁니다. 서버 항목은 `command` 값이 다른 interpreter여도 `args` 값이 `["-I", <라우터 경로>]`이면 같은 형태로 보고, recall 스크립트는 `PYTHON=` 줄만 다르면 같은 형태로 봅니다. 다른 vault를 다른 Python으로 install하면 이 공유 파일이 다시 쓰이기 때문입니다. 그 밖의 내용이면 남기고 경로를 출력합니다.
 - 이전 버전 builder로 설치한 vault이면 아무것도 쓰지 않고 거부합니다. 이전 버전의 uninstall을 사용합니다.
 - vault 밖 변경이 중간에 실패하면 모두 되돌리고 vault 안은 건드리지 않습니다.
 - uninstall 뒤 같은 vault를 다시 쓰려면 install만 다시 실행합니다. 연결 설정이 지워졌다면 `link` 명령도 다시 실행합니다.
@@ -997,7 +928,7 @@ vault-builder uninstall --all
 
 경로를 주면 그 vault 하나를 검사합니다. 경로를 생략하면 연결 설정의 vault 전부를 검사하고, 문제 줄 앞에 vault 이름과 경로를 붙입니다. 여러 vault가 함께 쓰는 항목은 한 번만 검사합니다.
 
-manifest, 수정된 managed 파일, 불러오기 skill과 recall 스크립트(실행 권한, `PYTHON=` 줄의 interpreter, git 밖 폴더에서의 실행 결과), 연결 설정, git version(2.31 이상)을 검사하고 문제 목록을 출력합니다. 사용자가 고친 managed 파일도 문제로 셉니다. MCP 등록은 아래를 검사합니다.
+manifest, 수정된 managed 파일, 라우터, 연결 설정을 검사하고 문제 목록을 출력합니다. 이전 install이 남긴 builder의 불러오기 skill이나 recall 스크립트가 있으면 `vault-builder setup`으로 지우라고 문제로 알립니다. 사용자가 고친 managed 파일도 문제로 셉니다. MCP 등록은 아래를 검사합니다.
 
 - 서버 항목 `vault-wiki`가 있고 `args` 값이 `["-I", <라우터 경로>]`인지
 - builder가 만든 이전 이름의 서버 항목 `llm-wiki`가 남아 있지 않은지. 남아 있으면 `vault-builder setup`으로 이름을 바꿉니다.
@@ -1010,7 +941,7 @@ hook, vg, `vault-builder` 명령은 아래를 검사합니다.
 
 - `settings.json`에 SessionStart, PreCompact, SessionEnd launcher 항목이 하나씩 있는지. hook이 하나도 설치되지 않았으면 문제가 아니라 알림(`Note:`)으로 출력합니다.
 - launcher 파일이 있고 builder 원본과 같은지
-- `vault-hooks.json`의 `vg` 값이 절대 경로이고 실행 파일인지. 이 파일이나 `vg` 값이 없으면 hook이 recall 스크립트와 직접 세션 수집을 쓴다고 알림으로 출력합니다.
+- `vault-hooks.json`의 `vg` 값이 절대 경로이고 실행 파일인지. 이 파일이나 `vg` 값이 없으면 SessionStart hook은 아무것도 넣지 않고 수집 hook은 직접 세션 수집을 쓴다고 알림으로 출력합니다.
 - 그 vg가 `vg --help`로 10초 안에 exit 0으로 끝나는지
 - `$HOME/.local/bin/vault-builder` 파일에 표시 줄이 있고, 적힌 checkout이 builder checkout이고, 실행 권한이 있는지. 파일이 없으면 알림으로 출력합니다.
 
@@ -1171,7 +1102,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 세션 원문 수집 (훅은 인자 없이 stdin JSON으로 호출) | `python3 tools/wiki/cli.py sessions capture --transcript /path/to/session.jsonl` |
 | 세션 보관소 상태 확인 (읽기 전용) | `python3 tools/wiki/cli.py sessions status` |
 | 커밋된 세션 파일 삭제·변경 검사 | `python3 tools/wiki/cli.py sessions git-check` |
-| L1 메모리 정리 대상 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
+| L1 메모리 목록 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
 | 첫 설치 (vault, hook, 저장소 연결, MCP 등록) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash` |
 | 설치 명령으로 전부 제거 (vault 폴더는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
 | vault 추가, 빠진 부분 다시 설치 | `vault-builder setup --vault team="$HOME/team-vault" --role team=team --repo /path/to/my-app` |
@@ -1181,8 +1112,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 연결 상태 확인 (읽기 전용) | `vault-builder list --repo /path/to/my-app` |
 | 기본 쓰기 vault 정하기 | `vault-builder set-default-write --project my-app --vault app` |
 | vault 역할 바꾸기 | `vault-builder set-role --vault app --role project` |
-| 여러 저장소가 쓰는 vault의 `project` 없는 페이지를 모든 연결 저장소 요약에 넣기 | `vault-builder set-sharable --vault personal --value true` |
-| project 요약 불러오기 (Claude Code 세션) | `/project-memory [open\|decisions\|corrections]` |
+| vault의 `sharable` 값 정하기 (vault-graph가 읽음) | `vault-builder set-sharable --vault personal --value true` |
 | vault 밖 파일 설치 | `vault-builder install /path/to/vault --name personal --with-hooks` |
 | 모든 vault와 hook, vg 점검 (읽기 전용) | `vault-builder doctor` |
 | vault 하나 점검 (읽기 전용) | `vault-builder doctor /path/to/vault` |

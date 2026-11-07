@@ -53,7 +53,7 @@ raw source
 | `scratch/reports/` | Lint, ingest, audit, query, and repair reports.                                                                |
 | `scratch/review/`  | Human-judgment queue.                                                                                          |
 | `tools/wiki/`      | Deterministic quality tooling.                                                                                 |
-| `.agents/skills/`  | Agent workflow guides for `wiki-ingest`, `wiki-update`, `wiki-query`, `memory-cleanup`, and `session-capture`. |
+| `.agents/skills/`  | Agent workflow guides for `wiki-ingest`, `wiki-update`, `wiki-query`, and `session-capture`.                   |
 | `docs/agent/`      | Detailed agent reference.                                                                                      |
 
 ## Required Commands
@@ -151,8 +151,6 @@ raw_sha256: "..."
 ## Task Routing
 
 For ingest, update, or query tasks, follow the matching guide under `.agents/skills/`, read `wiki/index.md` plus relevant pages or sources, preserve locks and provenance, and use drafts with `publish-draft` for durable changes. Use workflow checkpoints and write reports when applicable.
-
-For Claude Code memory cleanup requests, follow `.agents/skills/memory-cleanup/SKILL.md`. Start with the read-only `python3 tools/wiki/cli.py memory-scan --json`, and never edit L1 memory files.
 
 For requests to archive the current or a past agent session, follow `.agents/skills/session-capture/SKILL.md`. Write session files only through `sessions capture`, and never edit, rename, or delete files under `raw/sessions/`.
 

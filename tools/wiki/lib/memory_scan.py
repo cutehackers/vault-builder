@@ -1,13 +1,13 @@
-"""Read-only scan of Claude Code L1 memory notes for the memory-cleanup skill.
+"""Read-only scan of Claude Code L1 memory notes. vault-graph runs it read-only (vault-graph request S11).
 
 The scan reads the vault map at <config dir>/vault-builder/vault-map.json, finds the
 projects linked to this vault, lists each project's L1 memory notes, and reports
 whether each note's sha256 already appears as `raw_sha256` on a source page in any
 vault linked to that project. It never writes a file.
 
-`find_project` repeats the project lookup rule of the router and the recall script
+`find_project` repeats the project lookup rule of the router
 (root, then origin remote, then folder name). This file is installed inside vaults
-and cannot import either of them, so the rule lives here on its own.
+and cannot import the router, so the rule lives here on its own.
 """
 from __future__ import annotations
 

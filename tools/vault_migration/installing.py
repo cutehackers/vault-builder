@@ -88,7 +88,7 @@ _LEGACY_RECALL_TEMPLATE_SHA256 = frozenset(
     }
 )
 _ROUTER_ASSET = Path("tools/vault_migration/assets/llm-wiki-router/llm_wiki_router.py")
-_CATALOG_PATH = "tools/vault_migration/contracts/v5.json"
+_CATALOG_PATH = "tools/vault_migration/contracts/v6.json"
 _REFUSED_EXISTING_ACTIONS = frozenset({"create", "replace", "review-required", "invalid"})
 _REFUSED_RESTORE_ACTIONS = frozenset({"review-required", "invalid"})
 _VAULT_MAP_VERSION = 2  # the version install writes
@@ -116,7 +116,6 @@ _COPY_FILES = (
     ".claude/skills/wiki-ingest/SKILL.md",
     ".claude/skills/wiki-update/SKILL.md",
     ".claude/skills/wiki-query/SKILL.md",
-    ".claude/skills/memory-cleanup/SKILL.md",
     ".claude/skills/session-capture/SKILL.md",
     "scripts/release_gate.sh",
     ".github/workflows/qa.yml",
