@@ -219,7 +219,7 @@ superseded_by: []
 project: vault-builder        # or [vault-builder, other-repo]
 ```
 
-`project` names the project ids a page belongs to. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value, including numbers, as an error. `maps build` writes one summary page per project id at `wiki/maps/projects/<project id>.md` with three sections in this order: `## Open Work` (inbox items with `Project: <project id>` and status `unprocessed` or `deferred`), `## Current Decisions` (`type: decision` pages that are not `deprecated`), and `## Corrections and Rules` (pages tagged `correction` or `rule`). Each section stays within 750 estimated tokens and the page body within 1,500, where estimated tokens are Hangul characters / 2 plus other characters / 4, rounded up.
+`project` names the project ids a page belongs to. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value, including numbers, as an error. `maps build` no longer writes project summary pages. It removes the pages under `wiki/maps/projects/` that an earlier `maps build` wrote (frontmatter `generated_by: tools/wiki/cli.py maps build` and no page lock) and leaves any other file there as an ordinary wiki page.
 
 Source pages may add:
 

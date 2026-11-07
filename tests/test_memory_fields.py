@@ -287,19 +287,6 @@ class RetiredIsNotCurrentTest(unittest.TestCase):
         not_current = text.split("## Deprecated Pages", 1)[1].split("##", 1)[0]
         self.assertIn("concepts/old-habit", not_current)
 
-    def test_project_summary_skips_retired_decisions(self):
-        from tools.wiki.lib.maps import _project_summary_pages
-
-        (self.root / "wiki" / "decisions").mkdir(exist_ok=True)
-        current = self.root / "wiki" / "decisions" / "keep.md"
-        current.write_text(render_page(_frontmatter("Keep", "decision", project="demo"), "# Keep\n"))
-        retired = self.root / "wiki" / "decisions" / "drop.md"
-        retired.write_text(render_page(_retired("Drop", "decision", project="demo"), "# Drop\n"))
-        summaries = _project_summary_pages(self.root, [parse_page(current), parse_page(retired)], [], date(2026, 11, 2))
-        body = "\n".join(page.body for page in summaries)
-        self.assertIn("decisions/keep", body)
-        self.assertNotIn("decisions/drop", body)
-
     def test_metrics_count_links_to_retired_pages(self):
         from tools.wiki.lib.metrics import _deprecated_linked_targets
 

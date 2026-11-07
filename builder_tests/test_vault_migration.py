@@ -37,14 +37,7 @@ from tools.vault_migration.planning import (
     target_fingerprint,
     validate_external_output_path,
 )
-from tools.wiki.lib.maps import (
-    PROJECT_MAP_MAX_TOKENS,
-    PROJECT_SECTION_HEADINGS,
-    PROJECT_SECTION_MAX_TOKENS,
-    _render_project_summary,
-    build_navigation_maps,
-    estimate_tokens,
-)
+from tools.wiki.lib.maps import build_navigation_maps
 from tools.wiki.lib.vault_manifest import (
     normalized_json_sha256,
     parse_manifest_json,

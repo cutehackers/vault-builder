@@ -293,7 +293,7 @@ good: specification-drift.md
 | `map` | `wiki/maps/` | `llm-wiki-operating-map.md` |
 | `project` | `wiki/projects/<project>.md` only | `vault-graph.md` |
 
-A `project` page is the brief of one project: its goal, structure, constraints to keep, and next steps. Its path is `wiki/projects/<project>.md`, its frontmatter `project` is that one project id, and every page directly in `wiki/projects/` has `type: project`. Validation reports `project-page-path` otherwise. Agents write it through `publish-draft` like any other page. The generated summaries under `wiki/maps/projects/` are `map` pages, not briefs.
+A `project` page is the brief of one project: its goal, structure, constraints to keep, and next steps. Its path is `wiki/projects/<project>.md`, its frontmatter `project` is that one project id, and every page directly in `wiki/projects/` has `type: project`. Validation reports `project-page-path` otherwise. Agents write it through `publish-draft` like any other page.
 
 Optional page types may live in the nearest default folder until they become numerous enough to deserve their own folder.
 
@@ -364,7 +364,7 @@ raw_sha256: "..."
 project: project-id           # or [project-id, other-project-id]
 ```
 
-`project` is a project id or a list of project ids. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value as an error. `maps build` collects these pages into `wiki/maps/projects/<project id>.md`: decisions that are not deprecated go under `## Current Decisions`, pages tagged `correction` or `rule` go under `## Corrections and Rules`, and other project pages stay in the topic map and index only.
+`project` is a project id or a list of project ids. A project id is the repository's main worktree folder name and must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. Lint reports any other value as an error. `maps build` writes no project summary page. It removes the summary pages an earlier `maps build` wrote under `wiki/maps/projects/` (frontmatter `generated_by: tools/wiki/cli.py maps build`, no page lock) and leaves hand-written files there.
 
 ### 4.2 Quality Gate Rule
 
@@ -1365,7 +1365,7 @@ Note: ...
 Next action: ...
 ```
 
-`Project:` is optional. When it is present and `Status` is `unprocessed` or `deferred`, `maps build` lists the item under `## Open Work` in `wiki/maps/projects/<project id>.md`.
+`Project:` is optional. It names the project id the item belongs to.
 
 During lint, process or defer inbox items.
 
