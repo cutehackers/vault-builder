@@ -3793,7 +3793,14 @@ chmod +x "${target}/scripts/release_gate.sh"
             )
             (root / "wiki" / "claims" / "contested-claim.md").write_text(render_page(claim_fm, claim_body))
             replacement = root / "wiki" / "concepts" / "replacement-page.md"
-            replacement.write_text(render_page(_frontmatter("Replacement Page"), "# Replacement Page\n\nSource: Human instruction.\n"))
+            # The index link alone no longer counts (index, map and log list deprecated pages by design),
+            # so a content page links the deprecated page.
+            replacement.write_text(
+                render_page(
+                    _frontmatter("Replacement Page"),
+                    "# Replacement Page\n\nSource: Human instruction.\n\nReplaces [[concepts/deprecated-page]].\n",
+                )
+            )
             deprecated_fm = _frontmatter("Deprecated Page")
             deprecated_fm["status"] = "deprecated"
             deprecated_fm["superseded_by"] = ["concepts/replacement-page"]

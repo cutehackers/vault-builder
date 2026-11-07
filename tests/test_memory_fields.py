@@ -297,6 +297,32 @@ class RetiredIsNotCurrentTest(unittest.TestCase):
         pages = [parse_page(target), parse_page(linker)]
         self.assertEqual(_deprecated_linked_targets(self.root, pages), ["concepts/gone"])
 
+    def test_metrics_skip_links_from_index_map_and_log_pages(self):
+        # index, maps and log list retired pages by design, so their links do not count.
+        from tools.wiki.lib.metrics import _deprecated_linked_targets
+
+        target = self.root / "wiki" / "concepts" / "gone.md"
+        target.write_text(render_page(_retired("Gone"), "# Gone\n"))
+        pages = [parse_page(target)]
+        for name, page_type in (("index-like", "index"), ("lifecycle-like", "map"), ("log-like", "log")):
+            linker = self.root / "wiki" / f"{name}.md"
+            linker.write_text(render_page(_frontmatter(name, page_type), "# Nav\n\n- [[concepts/gone]]\n"))
+            pages.append(parse_page(linker))
+        self.assertEqual(_deprecated_linked_targets(self.root, pages), [])
+
+    def test_metrics_do_not_require_claim_provenance_for_memory_pages(self):
+        # Memory pages carry an Evidence section instead of a claim table.
+        from tools.wiki.lib.metrics import _is_substantive_without_claim_provenance
+
+        memory = Page(
+            path=Path("wiki/decisions/memory.md"),
+            frontmatter=_frontmatter("Memory", "decision", memory_schema=MEMORY_SCHEMA),
+            body="# Memory\n",
+        )
+        plain = Page(path=Path("wiki/decisions/plain.md"), frontmatter=_frontmatter("Plain", "decision"), body="# Plain\n")
+        self.assertFalse(_is_substantive_without_claim_provenance(memory))
+        self.assertTrue(_is_substantive_without_claim_provenance(plain))
+
     def test_merge_scan_skips_retired_pages(self):
         from tools.wiki.lib.merge import _find_merge_candidates
 

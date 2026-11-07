@@ -1,5 +1,5 @@
 {
-  "builder_revision": "5.0.0",
+  "builder_revision": "5.0.1",
   "contract_version": 6,
   "managed_files": {
     ".agents/skills/session-capture/SKILL.md": {
@@ -144,7 +144,7 @@
       "mode": "0644",
       "path": "tests/test_memory_fields.py",
       "policy": "replace-if-unmodified",
-      "sha256": "c98b19a2746a121addd385ae62c50e8bebe2c8066a6bad0618fbd0f5f5e7d291"
+      "sha256": "1156514a973268e54a14f3afdf1a4548555a575ce2660a966f2f87e436052da3"
     },
     "tests/test_memory_proposal.py": {
       "mode": "0644",
@@ -174,7 +174,7 @@
       "mode": "0644",
       "path": "tests/test_wiki_tools.py",
       "policy": "replace-if-unmodified",
-      "sha256": "1f10d6995b8aa3b845058437633c3275296f05446335a0cec2feea71bbfde847"
+      "sha256": "dfd2f85eba8efa8d54ea0ad26572a3abe3f5847fc76e468c2fc7515254e9b91e"
     },
     "tools/wiki/cli.py": {
       "mode": "0644",
@@ -276,7 +276,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/metrics.py",
       "policy": "replace-if-unmodified",
-      "sha256": "33ca490ad990eaa5c6db239d23a317a11f377ee59adfdc4efa6174db3b6075b6"
+      "sha256": "257794097c3ac028d316351f87c74f4a1c69ee426147545529754728f68fec85"
     },
     "tools/wiki/lib/paths.py": {
       "mode": "0644",
