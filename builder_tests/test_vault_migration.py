@@ -9027,14 +9027,14 @@ class ReleaseVersionTests(unittest.TestCase):
         self.assertEqual(version, headings[1])
         self.assertRegex(changelog, rf"(?m)^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$")
         catalog = load_catalog(ROOT / "tools" / "vault_migration" / "contracts" / "v6.json")
-        self.assertEqual("5.0.1", version)
+        self.assertEqual("5.0.2", version)
         self.assertEqual(version, catalog.builder_revision)
         self.assertEqual(6, catalog.contract_version)
         self.assertIn(f"| {version} | {catalog.contract_version} |", changelog)
         self.assertIn("| 2.0.0 | 3 | 3 | 2 |", changelog)
 
     def test_version_label_names_release_and_contract(self):
-        self.assertEqual("vault-builder 5.0.1 (contract 6)", version_label(ROOT))
+        self.assertEqual("vault-builder 5.0.2 (contract 6)", version_label(ROOT))
 
     def test_catalog_command_defaults_revision_to_version(self):
         written = []
@@ -9200,7 +9200,7 @@ class ContractV3ReleaseTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((6, 6, "5.0.1"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((6, 6, "5.0.2"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
         for relative, desired in v5.managed_files.items():
             self.assertEqual(desired.sha256, sha256_file(target / relative), relative)
@@ -9328,7 +9328,7 @@ class ContractV4MigrationTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((6, 6, "5.0.1"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((6, 6, "5.0.2"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
             self.assertEqual(set(v5.managed_files), set(result.managed_files))
         for relative, desired in v5.managed_files.items():
@@ -9483,7 +9483,7 @@ class ContractV5MigrationTests(_RouterVaultTestCase):
         persisted = load_manifest(target)
         assert persisted is not None
         for result in (manifest, persisted):
-            self.assertEqual((6, 6, "5.0.1"), (result.schema_version, result.contract_version, result.builder_revision))
+            self.assertEqual((6, 6, "5.0.2"), (result.schema_version, result.contract_version, result.builder_revision))
             self.assertEqual(before.external_records, result.external_records)
             self.assertEqual(set(v5.managed_files), set(result.managed_files))
         for relative, desired in v5.managed_files.items():

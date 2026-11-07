@@ -1,5 +1,5 @@
 {
-  "builder_revision": "5.0.1",
+  "builder_revision": "5.0.2",
   "contract_version": 6,
   "managed_files": {
     ".agents/skills/session-capture/SKILL.md": {

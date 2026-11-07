@@ -25,6 +25,22 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [5.0.2] - 2026-11-08
+
+예전 릴리스가 설치한 훅 실행기를 `setup`이 알 수 없는 파일로 보고 교체하지 않았다. 그래서 `doctor`가 `vault-builder setup`을 안내해도 문제가 계속 남았다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 5.0.2 | 6 | 6 | 2 |
+
+### Fixed
+
+- `install --with-hooks`와 `setup`이 v3.0.0부터 v4.1.0까지의 훅 실행기, 그리고 5.0.0 전 main의 훅 실행기를 새 실행기로 교체한다. 바이트가 이 실행기들과 다른 파일은 전과 같이 그대로 둔다.
+
+### Upgrade
+
+- Claude Code를 종료하고 `vault-builder setup`을 다시 실행한다.
+
 ## [5.0.1] - 2026-11-07
 
 vault-graph가 쓴 기억 페이지가 있는 vault는 `metrics --check`가 실패해서 migration apply가 되돌려졌다. 검사 기준을 고쳤다.

@@ -77,6 +77,13 @@ _LEGACY_SKILL_SHA256 = frozenset(
         "aa1c6e4a4724f0cd1a8b7e48c8f915198597bfa964450721f9062f14856bcf85",
     }
 )
+# Hook launcher assets of earlier builders (v3.0.0 to v4.1.0, then main before 5.0.0). Install replaces them.
+_PREVIOUS_LAUNCHER_SHA256 = frozenset(
+    {
+        "53e8fe4f60ddb3b330ae583de42a5c219385b4401d3bd6a6836ddffe062a995d",
+        "b3fad1d24b7dbb40652a340d5c973aa28715e6af517217ae3f74e37cd99984be",
+    }
+)
 # recall.sh assets with the placeholder still on their single PYTHON= line. Install replaced only that line.
 _LEGACY_RECALL_TEMPLATE_SHA256 = frozenset(
     {
@@ -547,7 +554,12 @@ def _hooks_precheck(
     else:
         settings_action = "update" if changed else "unchanged"
     asset = (builder_root / _hooks.LAUNCHER_ASSET).read_bytes()
-    launcher_plan = _file_plan(launcher, asset, 0o644, lambda current: current == asset)
+    launcher_plan = _file_plan(
+        launcher,
+        asset,
+        0o644,
+        lambda current: current == asset or hashlib.sha256(current).hexdigest() in _PREVIOUS_LAUNCHER_SHA256,
+    )
     if launcher_plan.action == "keep":
         notes.append(f"Kept existing file with unknown content (not replaced): {launcher}")
     vg = _hooks.find_vg(environ)
