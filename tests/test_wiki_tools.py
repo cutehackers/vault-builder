@@ -5876,6 +5876,20 @@ def _old_project_summary(root: Path, project_id: str, *, locked: bool = False) -
     return path
 
 
+def _list_old_summaries_in_topic_map(root: Path) -> None:
+    """Rewrite the topic map the way an earlier maps build did: it also listed the project summary pages."""
+    from tools.wiki.lib.maps import _old_project_summary_paths, _render_map_pages
+
+    old = set(_old_project_summary_paths(root))
+    pages = [parse_page(path) for path in sorted((root / "wiki").rglob("*.md"))]
+    current = [page for page in pages if page.frontmatter is not None and page.path not in old]
+    kept = [page for page in pages if page.path in old]
+    topic = root / "wiki" / "maps" / "topic-map.md"
+    for path, content in _render_map_pages(root, current, [], [], date.today(), kept):
+        if path == topic:
+            path.write_text(content)
+
+
 class ProjectFieldAndOldSummaryTest(unittest.TestCase):
     """maps build writes no project summary pages and removes the ones it wrote before (vault-graph request S11)."""
 
@@ -5954,6 +5968,8 @@ class ProjectFieldAndOldSummaryTest(unittest.TestCase):
             self.assertEqual(0, _run_wiki_cli(root, "maps", "build")[0])
             alpha = _old_project_summary(root, "alpha")
             beta = _old_project_summary(root, "beta-2")
+            _list_old_summaries_in_topic_map(root)
+            self.assertIn("[[maps/projects/alpha]]", (root / "wiki" / "maps" / "topic-map.md").read_text())
 
             check_code, check_output = _run_wiki_cli(root, "maps", "build", "--check")
             kept_by_check = alpha.exists() and beta.exists()
@@ -5964,7 +5980,8 @@ class ProjectFieldAndOldSummaryTest(unittest.TestCase):
             project_dir_exists = (root / "wiki" / "maps" / "projects").exists()
             topic_map = (root / "wiki" / "maps" / "topic-map.md").read_text()
 
-        self.assertEqual(1, check_code, check_output)
+        # --check does not fail on old summaries, so the gate that migration apply runs still passes.
+        self.assertEqual(0, check_code, check_output)
         self.assertTrue(kept_by_check)
         self.assertEqual(0, build_code, build_output)
         self.assertEqual(0, recheck_code, recheck_output)
