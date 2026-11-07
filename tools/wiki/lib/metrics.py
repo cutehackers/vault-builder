@@ -30,6 +30,8 @@ SUBSTANTIVE_TYPES = {
     "question",
     "glossary",
 }
+# index, maps and log list retired and deprecated pages by design, so their links are not counted.
+NAVIGATION_TYPES = {"index", "map", "log"}
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,9 @@ def _is_substantive_without_claim_provenance(page: Page) -> bool:
     frontmatter = page.frontmatter or {}
     if str(frontmatter.get("type")) not in SUBSTANTIVE_TYPES:
         return False
+    # Memory pages (vault-graph remember) carry an Evidence section instead of a claim table.
+    if "memory_schema" in frontmatter:
+        return False
     quality = frontmatter.get("quality", {})
     if not isinstance(quality, dict):
         return True
@@ -174,6 +179,8 @@ def _deprecated_linked_targets(root: Path, pages: list[Page]) -> list[str]:
     }
     linked_targets = Counter[str]()
     for page in pages:
+        if str((page.frontmatter or {}).get("type")) in NAVIGATION_TYPES:
+            continue
         for target in find_wiki_links(page.body):
             linked_targets[target] += 1
     return sorted(target for target in deprecated_targets if linked_targets[target] > 0)

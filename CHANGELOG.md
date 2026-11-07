@@ -25,6 +25,23 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-11-07
+
+vault-graph가 쓴 기억 페이지가 있는 vault는 `metrics --check`가 실패해서 migration apply가 되돌려졌다. 검사 기준을 고쳤다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 5.0.1 | 6 | 6 | 2 |
+
+### Fixed
+
+- `metrics`가 기억 페이지(frontmatter `memory_schema`가 있는 페이지)를 `pages_without_claim_level_provenance`에 세지 않는다. 기억 페이지는 claim 표 대신 Evidence 절로 근거를 적는다.
+- `metrics`가 index, map, log 페이지의 링크를 `deprecated_linked_pages`에 세지 않는다. 이 페이지들은 폐기된 페이지를 일부러 나열한다. 다른 페이지가 폐기된 페이지를 링크하면 전과 같이 센다.
+
+### Upgrade
+
+- Claude Code를 종료하고 `vault-builder setup`을 다시 실행하거나, vault마다 audit와 apply를 실행한다. 순서는 5.0.0 Upgrade 절과 같다.
+
 ## [5.0.0] - 2026-11-07
 
 vault-graph 요청S11로 대체 경로를 없앴다. vault-builder는 `/project-memory` skill, `recall.sh`, `memory-cleanup` skill, 프로젝트 요약 페이지를 더 만들지 않고, 세션 시작 회상과 기억 정리는 vault-graph가 맡는다. vault-graph가 없는 사용자는 세션 시작 회상과 기억 정리를 받지 못하고, ingest, update, query, 검증, 세션 수집은 그대로 동작한다. 명령 `maps no-project-summary`와 skill을 없애고 contract를 6으로 올렸으므로 MAJOR로 올렸다.
