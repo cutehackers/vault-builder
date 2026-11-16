@@ -1,5 +1,5 @@
 {
-  "builder_revision": "5.0.2",
+  "builder_revision": "5.1.0",
   "contract_version": 6,
   "managed_files": {
     ".agents/skills/session-capture/SKILL.md": {
@@ -66,7 +66,7 @@
       "mode": "0644",
       "path": "AGENTS.md",
       "policy": "replace-if-unmodified",
-      "sha256": "a82815d79d06be63d555b1f870ebf6c62878577294a40a77fb0e9dc8ecb54556"
+      "sha256": "1387eb92d15ed852cda420cec1cedf09c7cdce09299a16dbc23a53dbc86077d8"
     },
     "CLAUDE.md": {
       "mode": "0644",
@@ -114,7 +114,7 @@
       "mode": "0644",
       "path": "docs/agent/OPERATING-SCHEMA.md",
       "policy": "replace-if-unmodified",
-      "sha256": "ff40aabb3480b832e03fac2c57b091f263b889791db364239d4f1d6db478b3d4"
+      "sha256": "c127c8248ee06dd0c8b25f2894ab658ca2389db4b19e14e81257ac47f66a8953"
     },
     "docs/usage.md": {
       "mode": "0644",
@@ -180,7 +180,7 @@
       "mode": "0644",
       "path": "tools/wiki/cli.py",
       "policy": "replace-if-unmodified",
-      "sha256": "9bdee8b1925b24a39b8de178292e119b568a00477a738340ee8a7f0bcda9c018"
+      "sha256": "6abb278c6a705b847688a2a7186ce57d06b3023ca1d607047b9a7b6a6d01491a"
     },
     "tools/wiki/lib/.gitkeep": {
       "mode": "0644",
@@ -312,19 +312,19 @@
       "mode": "0644",
       "path": "tools/wiki/lib/session_archive.py",
       "policy": "replace-if-unmodified",
-      "sha256": "d205fc2c377b57c7beeb317a70d89fdb4bfe5c55d86e5a7ff403521586e6275c"
+      "sha256": "869207f678b8530fb48875e36c61dc8e416a1cdfe1d9bf42ba9accfc0e6279cb"
     },
     "tools/wiki/lib/session_capture.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/session_capture.py",
       "policy": "replace-if-unmodified",
-      "sha256": "7c85007122b3fe11f06f8a8d8b7e0742bc45912320b9fb5e1006d94247a270bc"
+      "sha256": "8345a967b989c20656d6d1d2059e7dfc48a943a4ad7153304c99c3d0f4ff590b"
     },
     "tools/wiki/lib/source_registry.py": {
       "mode": "0644",
       "path": "tools/wiki/lib/source_registry.py",
       "policy": "replace-if-unmodified",
-      "sha256": "21e88373f2a37c0437e905bdc2a6a796ca26f13cfa1ad4c9a863e22c407595d5"
+      "sha256": "5763e6aaa6c2ac7ab65980708c7675db87f38e2c6807d2bc2cab87a89771827e"
     },
     "tools/wiki/lib/vault_manifest.py": {
       "mode": "0644",

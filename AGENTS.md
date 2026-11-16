@@ -32,7 +32,7 @@ raw source
 
 ## Non-Negotiable Rules
 
-1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks. Two exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/`, and `python3 tools/wiki/cli.py import-source <file> --into raw/imports/<kind>/` may add a byte-for-byte copy of a file from outside `raw/` under `raw/imports/<kind>/`. Every other write there, including editing, renaming, or deleting an existing session file or import copy, stays forbidden.
+1. Never edit, rename, rewrite, or delete files under `raw/` unless the human explicitly asks. Three exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/`, `python3 tools/wiki/cli.py sessions attach-facts --session <part> --facts <json>` may add one session fact attachment `<part name without .md>.facts.md` next to a session part file after validating it, and `python3 tools/wiki/cli.py import-source <file> --into raw/imports/<kind>/` may add a byte-for-byte copy of a file from outside `raw/` under `raw/imports/<kind>/`. Every other write there, including editing, renaming, or deleting an existing session file, fact attachment, or import copy, stays forbidden.
 2. Never present LLM draft text as durable knowledge before validation.
 3. Every substantive wiki claim needs provenance from a raw source, source page, prior wiki page, or explicit human instruction.
 4. Do not silently resolve contradictions. Record the tension and request human judgment when it affects an important decision.
@@ -47,7 +47,7 @@ raw source
 | Path               | Meaning                                                                                                        |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `raw/`             | Immutable source material.                                                                                     |
-| `raw/sessions/`    | Agent conversation transcripts. Session capture command only, add-only, no source pages.                       |
+| `raw/sessions/`    | Agent conversation transcripts and their `.facts.md` attachments. Session commands only, add-only, no source pages. |
 | `wiki/`            | Durable compiled knowledge.                                                                                    |
 | `scratch/drafts/`  | LLM proposals before validation.                                                                               |
 | `scratch/reports/` | Lint, ingest, audit, query, and repair reports.                                                                |

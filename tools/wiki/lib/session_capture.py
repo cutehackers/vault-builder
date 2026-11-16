@@ -13,15 +13,16 @@ instead of a transcript and writes the part in vault-session/v2 (vault-graph req
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, TextIO
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from .frontmatter import _parse_frontmatter, render_page
 from .memory_scan import MemoryScanError, ProjectStop, find_project, load_vault_map, vault_map_path
@@ -31,6 +32,7 @@ from .session_archive import (
     SESSION_ID_PATTERN,
     SESSION_SCHEMA,
     SESSION_SCHEMA_V2,
+    SESSION_FACTS_SUFFIX,
     check_session_file,
     parse_session_path,
     session_body_sha256,
@@ -1429,3 +1431,226 @@ def _resolve(path: Path) -> Path:
         return Path(path).expanduser().resolve()
     except (OSError, RuntimeError):
         return Path(path).expanduser().absolute()
+
+
+# Session fact attachment (vault-graph contract vault-session-facts/v1, spec D25-D27).
+# The only write path for <part>.facts.md. It writes one new file next to the part and never overwrites.
+
+FACTS_SCHEMA = "vault-session-facts/v1"
+FACTS_INPUT_SCHEMA = "vault-session-facts-input/1"
+FACTS_EXTRACTORS = ("claude", "llama-server")
+FACT_TEXT_MAX_CHARS = 400
+_FACTS_INPUT_KEYS = ("schema", "session_id", "source_sha256", "extractor", "model", "facts")
+_FACT_KEYS = ("date", "text", "exchange_id")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_FACT_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_EXCHANGE_LINE_RE = re.compile(r"^<!-- vg:exchange id=(?P<id>[^\s]+)(?: |-->)", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class AttachFactsResult:
+    status: str  # "written", "exists" or "rejected"
+    path: str  # Where the attachment is or would be, relative to the vault root when it is inside it.
+    reason: str | None = None  # Reason code when rejected.
+    facts: int = 0
+    detail: str = ""
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if self.status == "rejected" else 0
+
+    @property
+    def message(self) -> str:
+        if self.status == "written":
+            return f"Wrote {self.path} ({self.facts} facts)."
+        if self.status == "exists":
+            return f"{self.path} already exists; left unchanged."
+        return f"Rejected ({self.reason}): {self.detail} Nothing written to {self.path}."
+
+    def as_json(self) -> dict[str, Any]:
+        return {"status": self.status, "path": self.path, "reason": self.reason, "facts": self.facts}
+
+
+class _FactsRejected(Exception):
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+def attach_session_facts(
+    vault_root: Path, session: Path, facts_input: Path, now: datetime | None = None
+) -> AttachFactsResult:
+    """Check facts_input against the part file session and write <part>.facts.md next to it.
+
+    An existing attachment gives exists before any check. Any failed check gives rejected with a
+    reason code and writes nothing.
+    """
+    root = _resolve(Path(vault_root))
+    part_path = Path(session).expanduser()
+    if not part_path.is_absolute():
+        part_path = root / part_path
+    part_path = _resolve(part_path)
+    attachment = part_path.with_name(_facts_name(part_path.name))
+    relative = _vault_relative(root, attachment)
+
+    if attachment.exists():
+        return AttachFactsResult("exists", relative, facts=_existing_fact_count(attachment))
+    try:
+        part_relative, frontmatter, part_bytes, body = _read_part(root, part_path)
+        data = _read_facts_input(Path(facts_input).expanduser())
+        actual = hashlib.sha256(part_bytes).hexdigest()
+        if data["source_sha256"] != actual:
+            raise _FactsRejected(
+                "source_mismatch", f"source_sha256 {data['source_sha256']} differs from part sha256 {actual}."
+            )
+        if data["session_id"] != str(frontmatter.get("session_id")):
+            raise _FactsRejected(
+                "session_id_mismatch",
+                f"session_id {data['session_id']!r} differs from part session_id {frontmatter.get('session_id')!r}.",
+            )
+        facts = data["facts"]
+        if not facts:
+            raise _FactsRejected("no_facts", "facts is empty.")
+        exchange_ids = _part_exchange_ids(body)
+        for number, fact in enumerate(facts, start=1):
+            _check_fact(number, fact, exchange_ids)
+    except _FactsRejected as rejected:
+        return AttachFactsResult("rejected", relative, rejected.reason, detail=rejected.detail)
+
+    generated_at = (now or _utc_now()).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    attachment_frontmatter: dict[str, Any] = {
+        "schema": FACTS_SCHEMA,
+        "agent": frontmatter["agent"],
+        "session_id": frontmatter["session_id"],
+        "part": frontmatter["part"],
+        "source": part_relative,
+        "source_sha256": data["source_sha256"],
+        "extractor": data["extractor"],
+        "model": data["model"],
+        "generated_at": generated_at,
+        "fact_count": len(facts),
+    }
+    lines = "".join(f"- {fact['date']} {fact['text']} (exchange {fact['exchange_id']})\n" for fact in facts)
+    text = _facts_text(attachment_frontmatter, lines)
+    if not write_new_file(attachment, text):
+        return AttachFactsResult("exists", relative, facts=_existing_fact_count(attachment))
+    return AttachFactsResult("written", relative, facts=len(facts))
+
+
+# Contract section 3 always writes these values in double quotes. They hold no quote or backslash.
+_FACTS_QUOTED_KEYS = ("session_id", "source_sha256", "generated_at")
+
+
+def _facts_text(frontmatter: dict[str, Any], body: str) -> str:
+    rendered = render_page(frontmatter, body)
+    lines = rendered.split("\n")
+    for index, line in enumerate(lines[1 : len(frontmatter) + 1], start=1):
+        key = line.split(":", 1)[0]
+        if key in _FACTS_QUOTED_KEYS:
+            lines[index] = f'{key}: "{frontmatter[key]}"'
+    return "\n".join(lines)
+
+
+def _facts_name(part_name: str) -> str:
+    stem = part_name[: -len(".md")] if part_name.endswith(".md") else part_name
+    return stem + SESSION_FACTS_SUFFIX
+
+
+def _vault_relative(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _existing_fact_count(path: Path) -> int:
+    try:
+        raw_frontmatter, _ = split_session_text(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return 0
+    count = _parse_frontmatter(raw_frontmatter or "")[0].get("fact_count")
+    return count if type(count) is int else 0
+
+
+def _read_part(root: Path, part_path: Path) -> tuple[str, dict[str, Any], bytes, str]:
+    """The part's vault-relative path, frontmatter, bytes and body. Rejects anything but a valid v2 part."""
+    archive = root / SESSION_ARCHIVE_DIR
+    try:
+        part_path.relative_to(archive)
+    except ValueError:
+        raise _FactsRejected("session_missing", f"{part_path.name} is not under {SESSION_ARCHIVE_DIR}/ of this vault.") from None
+    relative = part_path.relative_to(root).as_posix()
+    if not part_path.is_file():
+        raise _FactsRejected("session_missing", f"{relative} does not exist.")
+    check = check_session_file(root, part_path)
+    if check.session_path is None or check.frontmatter is None:
+        raise _FactsRejected("session_missing", f"{relative} is not a session part file.")
+    if check.frontmatter.get("schema") != SESSION_SCHEMA_V2:
+        raise _FactsRejected("session_missing", f"{relative} is not a {SESSION_SCHEMA_V2} file.")
+    if not check.ok:
+        raise _FactsRejected(
+            "session_missing", f"{relative} fails the session archive check: {check.issues[0].message}"
+        )
+    part_bytes = part_path.read_bytes()
+    _, body = split_session_text(part_bytes.decode("utf-8"))
+    return relative, check.frontmatter, part_bytes, body
+
+
+def _read_facts_input(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_bytes().decode("utf-8"))
+    except OSError as exc:
+        raise _FactsRejected("bad_input", f"Cannot read facts JSON: {exc.strerror or exc}.") from None
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _FactsRejected("bad_input", f"Facts input is not UTF-8 JSON: {exc}.") from None
+    if not isinstance(data, dict):
+        raise _FactsRejected("bad_input", "Facts input must be a JSON object.")
+    missing = [key for key in _FACTS_INPUT_KEYS if key not in data]
+    if missing:
+        raise _FactsRejected("bad_input", f"Missing keys: {', '.join(missing)}.")
+    if data["schema"] != FACTS_INPUT_SCHEMA:
+        raise _FactsRejected("bad_input", f"schema {data['schema']!r} is not {FACTS_INPUT_SCHEMA}.")
+    for key in ("session_id", "source_sha256", "extractor", "model"):
+        if not isinstance(data[key], str) or not data[key]:
+            raise _FactsRejected("bad_input", f"{key} must be a non-empty string.")
+    if not _SHA256_RE.fullmatch(data["source_sha256"]):
+        raise _FactsRejected("bad_input", "source_sha256 must be 64 lowercase hex characters.")
+    if data["extractor"] not in FACTS_EXTRACTORS:
+        raise _FactsRejected("bad_input", f"extractor must be one of {', '.join(FACTS_EXTRACTORS)}.")
+    if "\n" in data["model"] or "\r" in data["model"]:
+        raise _FactsRejected("bad_input", "model cannot hold a line break.")
+    if not isinstance(data["facts"], list):
+        raise _FactsRejected("bad_input", "facts must be a list.")
+    for number, fact in enumerate(data["facts"], start=1):
+        if not isinstance(fact, dict) or any(not isinstance(fact.get(key), str) for key in _FACT_KEYS):
+            raise _FactsRejected("bad_input", f"Fact {number} must be an object with string date, text and exchange_id.")
+    return data
+
+
+def _part_exchange_ids(body: str) -> set[str]:
+    ids: set[str] = set()
+    for match in _EXCHANGE_LINE_RE.finditer(body):
+        ids.add(match.group("id"))
+        ids.add(unquote(match.group("id")))
+    return ids
+
+
+def _check_fact(number: int, fact: dict[str, str], exchange_ids: set[str]) -> None:
+    """Contract section 4 order: unknown_exchange, bad_text, bad_date, secret."""
+    if fact["exchange_id"] not in exchange_ids:
+        raise _FactsRejected("unknown_exchange", f"Fact {number} exchange_id {fact['exchange_id']!r} is not in the part.")
+    text = fact["text"]
+    if not text or text != text.strip() or "\n" in text or "\r" in text:
+        raise _FactsRejected("bad_text", f"Fact {number} text is empty, has a line break or leading/trailing spaces.")
+    if len(text) > FACT_TEXT_MAX_CHARS:
+        raise _FactsRejected("bad_text", f"Fact {number} text has {len(text)} characters (max {FACT_TEXT_MAX_CHARS}).")
+    value = fact["date"]
+    try:
+        if not _FACT_DATE_RE.fullmatch(value):
+            raise ValueError
+        date.fromisoformat(value)
+    except ValueError:
+        raise _FactsRejected("bad_date", f"Fact {number} date {value!r} is not a real YYYY-MM-DD date.") from None
+    if redact(text)[1]:
+        raise _FactsRejected("secret", f"Fact {number} text holds a value the vault redaction rules hide.")
