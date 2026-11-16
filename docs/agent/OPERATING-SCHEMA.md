@@ -145,7 +145,7 @@ When creating an optional folder, append a `schema-change` entry to `wiki/log.md
 
 Never edit, rewrite, rename, or delete files under `raw/` unless explicitly instructed.
 
-Two exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/` without a per-file human request, and `import-source` may add copies under `raw/imports/<kind>/` (section 16.2). Every other write there, including editing, renaming, or deleting an existing session file, stays forbidden. Session files have no source pages. Lint checks each session file's integrity with its body hash (`body_sha256`), and the release gate checks committed session files against Git history (section 16.1).
+Three exceptions: the session capture command (`python3 tools/wiki/cli.py sessions capture`) may add new files under `raw/sessions/` without a per-file human request, `sessions attach-facts` may add one validated fact attachment `<part name without .md>.facts.md` next to a session part file, and `import-source` may add copies under `raw/imports/<kind>/` (section 16.2). Every other write there, including editing, renaming, or deleting an existing session file or fact attachment, stays forbidden. A fact attachment is not a session file, and the release gate checks committed attachments against Git history like session files. Session files have no source pages. Lint checks each session file's integrity with its body hash (`body_sha256`), and the release gate checks committed session files against Git history (section 16.1).
 
 If a raw source contains errors, record corrections in the wiki, not in the source.
 

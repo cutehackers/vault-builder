@@ -25,6 +25,28 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-16
+
+vault-graph가 세션에서 뽑은 날짜 붙은 사실을 원 세션을 찾는 검색 키로 쓰려면 Vault 안에 사실을 둘 곳이 필요했다. vault-graph는 Vault 파일을 직접 쓰지 않으므로 Vault 명령 `sessions attach-facts`를 더했다. 기존 설치와 함께 쓸 수 있는 새 명령이라 MINOR로 올렸다.
+
+| 릴리스 | contract | manifest schema | vault-map |
+| --- | --- | --- | --- |
+| 5.1.0 | 6 | 6 | 2 |
+
+### Added
+
+- `sessions attach-facts --session <part> --facts <json> [--json]`이 `vault-session/v2` part 파일 옆에 사실 첨부 `<part 이름에서 .md를 뺀 것>.facts.md`(`vault-session-facts/v1`)를 쓴다. 입력 JSON(`vault-session-facts-input/1`)을 part 파일의 sha256, `session_id`, 교환 id와 대조하고, 문장 길이, 날짜, 비밀값 가림 규칙을 검사한다. 하나라도 어긋나면 아무것도 쓰지 않고 `rejected`와 이유 코드를 내고 exit 1로 끝난다. 첨부가 이미 있으면 검사 전에 `exists`를 내고 덮어쓰지 않는다. 마지막 줄 JSON은 `{status, path, reason, facts}`다. 형식과 이유 코드는 vault-graph 계약 `docs/contracts/vault-session-facts-v1.md`를 따른다.
+- `AGENTS.md` 규칙1과 `docs/agent/OPERATING-SCHEMA.md`에 사실 첨부 예외를 적는다. 첨부를 쓰는 길은 이 명령뿐이다.
+
+### Changed
+
+- `sessions status`, lint, `metrics`, `sessions capture`가 `.facts.md`를 세션 파일로 세지 않는다. `sessions git-check`는 커밋된 첨부가 바뀌거나 없어지면 세션 파일과 같이 실패하고, 통과 문구에 첨부 수를 따로 적는다.
+- source registry가 첨부를 `session-facts` 종류로 적고, 옆 part 파일이 세션 검사를 통과하면 `session`, 아니면 `session-invalid` 상태로 둔다.
+
+### Upgrade
+
+- Claude Code를 종료하고 `vault-builder setup`을 다시 실행하거나, vault마다 audit와 apply를 실행한다. 순서는 5.0.0 Upgrade 절과 같다.
+
 ## [5.0.2] - 2026-11-08
 
 예전 릴리스가 설치한 훅 실행기를 `setup`이 알 수 없는 파일로 보고 교체하지 않았다. 그래서 `doctor`가 `vault-builder setup`을 안내해도 문제가 계속 남았다.

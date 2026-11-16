@@ -22,6 +22,10 @@ SESSION_PATH_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})-(?P<session_id>" + SESSION_ID_PATTERN + r")"
     r"-part(?P<part>[1-9][0-9]*)\.md$"
 )
+# Session fact attachment (vault-graph contract vault-session-facts/v1): <part name without .md>.facts.md
+# next to its part file. It is not a session file, but it is just as immutable once written.
+SESSION_FACTS_SUFFIX = ".facts.md"
+SESSION_FACTS_PATH_RE = re.compile(SESSION_PATH_RE.pattern[: -len(r"\.md$")] + r"\.facts\.md$")
 COLLECTED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SESSION_FRONTMATTER_FIELDS = (
     "schema",
@@ -114,6 +118,16 @@ def session_archive_root(root: Path) -> Path:
 
 
 def list_session_files(root: Path) -> list[Path]:
+    """Files under raw/sessions/ that are session files. Fact attachments are left out."""
+    return [path for path in _list_archive_files(root) if not is_session_facts_path(_relative(root, path))]
+
+
+def is_session_facts_path(relative: str) -> bool:
+    """True for raw/sessions/<agent>/<date>-<session_id>-part<N>.facts.md."""
+    return SESSION_FACTS_PATH_RE.match(relative) is not None
+
+
+def _list_archive_files(root: Path) -> list[Path]:
     archive = session_archive_root(root)
     if not archive.is_dir():
         return []
@@ -267,11 +281,16 @@ class SessionGitProblem:
     relative: str
     reason: str  # "missing" or "changed"
 
+    @property
+    def is_facts(self) -> bool:
+        return is_session_facts_path(self.relative)
+
 
 @dataclass(frozen=True)
 class SessionGitCheck:
-    checked_count: int
+    checked_count: int  # Session files only.
     problems: tuple[SessionGitProblem, ...]
+    facts_count: int = 0  # Fact attachments, checked the same way but not counted as session files.
 
     @property
     def ok(self) -> bool:
@@ -295,7 +314,11 @@ def count_uncommitted_session_files(root: Path) -> int | None:
         output = _run_git(root, "status", "--porcelain", "--untracked-files=all", "--", SESSION_ARCHIVE_DIR)
     except (OSError, subprocess.CalledProcessError):
         return None
-    return sum(1 for line in output.decode("utf-8", "replace").splitlines() if line.strip())
+    return sum(
+        1
+        for line in output.decode("utf-8", "replace").splitlines()
+        if line.strip() and not is_session_facts_path(line[3:].strip().strip('"'))
+    )
 
 
 def first_added_session_blobs(root: Path) -> dict[str, str]:
@@ -348,7 +371,10 @@ def check_session_git_archive(root: Path) -> SessionGitCheck | None:
             problems.append(SessionGitProblem(relative, "missing"))
         elif _git_blob_id(path.read_bytes(), len(blobs[relative])) != blobs[relative]:
             problems.append(SessionGitProblem(relative, "changed"))
-    return SessionGitCheck(checked_count=len(blobs), problems=tuple(problems))
+    facts_count = sum(1 for relative in blobs if is_session_facts_path(relative))
+    return SessionGitCheck(
+        checked_count=len(blobs) - facts_count, problems=tuple(problems), facts_count=facts_count
+    )
 
 
 def _git_blob_id(data: bytes, id_length: int) -> str:

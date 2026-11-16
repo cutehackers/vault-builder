@@ -10,7 +10,7 @@ from .frontmatter import parse_page
 from .hash_source import compute_sha256, display_path
 from .ingest import ingest_source
 from .paths import resolve_report_path
-from .session_archive import SESSION_ARCHIVE_DIR, check_session_archive
+from .session_archive import SESSION_ARCHIVE_DIR, SESSION_FACTS_SUFFIX, check_session_archive, is_session_facts_path
 
 
 @dataclass(frozen=True)
@@ -56,12 +56,15 @@ def build_source_registry(root: Path, checked_at: date | None = None) -> list[So
         raw_hash = compute_sha256(raw_path)
         if is_session_path(raw_display):
             # Session files have no source page; the archive check decides their status.
+            # A fact attachment follows the archive check of the part it sits next to.
+            is_facts = is_session_facts_path(raw_display)
+            checked = raw_display[: -len(SESSION_FACTS_SUFFIX)] + ".md" if is_facts else raw_display
             entries[raw_display] = SourceRegistryEntry(
                 raw_path=raw_display,
                 raw_sha256=raw_hash,
-                source_kind="session",
+                source_kind="session-facts" if is_facts else "session",
                 source_page=None,
-                ingest_status="session" if session_ok.get(raw_display, False) else "session-invalid",
+                ingest_status="session" if session_ok.get(checked, False) else "session-invalid",
                 last_checked=current_date,
             )
             continue

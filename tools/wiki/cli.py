@@ -58,7 +58,7 @@ from tools.wiki.lib.session_archive import (
     count_uncommitted_session_files,
     session_archive_status,
 )
-from tools.wiki.lib.session_capture import TRIGGERS, run_capture_command
+from tools.wiki.lib.session_capture import TRIGGERS, attach_session_facts, run_capture_command
 from tools.wiki.lib.workflow import (
     ensure_draft_targets_workflow_target,
     prepare_query_capture_workflow,
@@ -257,10 +257,25 @@ def main(argv: list[str] | None = None) -> int:
     sessions_subcommands.add_parser(
         "git-check",
         description=(
-            "Fail when a session file committed under raw/sessions/ is missing or differs from the blob first added. "
-            "Prints skipped outside a Git work tree."
+            "Fail when a session file or fact attachment committed under raw/sessions/ is missing or differs from "
+            "the blob first added. Prints skipped outside a Git work tree."
         ),
     )
+    sessions_attach_facts = sessions_subcommands.add_parser(
+        "attach-facts",
+        description=(
+            "Write the immutable fact attachment <part>.facts.md (vault-session-facts/v1) next to one "
+            "vault-session/v2 part file of this vault, after checking the facts JSON against the part. "
+            "Never overwrites: an existing attachment gives exists. Exit 0 for written or exists, 1 for rejected."
+        ),
+    )
+    sessions_attach_facts.add_argument(
+        "--session", required=True, help="Part file under raw/sessions/, relative to the vault root or absolute."
+    )
+    sessions_attach_facts.add_argument(
+        "--facts", required=True, help="Input JSON (vault-session-facts-input/1). Read only; may be outside the vault."
+    )
+    sessions_attach_facts.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -269,6 +284,13 @@ def main(argv: list[str] | None = None) -> int:
             return _sessions_status(args.json)
         if args.sessions_command == "git-check":
             return _sessions_git_check()
+        if args.sessions_command == "attach-facts":
+            result = attach_session_facts(ROOT, Path(args.session), Path(args.facts))
+            if args.json:
+                print(json.dumps(result.as_json(), ensure_ascii=False))
+            else:
+                print(result.message)
+            return result.exit_code
         if args.rerender and not args.normalized:
             sessions_capture.error("--rerender needs --normalized")
         if args.normalized and (args.transcript or args.session_id):
@@ -1110,14 +1132,18 @@ def _sessions_git_check() -> int:
         print("Session git check skipped: the vault is not a Git work tree.")
         return 0
     for problem in result.problems:
+        kind = "fact attachment" if problem.is_facts else "session file"
         if problem.reason == "missing":
-            print(f"{problem.relative}: committed session file is missing from the work tree")
+            print(f"{problem.relative}: committed {kind} is missing from the work tree")
         else:
             print(f"{problem.relative}: work tree bytes differ from the blob first committed")
+    counted = f"{result.checked_count} committed session files"
+    if result.facts_count:
+        counted += f" and {result.facts_count} fact attachments"
     if result.ok:
-        print(f"Session git check passed: {result.checked_count} committed session files unchanged.")
+        print(f"Session git check passed: {counted} unchanged.")
         return 0
-    print(f"Session git check failed: {len(result.problems)} of {result.checked_count} committed session files.")
+    print(f"Session git check failed: {len(result.problems)} of {counted}.")
     return 1
 
 
