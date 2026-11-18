@@ -25,6 +25,12 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+
+- `README.md`와 `README-kr.md`에 기능 절을 더한다. setup과 doctor, Vault 역할, 저장소 연결, 세션 hook, 세션 수집, 세션 사실 첨부, 기억 검토, MCP 라우터를 같은 네 항목(하는 일, 실행 시점, 명령, 쓰는 위치)으로 설명한다.
+- `docs/usage.md`에 `review propose`로 시작하는 기억 검토 흐름, `sessions attach-facts`, 훅 실행기의 자동 수집 순서를 더하고, 새로 install한 vault의 contract를 3에서 6으로 고친다.
+- `docs/html/vault-roadmap.html`과 `docs/html/vault-structure-map.html`을 5.1.0(contract 6) 코드와 git 이력에 맞춘다. 관리 파일 hash가 바뀌어 v6 카탈로그를 다시 만든다.
+
 ## [5.1.0] - 2026-11-16
 
 vault-graph가 세션에서 뽑은 날짜 붙은 사실을 원 세션을 찾는 검색 키로 쓰려면 Vault 안에 사실을 둘 곳이 필요했다. vault-graph는 Vault 파일을 직접 쓰지 않으므로 Vault 명령 `sessions attach-facts`를 더했다. 기존 설치와 함께 쓸 수 있는 새 명령이라 MINOR로 올렸다.

@@ -78,13 +78,13 @@
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "7d4a47c9db695e9a90a91b57b51b47b645180bf8d56b7597b18cfd10b5445e04"
+      "sha256": "833bb2c0bf9f0838efaeb32eee06b4327d73111a28c643d4bd8f7ab761dda933"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "a393588922c9291227e9701d30ae4fa2d2953e600580210269fdc3abc4143f5d"
+      "sha256": "85e56df5b4d93878d6aa8332275126ae72f188a6c6a8b5b199bd884e335cf327"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
@@ -120,7 +120,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "a17ad7d102670cfbbf411325f4341d18aadcb9f9d7ff28ba61341fb5de112558"
+      "sha256": "b00549a58d7d438d2d0b405a6f3a6c741dd40c534d9ae97a481487e95f3a6285"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",

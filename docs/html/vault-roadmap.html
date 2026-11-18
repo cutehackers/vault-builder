@@ -79,6 +79,8 @@ section { display: grid; gap: 18px; min-width: 0; }
 .st { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
 .st.done { color: var(--ok); background: var(--ok-soft); }
 .st.part { color: var(--warn); background: var(--warn-soft); }
+.st.todo { color: var(--muted); background: transparent; border: 1px solid var(--line); }
+.st.ext { color: var(--off); background: var(--off-soft); }
 .card.is-done { border-color: var(--ok); background: var(--ok-soft); }
 .card.is-part { border-color: var(--warn); }
 .prop.is-done { border-color: var(--ok); }
@@ -139,13 +141,47 @@ td.new { color: var(--accent); }
 <header class="head">
   <span class="eyebrow">vault · vault-builder · vault-graph</span>
   <h1>Vault 개선 로드맵</h1>
-  <p class="lede">OpenWiki 조사로 만든 개선 계획(B1~B6)과 앞서 검토한 개선안(A1~A5)을 합쳐 제안 13개로 정리했습니다. 결정 4개는 2026-10-28에 모두 정했습니다. 그 뒤 vault 연결 규칙을 다시 검토해서 효율안1~3과 MCP 설치 점검 결과 발견1~6을 제안11~13에 반영했습니다. 제안11~13은 2026-10-29에 구현을 마치고 main에 병합했습니다(<code>a843778</code>). 테스트 582개와 release gate를 통과했고, 리뷰 판정은 Ready to merge(수용 근거 28/28)입니다. 이 Mac에도 새로 설치했고, 수동 점검 세 가지(서버 하나만 연결, doctor 통과, uninstall 뒤 남는 것 없음과 재설치 왕복)를 모두 통과했습니다. 2026-11-02에는 vault-graph가 요청한 계약1~7을 브랜치 <code>feat/jh/vault-graph-requests</code>에 구현했습니다(제안14). 이 브랜치는 아직 main에 병합하지 않았고 이 Mac에도 설치하지 않았습니다. 코드 참조는 2026-10-28 기준 현재 checkout에서 확인했습니다.</p>
+  <p class="lede">2026-11-18 기준 vault-builder 5.1.0(contract 6)의 상태입니다. 제안 14개 가운데 제안11~14는 구현해서 main에 병합했고 릴리스에 들어갔습니다. 제안2는 일부만 끝났습니다. 제안1, 3, 4, 8은 아직 코드에 없습니다. 제안6, 7, 9, 10은 vault-graph 저장소의 일이라 이 저장소 코드로는 상태를 확인하지 않았습니다. 로드맵 밖에서 구현한 기능(세션 보관, 설치 명령 하나, 대체 경로 제거, 사실 첨부)은 아래 "현재 상태"의 릴리스 표에 있습니다. 상태는 코드와 git 이력으로 확인했습니다. "핵심 진단"과 "계획 정정"은 2026-10-28 조사 기록이고, 거기 적힌 줄 번호는 그때 코드 기준입니다.</p>
   <div class="meta">
     <span><span class="tag a">A1~A5</span> 앞 검토의 개선1~5</span>
     <span><span class="tag b">B1~B6</span> OpenWiki 계획의 개선1~6</span>
     <span>OpenWiki 자체의 동작은 다시 확인하지 않고 조사 결과를 그대로 썼습니다</span>
   </div>
 </header>
+
+<section>
+  <h2>현재 상태</h2>
+  <p class="lede">릴리스마다 들어간 기능입니다. 출처는 <code>CHANGELOG.md</code>와 git tag입니다. 2.0.0에는 git tag가 없습니다.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>릴리스</th><th>날짜</th><th>contract</th><th>들어간 것</th></tr></thead>
+      <tbody>
+        <tr><td>1.0.0</td><td>2026-10-29</td><td>2</td><td>MCP 서버 하나와 상태 없는 라우터(제안11), <code>link</code>, <code>unlink</code>, <code>list</code>(제안12), root·remote·이름 순서의 저장소 찾기(제안13)</td></tr>
+        <tr><td>2.0.0</td><td>2026-10-30</td><td>3</td><td>세션 원문 보관소 <code>raw/sessions/</code>, <code>sessions capture</code>, <code>status</code>, <code>git-check</code>, <code>session-capture</code> skill</td></tr>
+        <tr><td>3.0.0</td><td>2026-11-04</td><td>5</td><td>vault-graph 요청 계약1~7(제안14). 설치 명령 <code>scripts/install.sh</code>와 <code>setup</code>, <code>uninstall --all</code>, 역할 표 <code>roles.py</code>. MCP 서버 이름을 <code>vault-wiki</code>로 바꿈</td></tr>
+        <tr><td>4.0.0</td><td>2026-11-05</td><td>5</td><td><code>setup</code>이 vault-graph를 설치하지 않음. vault-graph 설치는 vault-graph가 맡음</td></tr>
+        <tr><td>4.1.0</td><td>2026-11-05</td><td>5</td><td><code>setup</code>이 예전 vault를 audit한 뒤 업그레이드함</td></tr>
+        <tr><td>5.0.0</td><td>2026-11-07</td><td>6</td><td>대체 경로 제거: <code>/project-memory</code> skill, <code>recall.sh</code>, <code>memory-cleanup</code> skill, 프로젝트 요약 페이지를 더 만들지 않음. <code>sessions capture --normalized</code>(<code>vault-session/v2</code>), <code>set-sharable</code>, <code>import-source</code>, 페이지 종류 <code>project</code></td></tr>
+        <tr><td>5.0.1, 5.0.2</td><td>2026-11-07, 11-08</td><td>6</td><td>metrics 검사 수정, <code>setup</code>이 예전 훅 실행기를 새 것으로 교체</td></tr>
+        <tr><td>5.1.0</td><td>2026-11-16</td><td>6</td><td><code>sessions attach-facts</code>가 세션 part 옆에 <code>.facts.md</code> 첨부를 씀</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>제안</th><th>상태</th><th>확인한 근거</th></tr></thead>
+      <tbody>
+        <tr><td>제안11, 12, 13</td><td><span class="st done">✓ 구현 완료</span></td><td>main 병합 <code>a843778</code>, 릴리스 1.0.0</td></tr>
+        <tr><td>제안14</td><td><span class="st done">✓ 구현 완료</span></td><td>main 병합, 릴리스 3.0.0. 이 Mac에서 SessionStart, PreCompact, SessionEnd 훅이 실행기를 실행함</td></tr>
+        <tr><td>제안2</td><td><span class="st part">일부 완료</span></td><td>html 문구와 <code>docs/usage.md</code> 설치·MCP·연결 절은 고침. AGENTS.md 검색 규칙은 아직 없음</td></tr>
+        <tr><td>제안5</td><td><span class="st part">범위 바뀜</span></td><td>5.0.0에서 <code>memory-cleanup</code> skill을 지움(<code>8ba24d1</code>). 기억 정리는 vault-graph가 맡음</td></tr>
+        <tr><td>제안1</td><td><span class="st todo">미착수</span></td><td><code>health</code>는 지금도 실행할 때마다 lint 보고서를 씀. <code>Stale sources</code>는 지금도 raw drift와 누락만 셈</td></tr>
+        <tr><td>제안3, 4, 8</td><td><span class="st todo">미착수</span></td><td>줄 범위 근거, <code>claims-check</code>, <code>upstream</code> 필드, <code>repo://</code> 증거, 예약 점검이 코드에 없음</td></tr>
+        <tr><td>제안6, 7, 9, 10</td><td><span class="st ext">vault-graph 쪽</span></td><td>vault-graph 저장소의 일. 이 저장소에서는 확인하지 않음</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <section>
   <h2>핵심 진단</h2>
@@ -175,9 +211,11 @@ td.new { color: var(--accent); }
     <span><i style="background:var(--off)"></i>설계만</span>
     <span><i style="background:none;border:2px solid var(--warn)"></i>선행 작업</span>
     <span><i style="background:none;border:2px solid var(--ok)"></i>후속 작업</span>
-    <span><span class="st done">✓ 구현 완료</span> main 병합, 이 Mac 설치·점검 완료</span>
+    <span><span class="st done">✓ 구현 완료</span> main 병합, 릴리스에 포함</span>
     <span><span class="st part">일부 완료</span> 일부 항목만 구현</span>
-    <span><span class="st done">구현됨 · 브랜치</span> 브랜치에 구현, main 병합 전</span>
+    <span><span class="st part">범위 바뀜</span> 일부 항목이 더 맞지 않음</span>
+    <span><span class="st todo">미착수</span> 코드에 없음</span>
+    <span><span class="st ext">vault-graph 쪽</span> 이 저장소에서 확인하지 않음</span>
   </div>
   <div class="road-scroll">
     <div class="road" id="road">
@@ -188,27 +226,27 @@ td.new { color: var(--accent); }
 
       <div class="laneh">vault-builder<br>wiki 도구·계약</div>
       <div class="cell">
-        <button class="card" data-id="1" data-kind="fix" data-deps=""><span class="t">제안1. 보고서와 지표 정직하게</span><span class="row"><span class="tag a">A4</span><span class="tag b">B1</span><span class="size">작음</span></span></button>
+        <button class="card" data-id="1" data-kind="fix" data-deps=""><span class="t">제안1. 보고서와 지표 정직하게</span><span class="row"><span class="tag a">A4</span><span class="tag b">B1</span><span class="size">작음</span><span class="st todo">미착수</span></span></button>
         <button class="card is-done" data-id="11" data-kind="core" data-deps=""><span class="t">제안11. MCP 서버 하나와 깔끔한 설치·제거</span><span class="row"><span class="tag a">A3</span><span class="tag">효율안1</span><span class="size">큼</span><span class="st done">✓ 구현 완료</span></span></button>
         <button class="card is-done" data-id="12" data-kind="fix" data-deps=""><span class="t">제안12. 저장소 연결 명령</span><span class="row"><span class="tag">효율안2</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
         <button class="card is-done" data-id="13" data-kind="fix" data-deps=""><span class="t">제안13. 저장소를 경로와 remote로 찾기</span><span class="row"><span class="tag">효율안3</span><span class="size">작음</span><span class="st done">✓ 구현 완료</span></span></button>
-        <button class="card is-done" data-id="14" data-kind="core" data-deps="12 13"><span class="t">제안14. vault-graph 요청 계약1~7</span><span class="row"><span class="tag">요청3~6</span><span class="size">큼</span><span class="st done">구현됨 · 브랜치</span></span></button>
+        <button class="card is-done" data-id="14" data-kind="core" data-deps="12 13"><span class="t">제안14. vault-graph 요청 계약1~7</span><span class="row"><span class="tag">요청3~6</span><span class="size">큼</span><span class="st done">✓ 구현 완료</span></span></button>
       </div>
       <div class="cell">
-        <button class="card" data-id="3" data-kind="core" data-deps=""><span class="t">제안3. 줄 범위 claim 근거</span><span class="row"><span class="tag b">B2</span><span class="size">큼</span></span></button>
-        <button class="card" data-id="4" data-kind="core" data-deps="3"><span class="t">제안4. upstream 추적과 repo 증거</span><span class="row"><span class="tag b">B2</span><span class="size">중간</span></span></button>
-        <button class="card" data-id="5" data-kind="core" data-deps=""><span class="t">제안5. 공통 규칙을 검색으로 찾게</span><span class="row"><span class="tag a">A2</span><span class="size">작음</span></span></button>
+        <button class="card" data-id="3" data-kind="core" data-deps=""><span class="t">제안3. 줄 범위 claim 근거</span><span class="row"><span class="tag b">B2</span><span class="size">큼</span><span class="st todo">미착수</span></span></button>
+        <button class="card" data-id="4" data-kind="core" data-deps="3"><span class="t">제안4. upstream 추적과 repo 증거</span><span class="row"><span class="tag b">B2</span><span class="size">중간</span><span class="st todo">미착수</span></span></button>
+        <button class="card is-part" data-id="5" data-kind="core" data-deps=""><span class="t">제안5. 공통 규칙을 검색으로 찾게</span><span class="row"><span class="tag a">A2</span><span class="size">작음</span><span class="st part">범위 바뀜</span></span></button>
       </div>
       <div class="cell">
-        <button class="card" data-id="8" data-kind="fix" data-deps="3 4"><span class="t">제안8. 예약 점검</span><span class="row"><span class="tag b">B4</span><span class="size">작음</span></span></button>
+        <button class="card" data-id="8" data-kind="fix" data-deps="3 4"><span class="t">제안8. 예약 점검</span><span class="row"><span class="tag b">B4</span><span class="size">작음</span><span class="st todo">미착수</span></span></button>
       </div>
 
       <div class="laneh">vault-graph</div>
       <div class="cell"></div>
       <div class="cell"></div>
       <div class="cell">
-        <button class="card" data-id="6" data-kind="core" data-deps="3 4"><span class="t">제안6. 연결 설정 통합과 workspace</span><span class="row"><span class="tag b">B3</span><span class="size">큼</span></span></button>
-        <button class="card" data-id="7" data-kind="core" data-deps="6 11"><span class="t">제안7. MCP 진입점 정리</span><span class="row"><span class="tag a">A3</span><span class="tag b">B4</span><span class="size">중간</span></span></button>
+        <button class="card" data-id="6" data-kind="core" data-deps="3 4"><span class="t">제안6. 연결 설정 통합과 workspace</span><span class="row"><span class="tag b">B3</span><span class="size">큼</span><span class="st ext">vault-graph 쪽</span></span></button>
+        <button class="card" data-id="7" data-kind="core" data-deps="6 11"><span class="t">제안7. MCP 진입점 정리</span><span class="row"><span class="tag a">A3</span><span class="tag b">B4</span><span class="size">중간</span><span class="st ext">vault-graph 쪽</span></span></button>
       </div>
 
       <div class="laneh">문서·설계</div>
@@ -216,10 +254,10 @@ td.new { color: var(--accent); }
         <button class="card is-part" data-id="2" data-kind="fix" data-deps=""><span class="t">제안2. 문서를 구현에 맞추기</span><span class="row"><span class="tag a">A1</span><span class="tag a">A5</span><span class="tag b">B1</span><span class="size">작음</span><span class="st part">일부 완료</span></span></button>
       </div>
       <div class="cell">
-        <button class="card" data-id="10" data-kind="design" data-deps=""><span class="t">제안10. vault-graph 범위 축소</span><span class="row"><span class="tag b">B6</span><span class="size">설계</span></span></button>
+        <button class="card" data-id="10" data-kind="design" data-deps=""><span class="t">제안10. vault-graph 범위 축소</span><span class="row"><span class="tag b">B6</span><span class="size">설계</span><span class="st ext">vault-graph 쪽</span></span></button>
       </div>
       <div class="cell">
-        <button class="card" data-id="9" data-kind="design" data-deps="6"><span class="t">제안9. graph.json 계약</span><span class="row"><span class="tag b">B5</span><span class="size">설계</span></span></button>
+        <button class="card" data-id="9" data-kind="design" data-deps="6"><span class="t">제안9. graph.json 계약</span><span class="row"><span class="tag b">B5</span><span class="size">설계</span><span class="st ext">vault-graph 쪽</span></span></button>
       </div>
     </div>
   </div>
@@ -240,6 +278,7 @@ td.new { color: var(--accent); }
         <li>upstream 비교가 없는 동안 <code>Stale sources</code>는 0 대신 "미측정"으로 표시합니다.</li>
       </ul>
       <div class="foot"><span>출처: A4, B1(약점5)</span><span>선행: 없음</span></div>
+      <div class="foot"><span><span class="st todo">미착수</span> <code>health</code>는 지금도 실행할 때마다 <code>scratch/reports/</code>에 lint 보고서를 씁니다. audit의 미커밋 검사는 audit 보고서를 쓰기 전에 실행하지만, <code>scratch/reports/</code> 아래 다른 변경은 여전히 셉니다. <code>Stale sources</code>는 지금도 raw drift와 누락만 셉니다.</span></div>
     </article>
 
     <article class="prop is-done" id="p11">
@@ -280,24 +319,24 @@ td.new { color: var(--accent); }
     </article>
 
     <article class="prop is-done" id="p14">
-      <header><span class="code">제안14</span><h3>vault-graph가 요청한 계약1~7을 구현한다</h3><span class="st done">구현됨 · 브랜치</span></header>
+      <header><span class="code">제안14</span><h3>vault-graph가 요청한 계약1~7을 구현한다</h3><span class="st done">✓ 구현 완료</span></header>
       <p>vault-graph는 Vault 파일을 직접 쓰지 않고 Vault 도구만 부릅니다. 그래서 vault-graph가 부를 명령의 입력과 출력을 vault-builder 쪽 계약으로 고정했습니다. 요청 원문과 상태는 <code>docs/superpowers/specs/2026-10-29-vault-graph-requests-ko.md</code>에 있습니다.</p>
       <div class="tbl">
         <table>
           <thead><tr><th>계약</th><th>요청</th><th>구현한 것</th><th>상태</th></tr></thead>
           <tbody>
-            <tr><td>계약1</td><td>요청4</td><td><code>publish-draft --json</code>이 <code>vault-publish-result/v1</code> JSON 객체 하나를 냅니다. <code>status</code>는 <code>published</code> 또는 <code>rejected</code>이고, 거부 이유 <code>reason</code>은 <code>lint-dirty-before</code>, <code>draft-invalid</code>, <code>human-locked</code>, <code>page-missing</code>, <code>lint-failed-after</code>, <code>io-error</code> 중 하나입니다. 종료 코드는 0(published)과 1(rejected)입니다. 발행 로직은 <code>tools/wiki/lib/publish.py</code>로 옮겼습니다.</td><td>구현됨 <code>eab420a</code></td></tr>
-            <tr><td>계약2</td><td>요청6</td><td>선택 frontmatter <code>memory_schema</code>(<code>vault-memory/v1</code>), <code>pin</code>(불리언), <code>memory_kind</code>(<code>rule</code>, <code>correction</code>, <code>decision</code>, <code>preference</code>)와 status <code>retired</code>를 더했습니다. <code>retired</code>는 대체 없이 폐기한 페이지이고 <code>retired_reason</code>과 <code>retired_at</code>이 있어야 합니다. 대체가 있는 폐기는 지금처럼 <code>deprecated</code>와 <code>superseded_by</code>입니다. 검색, 지도, 지표, 병합 후보는 <code>retired</code>를 <code>deprecated</code>와 같이 현재가 아닌 페이지로 다룹니다.</td><td>구현됨 <code>c24d4a5</code></td></tr>
-            <tr><td>계약3</td><td>새 요청</td><td><code>patch-page</code> draft가 <code>edits</code> 없이 <code>frontmatter</code>만 바꿀 수 있습니다. 폐기가 이 형식을 씁니다. 둘 다 비어 있으면 지금처럼 거부합니다.</td><td>구현됨 <code>e1c992d</code></td></tr>
-            <tr><td>계약4</td><td>요청7 일부</td><td>검토 유형 <code>memory-proposal</code>과 <code>review propose</code> 명령입니다. 추론한 기억은 <code>scratch/review/</code>에 pending 항목과 draft 사본으로 들어갑니다. 사람이 <code>review resolve --status accepted</code>로 승인하면 대상 페이지 해시를 다시 확인한 뒤 발행합니다. 거절하면 기억 페이지는 바뀌지 않고 <code>wiki/log.md</code>에 한 줄만 남습니다.</td><td>구현됨 <code>0c014bd</code></td></tr>
-            <tr><td>계약5</td><td>요청5</td><td>외부 계약 문서 <code>docs/contracts/vault-map-v2.md</code>를 썼습니다. version 2 안에서 선택 필드 <code>default_write_vault</code>를 더했고, <code>set-role</code>, <code>set-default-write</code> 명령이 생겼습니다.</td><td>구현됨 <code>eddddb9</code></td></tr>
-            <tr><td>계약6</td><td>요청3</td><td>hook 실행기 <code>vault_hooks.py</code>(<code>session-start</code>, <code>capture</code>, <code>capture --direct</code>)와 <code>install --with-hooks</code>입니다. 옵션을 줄 때만 <code>settings.json</code>의 SessionStart, PreCompact, SessionEnd에 실행기 항목을 하나씩 더합니다.</td><td>구현됨 <code>2232c7f</code>, <code>a9fddb4</code></td></tr>
-            <tr><td>계약7</td><td>계약1~4 전달</td><td>Vault 계약 버전을 4로 올렸습니다. 기존 Vault는 audit 뒤 apply로 계약1~4의 도구 변경을 받습니다.</td><td>구현됨 <code>dc2d293</code></td></tr>
+            <tr><td>계약1</td><td>요청4</td><td><code>publish-draft --json</code>이 <code>vault-publish-result/v1</code> JSON 객체 하나를 냅니다. <code>status</code>는 <code>published</code> 또는 <code>rejected</code>이고, 거부 이유 <code>reason</code>은 <code>lint-dirty-before</code>, <code>draft-invalid</code>, <code>human-locked</code>, <code>page-missing</code>, <code>lint-failed-after</code>, <code>io-error</code> 중 하나입니다. 종료 코드는 0(published)과 1(rejected)입니다. 발행 로직은 <code>tools/wiki/lib/publish.py</code>로 옮겼습니다.</td><td>구현됨 <code>db0e6e2</code></td></tr>
+            <tr><td>계약2</td><td>요청6</td><td>선택 frontmatter <code>memory_schema</code>(<code>vault-memory/v1</code>), <code>pin</code>(불리언), <code>memory_kind</code>(<code>rule</code>, <code>correction</code>, <code>decision</code>, <code>preference</code>)와 status <code>retired</code>를 더했습니다. <code>retired</code>는 대체 없이 폐기한 페이지이고 <code>retired_reason</code>과 <code>retired_at</code>이 있어야 합니다. 대체가 있는 폐기는 지금처럼 <code>deprecated</code>와 <code>superseded_by</code>입니다. 검색, 지도, 지표, 병합 후보는 <code>retired</code>를 <code>deprecated</code>와 같이 현재가 아닌 페이지로 다룹니다.</td><td>구현됨 <code>005f6f0</code></td></tr>
+            <tr><td>계약3</td><td>새 요청</td><td><code>patch-page</code> draft가 <code>edits</code> 없이 <code>frontmatter</code>만 바꿀 수 있습니다. 폐기가 이 형식을 씁니다. 둘 다 비어 있으면 지금처럼 거부합니다.</td><td>구현됨 <code>c6b33f6</code></td></tr>
+            <tr><td>계약4</td><td>요청7 일부</td><td>검토 유형 <code>memory-proposal</code>과 <code>review propose</code> 명령입니다. 추론한 기억은 <code>scratch/review/</code>에 pending 항목과 draft 사본으로 들어갑니다. 사람이 <code>review resolve --status accepted</code>로 승인하면 대상 페이지 해시를 다시 확인한 뒤 발행합니다. 거절하면 기억 페이지는 바뀌지 않고 <code>wiki/log.md</code>에 한 줄만 남습니다.</td><td>구현됨 <code>5fd45fa</code></td></tr>
+            <tr><td>계약5</td><td>요청5</td><td>외부 계약 문서 <code>docs/contracts/vault-map-v2.md</code>를 썼습니다. version 2 안에서 선택 필드 <code>default_write_vault</code>를 더했고, <code>set-role</code>, <code>set-default-write</code> 명령이 생겼습니다.</td><td>구현됨 <code>3ad3479</code></td></tr>
+            <tr><td>계약6</td><td>요청3</td><td>hook 실행기 <code>vault_hooks.py</code>(<code>session-start</code>, <code>capture</code>, <code>capture --direct</code>)와 <code>install --with-hooks</code>입니다. 옵션을 줄 때만 <code>settings.json</code>의 SessionStart, PreCompact, SessionEnd에 실행기 항목을 하나씩 더합니다.</td><td>구현됨 <code>85b71f8</code>, <code>51d631f</code></td></tr>
+            <tr><td>계약7</td><td>계약1~4 전달</td><td>Vault 계약 버전을 4로 올렸습니다. 기존 Vault는 audit 뒤 apply로 계약1~4의 도구 변경을 받습니다.</td><td>구현됨 <code>e312c84</code></td></tr>
           </tbody>
         </table>
       </div>
-      <p>결정2는 그대로 유지합니다. 계약5로 필드와 명령이 늘었지만 <code>vault-map.json</code>을 바꾸는 것은 vault-builder 명령(install, uninstall, link, unlink, set-role, set-default-write)뿐이고, vault-graph는 이 파일을 읽기만 합니다.</p>
-      <div class="foot"><span>출처: vault-graph spec 2026-11-02 vault-long-term-memory</span><span>선행: 제안12, 제안13(vault-map version 2와 프로젝트 찾기)</span><span>브랜치 <code>feat/jh/vault-graph-requests</code>, release gate 통과. main 병합과 이 Mac 설치는 아직입니다.</span></div>
+      <p>결정2는 그대로 유지합니다. 계약5로 필드와 명령이 늘었지만 <code>vault-map.json</code>을 바꾸는 것은 vault-builder 명령(install, uninstall, setup, link, unlink, set-role, set-default-write, set-sharable)뿐이고, vault-graph는 이 파일을 읽기만 합니다.</p>
+      <div class="foot"><span>출처: vault-graph spec 2026-11-02 vault-long-term-memory</span><span>선행: 제안12, 제안13(vault-map version 2와 프로젝트 찾기)</span><span>main에 병합했고 릴리스 3.0.0에 들어갔습니다. 표의 commit은 main 기준입니다. 계약7 뒤에도 contract는 5(3.0.0)와 6(5.0.0)으로 올라갔습니다.</span></div>
     </article>
 
     <article class="prop" id="p2">
@@ -309,7 +348,7 @@ td.new { color: var(--accent); }
         <li>AGENTS.md: "작업 시작 때 미리 읽지 말고, 확실하지 않은 내용이 작업에 영향을 줄 때만 검색한다. 코드가 권위다" 규칙을 넣습니다. 어느 MCP 도구를 먼저 쓸지는 결정4 뒤에 적습니다.</li>
       </ul>
       <div class="foot"><span>출처: A1, A5, B1(약점9, 14), B4 일부</span><span>선행: 없음</span></div>
-      <div class="foot"><span><span class="st done">✓ 완료</span> html의 실행 순서(commit <code>99a00ee</code>), <code>docs/usage.md</code> install 순서와 MCP·연결·설치 절(같은 branch)</span><span><span class="st part">남음</span> html의 나머지 6곳, AGENTS.md 검색 규칙, vault의 결정 페이지 상태</span></div>
+      <div class="foot"><span><span class="st done">✓ 완료</span> html의 실행 순서(commit <code>99a00ee</code>), html의 나머지 문구(<code>hook.sh</code>와 "MCP 읽기 도구 없음"이 더 없음), <code>docs/usage.md</code> install 순서와 MCP·연결·설치 절</span><span><span class="st part">남음</span> AGENTS.md 검색 규칙. vault의 결정 페이지 상태는 vault 쪽이라 이 저장소에서 확인하지 않음</span></div>
     </article>
 
     <div class="stage-h">단계1 · 근거 기반</div>
@@ -343,6 +382,7 @@ td.new { color: var(--accent); }
         <li>제안2의 AGENTS.md 지침에 "작업 규칙이 확실하지 않으면 personal vault에서 <code>rule</code> 태그로 검색한다"는 문장을 넣습니다.</li>
       </ul>
       <div class="foot"><span>출처: A2, 결정3</span><span>선행: 없음</span></div>
+      <div class="foot"><span><span class="st part">범위 바뀜</span> 5.0.0에서 <code>memory-cleanup</code> skill과 프로젝트 요약 페이지를 지웠습니다(<code>8ba24d1</code>, <code>1b01346</code>). 첫 항목은 더 맞지 않고, 기억 정리는 vault-graph가 맡습니다.</span></div>
     </article>
 
     <article class="prop" id="p10">
