@@ -142,7 +142,7 @@ LLM Wiki는 내부적으로 여러 품질 단계를 거치지만, 사용자는 �
 
 현재 저장소의 결정론적 도구는 `tools/wiki/cli.py` 아래에 있습니다. 위 skill/workflow는 사람이 기억하기 쉬운 권장 사용 방식이며, 내부에서는 기존 CLI를 조합합니다.
 
-현재 구현된 안정 명령은 `ingest-source`, `import-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `sessions capture/status/git-check`, `workflow ingest/update/query`입니다. `wiki-ingest`, `wiki-update`, `wiki-query` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
+현재 구현된 안정 명령은 `ingest-source`, `import-source`, `source-registry`, `bulk-ingest`, `publish-draft`, `publish-batch`, `review`, `merge scan`, `maps build`, `metrics`, `health`, `apply-draft`, `lint`, `hash-source`, `validate-page`, `memory-scan`, `sessions capture/status/git-check/attach-facts`, `workflow ingest/update/query`입니다. `review`에는 `create`, `propose`, `list`, `resolve`가 있습니다. `wiki-ingest`, `wiki-update`, `wiki-query`, `session-capture` skill 문서는 `.agents/skills/` 아래에 있으며, agent가 아래 workflow를 일관되게 따르기 위한 repo-local 지침입니다.
 
 ```text
 wiki-ingest
@@ -589,6 +589,22 @@ python3 tools/wiki/cli.py review resolve scratch/review/example-review.md --stat
 
 `review create`의 type은 `contradiction`, `merge`, `contested-claim`, `human-lock` 중 하나입니다. `review resolve`는 status를 `accepted`, `rejected`, `resolved` 중 하나로 바꾸고 `wiki/log.md`에 관련 page와 resolution을 기록합니다.
 
+#### 추론한 기억 검토 (memory-proposal)
+
+agent나 vault-graph가 추론한 기억은 바로 wiki에 쓰지 않고 검토 항목으로 올립니다. 사람이 승인해야 wiki 페이지가 바뀝니다.
+
+```bash
+python3 tools/wiki/cli.py review propose --draft scratch/drafts/memory.json --summary "Memory summary" --json
+python3 tools/wiki/cli.py review list --status pending
+python3 tools/wiki/cli.py review resolve scratch/review/<review id>.md --status accepted --resolution "Confirmed by the owner."
+```
+
+1. `review propose`는 draft를 파일 쓰기 없이 검증합니다. 통과하면 `scratch/review/<날짜>-memory-<해시 8자>.md` pending 항목(type `memory-proposal`)과 draft 사본 `<같은 이름>.draft.json`을 씁니다. wiki는 바꾸지 않습니다. 검증이 실패하거나 같은 항목이 이미 있으면 아무것도 쓰지 않고 exit 1로 끝납니다. `--json`은 `vault-review-result/v1` 객체 하나를 출력합니다.
+2. `review list`로 대기 중인 항목을 봅니다. MCP에서는 `wiki_review_list` 도구가 같은 일을 합니다.
+3. `review resolve --status accepted`는 대상 페이지가 제안 때와 같은지 hash로 다시 확인한 뒤 draft 사본을 `publish-draft`와 같은 검증으로 발행하고, 항목을 `accepted`로 닫습니다. 대상 페이지가 그사이 바뀌었거나 발행 검증이 실패하면 발행하지 않고 항목은 pending으로 남습니다. 대상 페이지가 바뀐 경우에는 항목을 `rejected`로 닫고 다시 제안합니다. `--status rejected`나 `--status resolved`는 wiki 페이지를 바꾸지 않고 항목만 닫고 `wiki/log.md`에 기록합니다.
+
+`review propose`에 해당하는 MCP 도구는 없습니다. vault-graph는 이 명령을 CLI로 실행합니다.
+
 중복 page 후보를 찾을 때는 merge scan을 실행합니다.
 
 ```bash
@@ -969,7 +985,7 @@ Claude Code는 대화 파일(transcript)을 기본 30일 뒤에 지웁니다. `s
 
 이미 `personal` 역할로 등록한 vault는 `vault-builder set-role --vault app --role project` 명령으로 역할을 바꿉니다. project vault가 없는 저장소를 `link`하면 명령은 세션 원문이 저장되지 않는다는 경고 한 줄을 출력합니다.
 
-수집 명령은 대상 vault의 manifest contract가 3 이상일 때만 씁니다. 지금 builder로 새로 install한 vault는 contract 3입니다. 이전 builder로 만든 vault라면 1.1절의 audit과 apply를 사람이 먼저 실행합니다. agent는 apply를 실행하지 않습니다.
+수집 명령은 대상 vault의 manifest contract가 3 이상일 때만 씁니다. 지금 builder로 새로 install한 vault는 contract 6입니다. 이전 builder로 만든 vault라면 1.1절의 audit과 apply를 사람이 먼저 실행합니다. agent는 apply를 실행하지 않습니다.
 
 #### `sessions capture`
 
@@ -1020,7 +1036,31 @@ commit하기 전에 세션 파일이 지워지면 어떤 검사도 잡지 못합
 
 `sessions git-check`
 
-vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 끝납니다. git 작업 트리이면 현재 branch 이력에서 `raw/sessions/` 아래에 추가된 적 있는 경로와 처음 추가된 내용을 모읍니다. 그 경로가 작업 트리에 없거나 내용이 처음 추가된 내용과 다르면 경로마다 한 줄을 출력하고 exit 1로 끝납니다. 파일을 되살리면 다시 통과합니다. `scripts/release_gate.sh`는 metrics 단계 뒤에 vault 루트에서 이 명령을 실행합니다.
+vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 끝납니다. git 작업 트리이면 현재 branch 이력에서 `raw/sessions/` 아래에 추가된 적 있는 경로와 처음 추가된 내용을 모읍니다. 세션 파일과 사실 첨부를 모두 검사하고, 첨부 수는 따로 출력합니다. 그 경로가 작업 트리에 없거나 내용이 처음 추가된 내용과 다르면 경로마다 한 줄을 출력하고 exit 1로 끝납니다. 파일을 되살리면 다시 통과합니다. `scripts/release_gate.sh`는 metrics 단계 뒤에 vault 루트에서 이 명령을 실행합니다.
+
+#### `sessions attach-facts`
+
+`sessions attach-facts --session <part 파일> --facts <JSON 파일> [--json]`
+
+세션 part 파일 하나 옆에 사실 첨부 `<part 이름에서 .md를 뺀 것>.facts.md`(`vault-session-facts/v1`)를 씁니다. vault-graph가 세션에서 뽑은 날짜 붙은 사실을 원 세션을 찾는 검색 키로 쓰려고 이 명령을 실행합니다. 사람이 직접 실행할 일은 보통 없습니다.
+
+- `--session` 값은 이 vault의 `raw/sessions/` 아래 `vault-session/v2` part 파일입니다. vault 루트 기준 상대 경로나 절대 경로를 받습니다.
+- `--facts` 값은 입력 JSON(`vault-session-facts-input/1`)입니다. 읽기만 하고, vault 밖 파일이어도 됩니다.
+- 쓰기 전에 입력을 part 파일의 sha256, `session_id`, 교환 id와 대조하고, 문장 길이, 날짜, 비밀값 가림 규칙을 검사합니다.
+- 결과는 세 가지입니다. `written`은 첨부를 새로 쓴 경우이고 exit 0입니다. `exists`는 첨부가 이미 있는 경우이고, 검사 전에 멈추며 덮어쓰지 않고 exit 0입니다. `rejected`는 검사가 하나라도 실패한 경우이고, 이유 코드를 출력하고 파일을 쓰지 않으며 exit 1입니다.
+- 첨부는 세션 파일로 세지 않습니다. `sessions status`, `lint`, `metrics`, `sessions capture`는 첨부를 건너뜁니다. 한 번 쓴 첨부는 세션 파일처럼 고치거나 지우지 않습니다.
+
+형식과 이유 코드는 vault-graph 계약 `docs/contracts/vault-session-facts-v1.md`(vault-graph 저장소)에 있습니다.
+
+#### 훅으로 자동 수집하기
+
+`setup`이나 `install --with-hooks`로 hook을 설치하면 PreCompact와 SessionEnd 때 훅 실행기 `<설정 폴더>/vault-builder/vault_hooks.py capture`가 실행됩니다.
+
+1. 실행기가 vg를 찾습니다. 순서는 환경 변수 `VAULT_GRAPH_BIN`, `<설정 폴더>/vault-builder/vault-hooks.json`의 `vg` 값, `PATH`입니다.
+2. vg가 있으면 `vg hook capture`를 실행합니다. exit 0이면 실행기는 더 하지 않습니다.
+3. vg가 없거나, 0이 아닌 코드로 끝나거나, 시간을 넘기면 `capture --direct`로 넘어갑니다. 세션 폴더의 저장소에 연결된 역할 `project` vault가 정확히 하나이고 그 vault의 contract가 3 이상일 때만, 그 vault의 `tools/wiki/cli.py sessions capture --json`에 훅 JSON을 넘깁니다. 조건이 맞지 않으면 이유를 stderr에 한 줄 남기고 아무것도 쓰지 않습니다.
+
+실행기는 Claude Code 세션을 막지 않도록 항상 exit 0으로 끝납니다. 예외는 vault-graph가 쓰는 `capture --direct --normalized <파일>` 형태에서 인자가 잘못되었거나 vault 도구가 `--normalized`를 모를 때이며, 이때는 exit 2로 끝납니다.
 
 #### 세션 파일 검사와 인용
 
@@ -1093,6 +1133,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | human review item 생성 | `python3 tools/wiki/cli.py review create --type contradiction --summary "..." --related wiki/overview.md --context "..."` |
 | human review queue 조회 | `python3 tools/wiki/cli.py review list` |
 | human review item resolve | `python3 tools/wiki/cli.py review resolve scratch/review/example.md --status accepted --resolution "..."` |
+| 추론한 기억을 검토 항목으로 올리기 | `python3 tools/wiki/cli.py review propose --draft scratch/drafts/memory.json --summary "..."` |
 | merge candidate scan | `python3 tools/wiki/cli.py merge scan --report --create-review` |
 | navigation map 생성 | `python3 tools/wiki/cli.py maps build --report` |
 | navigation map stale check | `python3 tools/wiki/cli.py maps build --check --report` |
@@ -1102,6 +1143,7 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 세션 원문 수집 (훅은 인자 없이 stdin JSON으로 호출) | `python3 tools/wiki/cli.py sessions capture --transcript /path/to/session.jsonl` |
 | 세션 보관소 상태 확인 (읽기 전용) | `python3 tools/wiki/cli.py sessions status` |
 | 커밋된 세션 파일 삭제·변경 검사 | `python3 tools/wiki/cli.py sessions git-check` |
+| 세션 part 옆에 사실 첨부 쓰기 | `python3 tools/wiki/cli.py sessions attach-facts --session raw/sessions/<agent>/<part>.md --facts /path/to/facts.json` |
 | L1 메모리 목록 확인 (읽기 전용) | `python3 tools/wiki/cli.py memory-scan --json` |
 | 첫 설치 (vault, hook, 저장소 연결, MCP 등록) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash` |
 | 설치 명령으로 전부 제거 (vault 폴더는 남김) | `curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scripts/install.sh \| bash -s -- --uninstall` |
