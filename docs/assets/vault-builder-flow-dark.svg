@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="456" viewBox="0 0 900 456" role="img" aria-label="vault-builder flow" font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6E7681"/></marker>
+<marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8B93FF"/></marker>
+<marker id="arrowHuman" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#C9D1D9"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="899" height="455" rx="16" fill="#0D1117" stroke="#30363D"/>
+<text x="24" y="36" font-size="12" font-weight="700" fill="#8B949E" text-anchor="start">1  LINK A REPOSITORY</text>
+<text x="24" y="300" font-size="12" font-weight="700" fill="#8B949E" text-anchor="start">2  SAVE A SESSION</text>
+<rect x="24" y="60" width="176" height="56" rx="10" fill="#161B22" stroke="#3D444D" stroke-width="1"/>
+<text x="38" y="84" font-size="14" font-weight="600" fill="#E6EDF3" text-anchor="start">Code repository</text>
+<text x="38" y="103" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">your git project</text>
+<rect x="236" y="60" width="176" height="56" rx="10" fill="#161B22" stroke="#C9D1D9" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="250" y="84" font-size="13.5" font-weight="600" fill="#E6EDF3" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault-builder link</text>
+<text x="250" y="103" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">run by you or setup</text>
+<rect x="448" y="60" width="176" height="56" rx="10" fill="#161B22" stroke="#3D444D" stroke-width="1"/>
+<text x="462" y="84" font-size="13.5" font-weight="600" fill="#E6EDF3" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault-map.json</text>
+<text x="462" y="103" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">which vaults a repo uses</text>
+<path d="M200 88.0 H233" fill="none" stroke="#C9D1D9" stroke-width="1.6" marker-end="url(#arrowHuman)"/>
+<path d="M412 88.0 H445" fill="none" stroke="#C9D1D9" stroke-width="1.6" marker-end="url(#arrowHuman)"/>
+<rect x="692" y="52" width="184" height="48" rx="10" fill="#161B22" stroke="#3D444D" stroke-width="1"/>
+<text x="706" y="72" font-size="14" font-weight="600" fill="#E6EDF3" text-anchor="start">personal vault</text>
+<text x="706" y="89" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">your own notes</text>
+<rect x="692" y="112" width="184" height="48" rx="10" fill="#161B22" stroke="#3D444D" stroke-width="1"/>
+<text x="706" y="132" font-size="14" font-weight="600" fill="#E6EDF3" text-anchor="start">team vault</text>
+<text x="706" y="149" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">notes shared by a team</text>
+<rect x="692" y="172" width="184" height="100" rx="10" fill="#161B22" stroke="#3D444D" stroke-width="1"/>
+<text x="706" y="194" font-size="14" font-weight="600" fill="#E6EDF3" text-anchor="start">project vault</text>
+<text x="706" y="212" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">this repository only</text>
+<rect x="706" y="228" width="156" height="28" rx="6" fill="#21262D" stroke="#3D444D"/>
+<text x="718" y="246.5" font-size="12.5" font-weight="500" fill="#E6EDF3" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>raw/sessions/</text>
+<path d="M624 88.0 C658 88.0 658 76.0 689 76.0" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M624 88.0 C658 88.0 658 136.0 689 136.0" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M624 88.0 C658 88.0 658 200 689 200" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="24" y="318" width="176" height="56" rx="10" fill="#1C1F3A" stroke="#8B93FF" stroke-width="1.5"/>
+<text x="38" y="342" font-size="14" font-weight="600" fill="#C7CBFF" text-anchor="start">Claude Code session</text>
+<text x="38" y="361" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">PreCompact · SessionEnd</text>
+<rect x="236" y="318" width="176" height="56" rx="10" fill="#1C1F3A" stroke="#8B93FF" stroke-width="1.5"/>
+<text x="250" y="342" font-size="14" font-weight="600" fill="#C7CBFF" text-anchor="start">Capture hook</text>
+<text x="250" y="361" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault_hooks.py</text>
+<rect x="448" y="318" width="176" height="56" rx="10" fill="#1C1F3A" stroke="#8B93FF" stroke-width="1.5"/>
+<text x="462" y="342" font-size="13.5" font-weight="600" fill="#C7CBFF" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>sessions capture</text>
+<text x="462" y="361" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">writes a new file</text>
+<path d="M200 346.0 H233" fill="none" stroke="#8B93FF" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<path d="M412 346.0 H445" fill="none" stroke="#8B93FF" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<path d="M624 346.0 H646 Q656 346.0 656 336.0 V252 Q656 242 666 242 H703" fill="none" stroke="#8B93FF" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<rect x="692" y="318" width="184" height="56" rx="10" fill="#161B22" stroke="#C9D1D9" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="706" y="342" font-size="13.5" font-weight="600" fill="#E6EDF3" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>git commit</text>
+<text x="706" y="361" font-size="12.5" font-weight="400" fill="#8B949E" text-anchor="start">you commit the file</text>
+<path d="M784.0 272 V315" fill="none" stroke="#C9D1D9" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowHuman)"/>
+<text x="794.0" y="299.0" font-size="12" font-weight="400" fill="#8B949E" text-anchor="start">later</text>
+<line x1="24" y1="394" x2="876" y2="394" stroke="#30363D"/>
+<rect x="24" y="412" width="28" height="18" rx="5" fill="#1C1F3A" stroke="#8B93FF" stroke-width="1.5"/>
+<text x="62" y="425.5" font-size="13" font-weight="400" fill="#E6EDF3" text-anchor="start">Runs automatically</text>
+<rect x="235" y="412" width="28" height="18" rx="5" fill="#161B22" stroke="#C9D1D9" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="273" y="425.5" font-size="13" font-weight="400" fill="#E6EDF3" text-anchor="start">You do it</text>
+<rect x="379" y="412" width="28" height="18" rx="5" fill="#161B22" stroke="#3D444D"/>
+<text x="417" y="425.5" font-size="13" font-weight="400" fill="#E6EDF3" text-anchor="start">File, folder, or vault</text>
+</svg>
