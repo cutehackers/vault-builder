@@ -6,8 +6,8 @@ agent가 그 자료로 페이지를 쓰고, 검사를 통과한 페이지만 `wi
 vault-builder는 vault를 코드 저장소에 연결하고 Claude Code 세션도 보관합니다.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vault-builder-flow-ko-dark.svg">
-  <img src="docs/assets/vault-builder-flow-ko-light.svg" width="900" alt="코드 저장소는 vault-map.json을 통해 personal, team, project vault에 연결됩니다. PreCompact나 SessionEnd 때 보관 hook이 sessions capture를 실행해 project vault의 raw/sessions/에 새 파일을 쓰고, 사람이 나중에 commit합니다.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cutehackers/vault-builder/main/docs/assets/vault-builder-flow-ko-dark.svg">
+  <img src="https://raw.githubusercontent.com/cutehackers/vault-builder/main/docs/assets/vault-builder-flow-ko-light.svg" width="900" alt="코드 저장소는 vault-map.json을 통해 personal, team, project vault에 연결됩니다. PreCompact나 SessionEnd 때 보관 hook이 sessions capture를 실행해 project vault의 raw/sessions/에 새 파일을 쓰고, 사람이 나중에 commit합니다.">
 </picture>
 
 색 테두리는 자동으로 실행되는 단계이고, 점선 테두리는 사람이 하는 단계입니다.

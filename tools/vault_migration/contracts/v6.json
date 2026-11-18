@@ -78,13 +78,13 @@
       "mode": "0644",
       "path": "README-kr.md",
       "policy": "replace-if-unmodified",
-      "sha256": "869fcadc215d5a2fadcc4e76db167b9e80746df3284261b2990c87af956f6f90"
+      "sha256": "cabf5d87a59bfde6b941d139fc43a63693686a8c465829cab1a5eca0db2322e0"
     },
     "README.md": {
       "mode": "0644",
       "path": "README.md",
       "policy": "replace-if-unmodified",
-      "sha256": "bb484e4145b33b3201736b2fd48a95f72b3781931f72c44d1276145d62888856"
+      "sha256": "fd88ae340eff9a5b62c969858d128558267db6154a81a5fc90b990e6864d09fd"
     },
     "docs/LLM-WIKI.md": {
       "mode": "0644",
