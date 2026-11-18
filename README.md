@@ -6,6 +6,37 @@ agent turns it into pages, and a page enters `wiki/` only after a check passes.
 vault-builder also links your vaults to your code repositories and saves your
 Claude Code sessions.
 
+```mermaid
+flowchart LR
+    repo["Code repository"]
+    link["vault-builder link"]
+    map["vault-map.json"]
+    personal["personal vault"]
+    team["team vault"]
+    project["project vault"]
+    event["Claude Code session<br/>PreCompact or SessionEnd"]
+    hook["hook: vault_hooks.py capture"]
+    capture["sessions capture"]
+    commit["git commit"]
+
+    repo --> link --> map
+    map --> personal
+    map --> team
+    map --> project
+    event --> hook --> capture
+    capture -->|"new file in raw/sessions/"| project
+    project --> commit
+
+    classDef auto stroke-width:3px
+    classDef manual stroke-dasharray:6 4
+    class event,hook,capture auto
+    class link,commit manual
+```
+
+Thick border: runs automatically. Dashed border: you do it. `setup` also runs
+`link` once for each repository during install. Session files go only to the
+project vault, never to personal or team vaults.
+
 ## Install
 
 Quit Claude Code, then run:

@@ -5,6 +5,37 @@ vault는 markdown wiki 페이지를 담은 git 폴더입니다. 원본 자료는
 agent가 그 자료로 페이지를 쓰고, 검사를 통과한 페이지만 `wiki/`에 들어갑니다.
 vault-builder는 vault를 코드 저장소에 연결하고 Claude Code 세션도 보관합니다.
 
+```mermaid
+flowchart LR
+    repo["코드 저장소"]
+    link["vault-builder link"]
+    map["vault-map.json"]
+    personal["personal vault"]
+    team["team vault"]
+    project["project vault"]
+    event["Claude Code 세션<br/>PreCompact 또는 SessionEnd"]
+    hook["hook: vault_hooks.py capture"]
+    capture["sessions capture"]
+    commit["git commit"]
+
+    repo --> link --> map
+    map --> personal
+    map --> team
+    map --> project
+    event --> hook --> capture
+    capture -->|"raw/sessions/에 새 파일"| project
+    project --> commit
+
+    classDef auto stroke-width:3px
+    classDef manual stroke-dasharray:6 4
+    class event,hook,capture auto
+    class link,commit manual
+```
+
+굵은 테두리는 자동으로 실행되는 단계이고, 점선 테두리는 사람이 하는 단계입니다.
+설치할 때 `setup`도 저장소마다 `link`를 한 번 실행합니다. 세션 파일은 project
+vault에만 들어가고, personal이나 team vault에는 들어가지 않습니다.
+
 ## 설치
 
 Claude Code를 종료한 뒤 아래 명령을 실행합니다.
