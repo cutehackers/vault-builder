@@ -308,7 +308,7 @@ python3 tools/wiki/cli.py bulk-ingest --all-raw --report
 
 `bulk-ingest`도 semantic extraction을 수행하지 않습니다. 각 raw file에 대해 `ingest-source`와 같은 source registration만 수행하고, source별 outcome을 report에 남깁니다.
 
-vault 밖 파일을 사본으로 남기고 등록하려면 `import-source`를 사용합니다. vault-graph가 Claude Code 자동 기억 노트를 근거로 쓸 때 이 명령을 실행합니다.
+vault 밖 파일을 사본으로 남기고 등록하려면 `import-source`를 사용합니다.
 
 ```bash
 python3 tools/wiki/cli.py import-source /path/outside/note.md --into raw/imports/claude-memory/ --json
@@ -591,7 +591,7 @@ python3 tools/wiki/cli.py review resolve scratch/review/example-review.md --stat
 
 #### 추론한 기억 검토 (memory-proposal)
 
-agent나 vault-graph가 추론한 기억은 바로 wiki에 쓰지 않고 검토 항목으로 올립니다. 사람이 승인해야 wiki 페이지가 바뀝니다.
+agent나 외부 도구가 추론한 기억은 바로 wiki에 쓰지 않고 검토 항목으로 올립니다. 사람이 승인해야 wiki 페이지가 바뀝니다.
 
 ```bash
 python3 tools/wiki/cli.py review propose --draft scratch/drafts/memory.json --summary "Memory summary" --json
@@ -603,7 +603,7 @@ python3 tools/wiki/cli.py review resolve scratch/review/<review id>.md --status 
 2. `review list`로 대기 중인 항목을 봅니다. MCP에서는 `wiki_review_list` 도구가 같은 일을 합니다.
 3. `review resolve --status accepted`는 대상 페이지가 제안 때와 같은지 hash로 다시 확인한 뒤 draft 사본을 `publish-draft`와 같은 검증으로 발행하고, 항목을 `accepted`로 닫습니다. 대상 페이지가 그사이 바뀌었거나 발행 검증이 실패하면 발행하지 않고 항목은 pending으로 남습니다. 대상 페이지가 바뀐 경우에는 항목을 `rejected`로 닫고 다시 제안합니다. `--status rejected`나 `--status resolved`는 wiki 페이지를 바꾸지 않고 항목만 닫고 `wiki/log.md`에 기록합니다.
 
-`review propose`에 해당하는 MCP 도구는 없습니다. vault-graph는 이 명령을 CLI로 실행합니다.
+`review propose`에 해당하는 MCP 도구는 없습니다.
 
 중복 page 후보를 찾을 때는 merge scan을 실행합니다.
 
@@ -713,19 +713,17 @@ python3 tools/wiki/mcp_server.py
 
 ## 17. 여러 vault를 저장소에 연결하기 (project memory)
 
-이 절은 vault를 저장소에 연결하는 방법을 설명합니다. 연결 설정은 MCP 라우터, 세션 수집 hook, vault-graph가 읽습니다. 세션에서 나온 결정, 교정, 남은 일을 기억으로 다시 꺼내 쓰는 일은 vault-graph(`vg`)가 맡습니다. vault-graph가 없으면 세션 시작 회상과 기억 정리는 없고, ingest, update, query, 검증, 세션 수집은 그대로 동작합니다.
+이 절은 vault를 저장소에 연결하는 방법을 설명합니다. 연결 설정은 MCP 라우터와 세션 수집 hook이 읽습니다. vault-builder에는 세션 시작 회상과 기억 정리 기능이 없습니다. ingest, update, query, 검증, 세션 수집은 vault-builder만으로 동작합니다.
 
-세션을 시작할 때 무엇이 자동으로 들어가는지는 hook 설치 여부와 vault-graph 유무에 달렸습니다.
+SessionStart hook은 외부 회상 명령이 있을 때 그 출력을 세션에 넘기는 연결 지점입니다. 혼자서는 아무것도 넣지 않습니다. 무엇이 들어가는지는 hook 설치 여부와 회상 명령의 결과에 달렸습니다.
 
 | 설치 상태 | 세션 시작 때 들어가는 것 |
 |---|---|
 | hook 없음 (`install`을 `--with-hooks` 없이 실행) | 아무것도 넣지 않습니다. |
-| hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | vg 출력을 그대로 넣습니다. vault-graph가 vault 페이지에서 고른 기억입니다. 빈 출력이면 아무것도 넣지 않습니다. |
+| hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | 그 명령의 출력을 그대로 넣습니다. 빈 출력이면 아무것도 넣지 않습니다. |
 | hook 있음, vg가 없거나 0이 아닌 코드로 끝나거나 시간을 넘김 | 아무것도 넣지 않습니다. 이유는 hook의 stderr에 한 줄로 남깁니다. |
 
-hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6). vg는 환경 변수 `VAULT_GRAPH_BIN`, `<설정 폴더>/vault-builder/vault-hooks.json`의 `vg` 값, `PATH` 순서로 찾고, `vg hook session-start`가 20초 안에 끝나지 않으면 시간을 넘긴 것으로 봅니다.
-
-세션 시작 기억을 직접 보려면 저장소 폴더에서 `echo '{}' | vg hook session-start`를 실행합니다. vg는 stdin JSON의 `cwd` 값으로 저장소를 고르고, 값이 없으면 현재 폴더를 씁니다. 이 명령은 vault-graph가 제공합니다.
+hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6). 회상 명령은 환경 변수, `<설정 폴더>/vault-builder/vault-hooks.json`에 적힌 경로, `PATH` 순서로 찾고, 20초 안에 끝나지 않으면 시간을 넘긴 것으로 봅니다.
 
 이 절의 `vault-builder ...` 명령은 설치 명령(1절)이 만든 `$HOME/.local/bin/vault-builder` 파일로 실행합니다. 이 파일은 builder checkout의 `tools/vault_migration/cli.py`를 실행하므로, builder checkout 폴더에서 `vault-builder` 대신 `python3 tools/vault_migration/cli.py`로 같은 명령을 실행할 수도 있습니다.
 
@@ -768,7 +766,7 @@ vault 밖 파일은 모두 설정 폴더 아래에 둡니다. 환경 변수 `CLA
 
 저장소가 어느 project 항목에 해당하는지는 17.3의 project 찾기 순서(root 경로, remote URL, 폴더 이름)로 정합니다. `link` 명령으로 새 항목을 만들면 project id는 기본으로 저장소 root 폴더 이름입니다. 같은 저장소의 `git worktree` 폴더에서도 project id는 같습니다.
 
-저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. vault 항목의 선택 key `sharable`은 `vault-builder set-sharable --vault <이름> --value true|false` 명령으로 정하고 `--clear` 옵션으로 지웁니다. vault-graph가 이 값을 읽고, 뜻은 `docs/contracts/vault-map-v2.md`에 있습니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
+저장소 연결은 이 파일을 손으로 고치지 않고 `link`, `unlink` 명령(17.3)으로 하고, vault 역할(17.2)은 `set-role` 명령으로 바꿉니다. vault 항목의 선택 key `sharable`은 `vault-builder set-sharable --vault <이름> --value true|false` 명령으로 정하고 `--clear` 옵션으로 지웁니다. vault-builder 명령은 이 값을 쓰기만 하고 읽지 않습니다. 외부 도구가 읽는 선택 값이고, 뜻은 `docs/contracts/vault-map-v2.md`에 있습니다. 상한 값 같은 다른 설정 key는 두지 않습니다.
 
 ### 17.2 vault 역할
 
@@ -851,11 +849,11 @@ python3 tools/wiki/cli.py memory-scan --repo /path/to/my-app --json
 
 `memory-scan` 명령은 이 vault에 연결된 project마다 L1 note 목록, note별 sha256과 type, 그리고 같은 project에 연결된 모든 vault에 이미 들어왔는지(`imported` 또는 `new`)를 출력합니다. 파일은 하나도 쓰지 않습니다. 연결 설정이 없거나 이 vault가 `vaults` 항목에 없으면 이유 한 줄과 함께 exit 1로 끝납니다. 이 경우 17.1과 17.3을 따라 연결 설정을 먼저 만듭니다.
 
-L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니다. vault-graph도 이 명령을 읽기 전용으로 실행합니다.
+L1 메모리 파일은 읽기만 하고 수정, 이동, 삭제하지 않습니다.
 
 ### 17.5 프로젝트 기억 불러오기
 
-vault-builder는 `/project-memory` skill, recall 스크립트, `memory-cleanup` skill, 프로젝트 요약 페이지 `wiki/maps/projects/<project id>.md`를 더 만들지 않습니다(vault-graph 요청S11). 프로젝트 기억을 불러오고 정리하는 일은 vault-graph가 맡습니다.
+vault-builder는 `/project-memory` skill, recall 스크립트, `memory-cleanup` skill, 프로젝트 요약 페이지 `wiki/maps/projects/<project id>.md`를 더 만들지 않습니다(vault-graph 요청S11).
 
 - install(`setup` 포함)은 이전 install이 만든 `<설정 폴더>/skills/project-memory/SKILL.md`와 `scripts/recall.sh`가 builder가 만든 파일일 때만 지웁니다. builder가 만든 파일은 manifest에 기록된 hash와 같거나 릴리스된 asset과 같은 파일입니다. recall 스크립트는 `PYTHON=` 줄만 달라도 같은 파일로 봅니다. 사용자가 고친 파일은 남기고 경로를 출력합니다.
 - `maps build`는 이전 `maps build`가 만든 요약 페이지(frontmatter `generated_by: tools/wiki/cli.py maps build`이고 page lock이 없는 파일)를 지우고 `wiki/log.md`에 적습니다. `wiki/maps/projects/` 폴더의 다른 파일은 사람이 쓴 페이지로 보고 그대로 둡니다. `maps build --check`는 남은 요약 페이지 때문에 실패하지 않으므로, migration apply가 실행하는 gate도 통과합니다.
@@ -893,7 +891,7 @@ vault-builder uninstall --all
 설치 명령(1절)이 마지막에 실행하는 명령입니다. 아래 4단계를 차례로 실행하고, 단계마다 `setup: [N/4]` 줄을 출력합니다. vault-builder 파일과 설정만 설치하고 다른 도구는 설치하지 않습니다.
 
 1. 사전 검사. 파일을 쓰지 않습니다. 옵션, 연결 설정, `--repo` 저장소를 확인하고 계획을 출력합니다. 그다음 manifest가 있는 vault마다 audit을 실행합니다. manifest schema가 예전 것이거나 audit 계획에 `create`, `replace` 항목이 있는 vault는 업그레이드할 vault로 계획에 함께 출력합니다. 어느 vault든 audit에 `review-required`나 `invalid` 항목이 있으면, 그런 경로를 모든 vault에 걸쳐 한 번에 출력하고 아무것도 쓰지 않고 멈춥니다. apply가 이런 항목이 있는 계획을 거부하기 때문입니다. 경로마다 audit 이유와 고치는 방법을 함께 출력합니다. vault-builder 관리 파일이 배포된 어느 버전과도 다르면, 고친 내용이 필요할 때 vault 밖에 복사해 두고 출력된 `cp` 명령으로 vault-builder 버전을 다시 넣은 뒤 다시 실행합니다. 관리 파일이 없어 audit이 실패할 때도 같은 `cp` 명령을 출력합니다. 위키 페이지가 source 페이지 규칙을 어기면 페이지를 고칩니다. 더 새 vault-builder가 쓴 manifest이면 vault-builder를 업데이트합니다. vault마다 install의 `--dry-run` 검사를 실행합니다. 업그레이드할 vault는 schema와 audit 검사만 빼고 나머지 검사를 같은 방법으로 받습니다. 하나라도 실패하면 아무것도 쓰지 않고 멈춥니다. 마지막으로 대화 모드에서는 진행할지 묻고, Claude Code가 실행 중인지 확인합니다.
-2. vault마다 업그레이드가 필요하면 audit 계획을 apply하고(1.1절의 apply와 같은 동작이며 실패하면 vault 파일을 되돌립니다), 이어서 hook을 포함해 install을 실행합니다(`install --with-hooks`). 업그레이드는 vault-builder 관리 파일과 manifest만 바꾸고 wiki 페이지와 raw source는 그대로 둡니다. 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다. 환경 변수는 그대로 넘기므로, `VAULT_GRAPH_BIN`이나 `PATH`에서 vg를 찾으면 그 경로를 `vault-hooks.json`에 적습니다. vg를 설치하는 도구가 그 경로를 `VAULT_GRAPH_BIN`에 넣고 setup을 실행하면 hook이 그 vg를 씁니다.
+2. vault마다 업그레이드가 필요하면 audit 계획을 apply하고(1.1절의 apply와 같은 동작이며 실패하면 vault 파일을 되돌립니다), 이어서 hook을 포함해 install을 실행합니다(`install --with-hooks`). 업그레이드는 vault-builder 관리 파일과 manifest만 바꾸고 wiki 페이지와 raw source는 그대로 둡니다. 그래서 `setup`으로 설치하면 hook이 항상 설치됩니다. 환경 변수는 그대로 넘기므로, 환경 변수나 `PATH`에서 외부 명령을 찾으면 그 경로를 `vault-hooks.json`에 적습니다.
 3. 저장소마다 `link`를 한 번 실행해 공유 vault 전부와 그 저장소의 project vault를 연결합니다. 기본 쓰기 vault가 정해지지 않으면 대화 모드에서는 묻고, 그 밖에는 `--default-write` 값을 쓰거나 `vault-builder set-default-write` 명령을 안내합니다.
 4. 경로 없이 doctor를 실행합니다.
 
@@ -901,7 +899,7 @@ vault-builder uninstall --all
 - `--role NAME=ROLE`은 vault마다 역할을 정합니다. 없으면 새 vault는 `personal`이고, 이미 있는 vault는 지금 역할을 유지합니다(17.2).
 - 같은 명령을 다시 실행해도 결과가 같습니다. 중간에 실패하면 원인을 고치고 같은 명령을 다시 실행합니다. vault를 나중에 더할 때도 위 예시처럼 새 vault만 넘깁니다.
 - 대화 모드는 터미널(`/dev/tty`)이 있고 `--yes`가 없을 때입니다. `--vault`, `--repo`, `--project-vault`를 하나도 주지 않으면 개인 vault 경로, 연결할 저장소, project vault 생성 여부, 다른 vault 추가 여부를 차례로 묻습니다. 실행 전에는 항상 계획을 보여 주고 진행할지 묻습니다.
-- vg를 찾지 못하면 `vault-hooks.json`에 vg 경로가 적히지 않습니다. 이때 SessionStart hook은 아무것도 넣지 않고, 수집 hook은 직접 세션 수집을 씁니다.
+- 외부 명령을 찾지 못하면 `vault-hooks.json`에 경로가 적히지 않습니다. 이때 SessionStart hook은 아무것도 넣지 않고, 수집 hook은 직접 세션 수집을 씁니다.
 - 종료 코드: 0은 성공, 1은 실패(사전 검사, install, link 실패, doctor가 문제를 찾음), 2는 옵션이 빠졌거나 잘못됨(터미널이 없는데 `--yes`와 `--dry-run`이 모두 없을 때 포함), 3은 Claude Code가 실행 중이라 멈춤입니다. 대화 모드는 Claude Code가 실행 중이면 종료할 때까지 Enter를 기다립니다.
 
 `install <path> [--name NAME] [--role ROLE] [--with-stenc] [--with-hooks] [--dry-run]`
@@ -912,7 +910,7 @@ vault-builder uninstall --all
 - 라우터 `<설정 폴더>/vault-builder/llm_wiki_router.py`를 설치합니다. 이미 있는 파일이 builder가 만든 것이 아니면 교체하지 않고 목록에 적습니다.
 - 이전 install이 만든 불러오기 skill과 recall 스크립트(`<설정 폴더>/skills/project-memory/`)가 builder가 만든 파일이면 지우고, 이 vault manifest의 기록에서도 뺍니다. 비게 된 폴더도 지웁니다. 사용자가 고친 파일은 남기고 목록에 적습니다(17.5).
 - 연결 설정이 없으면 만들고, 이 vault를 `vaults` 항목에 `--role` 값(없으면 `personal`)으로 더합니다. 저장소 연결은 `link` 명령(17.3)으로 합니다.
-- `--with-hooks` 옵션을 주면 `<설정 폴더>/settings.json`의 `hooks.SessionStart`, `hooks.PreCompact`, `hooks.SessionEnd`에 launcher `<설정 폴더>/vault-builder/vault_hooks.py`를 실행하는 항목을 하나씩 더합니다. 그리고 `<설정 폴더>/vault-builder/vault-hooks.json`에 vg 절대 경로를 적습니다. vg는 환경 변수 `VAULT_GRAPH_BIN` 값, 없으면 `PATH`에서 찾습니다. vg를 찾지 못하면 vg 경로 없이 설치하고 한 줄로 알립니다. 이때 `vault-hooks.json`에 적힌 vg가 더 이상 실행 파일이 아니면(vg를 지운 경우) 그 파일을 지웁니다. 아직 실행되는 vg 경로는 그대로 둡니다. install 명령의 기본값은 hook 없음이고, `setup`은 항상 이 옵션을 붙여 install을 실행합니다.
+- `--with-hooks` 옵션을 주면 `<설정 폴더>/settings.json`의 `hooks.SessionStart`, `hooks.PreCompact`, `hooks.SessionEnd`에 launcher `<설정 폴더>/vault-builder/vault_hooks.py`를 실행하는 항목을 하나씩 더합니다. 그리고 외부 명령을 찾으면 `<설정 폴더>/vault-builder/vault-hooks.json`에 그 절대 경로를 적습니다. 외부 명령은 환경 변수, 없으면 `PATH`에서 찾습니다. 찾지 못하면 경로 없이 설치하고 한 줄로 알립니다. 이때 `vault-hooks.json`에 적힌 경로가 더 이상 실행 파일이 아니면 그 파일을 지웁니다. 아직 실행되는 경로는 그대로 둡니다. install 명령의 기본값은 hook 없음이고, `setup`은 항상 이 옵션을 붙여 install을 실행합니다.
 - MCP 설정 파일의 `mcpServers` 객체 아래에 서버 항목 `vault-wiki` 하나를 둡니다. 값은 `{"command": <interpreter>, "args": ["-I", <라우터 경로>]}` 형태입니다. 모든 vault가 이 항목 하나를 함께 쓰므로, 두 번째 vault부터는 항목이 이미 같으면 MCP 설정 파일을 다시 쓰지 않습니다. 다른 key와 다른 서버 항목은 바꾸지 않습니다.
 - interpreter 경로는 install을 실행한 Python과 같은 파일을 가리키는 경로 가운데 patch version(`3.12.4` 같은 형태)이 없는 경로를 고릅니다. 그런 경로가 없으면 실행한 경로를 그대로 쓰고, Python을 올리면 install을 다시 실행하라는 알림을 출력합니다. 서버 항목에 이 경로를 씁니다.
 - 이미 있는 `vault-wiki` 항목이 이 설정 폴더의 라우터를 가리키지 않으면 다른 프로그램의 항목으로 보고 아무것도 쓰지 않고 거부합니다.
@@ -955,12 +953,12 @@ manifest, 수정된 managed 파일, 라우터, 연결 설정을 검사하고 문
 - 서버 항목의 `command`와 `args` 값으로 라우터를 실제로 시작해 30초 안에 `initialize`와 `tools/list` 요청에 응답하고, 도구 24개를 모두 돌려주는지
 - 이전 버전 builder가 만든 MCP 등록이 남아 있지 않은지
 
-hook, vg, `vault-builder` 명령은 아래를 검사합니다.
+hook, 외부 명령 경로, `vault-builder` 명령은 아래를 검사합니다.
 
 - `settings.json`에 SessionStart, PreCompact, SessionEnd launcher 항목이 하나씩 있는지. hook이 하나도 설치되지 않았으면 문제가 아니라 알림(`Note:`)으로 출력합니다.
 - launcher 파일이 있고 builder 원본과 같은지
-- `vault-hooks.json`의 `vg` 값이 절대 경로이고 실행 파일인지. 이 파일이나 `vg` 값이 없으면 SessionStart hook은 아무것도 넣지 않고 수집 hook은 직접 세션 수집을 쓴다고 알림으로 출력합니다.
-- 그 vg가 `vg --help`로 10초 안에 exit 0으로 끝나는지
+- `vault-hooks.json`에 적힌 외부 명령 경로가 절대 경로이고 실행 파일인지. 이 파일이나 경로가 없으면 SessionStart hook은 아무것도 넣지 않고 수집 hook은 직접 세션 수집을 쓴다고 알림으로 출력합니다.
+- 그 명령이 `--help`로 10초 안에 exit 0으로 끝나는지
 - `$HOME/.local/bin/vault-builder` 파일에 표시 줄이 있고, 적힌 checkout이 builder checkout이고, 실행 권한이 있는지. 파일이 없으면 알림으로 출력합니다.
 
 문제 줄은 `Problem: ... Fix: <명령>` 형식이고, 끝에 고치는 명령 하나가 붙습니다. 대부분 `vault-builder setup`입니다. 문제가 없으면 exit 0, 있으면 exit 1입니다. 서버 항목의 interpreter 경로에 patch version이 들어 있고 고를 수 있는 다른 경로가 있으면 install을 다시 실행하라는 알림만 출력하고 exit 값에는 넣지 않습니다. doctor는 어떤 파일도 쓰지 않습니다.
@@ -1001,7 +999,7 @@ hook을 설치했으면 PreCompact와 SessionEnd 때 자동으로 수집합니�
 
 - 훅 형태: `--transcript`와 `--normalized` 옵션이 없으면 stdin에서 Claude Code 훅 JSON 한 개를 읽습니다. 이 JSON의 `session_id`, `transcript_path`, `cwd`, `hook_event_name` 값을 씁니다. `hook_event_name` 값이 trigger가 됩니다. 훅은 이 명령을 인자 없이 호출하면 됩니다.
 - 수동 형태: `--transcript PATH` 옵션으로 transcript 파일을 지정합니다. session id는 `--session-id` 값이고, 없으면 파일 이름에서 확장자를 뺀 값입니다. 작업 폴더는 `--cwd` 값이고, 없으면 transcript 첫 항목의 `cwd` 값, 그것도 없으면 현재 폴더입니다. trigger 기본값은 `manual`입니다.
-- 정규화 형태: `--normalized PATH` 옵션으로 vault-graph가 만든 정규화 세션 파일(`vg-session-jsonl/1`)을 넘깁니다. 파일 형식은 `vault-session/v2`이고 닫힌 교환만 씁니다(`docs/agent/OPERATING-SCHEMA.md` 16.1절 "Session file v2"). session id와 agent는 정규화 파일 첫 줄에서 읽습니다. stdin에 훅 JSON이 있으면 그 `hook_event_name` 값을 trigger로, `cwd` 값을 작업 폴더로 쓰고, 훅 형태처럼 어떤 실패에서도 exit 0으로 끝납니다. 훅 JSON이 없으면 작업 폴더는 `--cwd` 값, 없으면 정규화 파일의 `cwd` 값입니다. `--rerender` 옵션은 이전 part의 이어 쓸 위치를 무시하고 닫힌 교환 전체를 새 part로 씁니다. 기존 파일은 바꾸지 않습니다. `--rerender`를 `--normalized` 없이 쓰거나, `--normalized`를 `--transcript`나 `--session-id`와 함께 쓰면 exit 2로 끝납니다. 모르는 옵션도 exit 2입니다.
+- 정규화 형태: `--normalized PATH` 옵션으로 외부 도구가 만든 정규화 세션 파일을 넘깁니다. 입력 형식은 `docs/agent/OPERATING-SCHEMA.md` 16.1절에 있습니다. 파일 형식은 `vault-session/v2`이고 닫힌 교환만 씁니다(`docs/agent/OPERATING-SCHEMA.md` 16.1절 "Session file v2"). session id와 agent는 정규화 파일 첫 줄에서 읽습니다. stdin에 훅 JSON이 있으면 그 `hook_event_name` 값을 trigger로, `cwd` 값을 작업 폴더로 쓰고, 훅 형태처럼 어떤 실패에서도 exit 0으로 끝납니다. 훅 JSON이 없으면 작업 폴더는 `--cwd` 값, 없으면 정규화 파일의 `cwd` 값입니다. `--rerender` 옵션은 이전 part의 이어 쓸 위치를 무시하고 닫힌 교환 전체를 새 part로 씁니다. 기존 파일은 바꾸지 않습니다. `--rerender`를 `--normalized` 없이 쓰거나, `--normalized`를 `--transcript`나 `--session-id`와 함께 쓰면 exit 2로 끝납니다. 모르는 옵션도 exit 2입니다.
 
 ```bash
 python3 tools/wiki/cli.py sessions capture \
@@ -1023,7 +1021,7 @@ python3 tools/wiki/cli.py sessions capture \
 | 대상 vault manifest가 없거나 contract가 3 미만 | 0, migration을 먼저 실행하라는 안내 |
 | `--vault` 경로가 그 project의 역할 `project` vault가 아님 | 1 |
 | transcript 파일이 없거나 읽을 수 없음, session id 형식 오류 | 1 |
-| 정규화 파일이 없거나 형식(`vg-session-jsonl/1`)에 맞지 않음, agent가 `claude-code`가 아님 | 1 |
+| 정규화 파일이 없거나 입력 형식에 맞지 않음, agent가 `claude-code`가 아님 | 1 |
 | 연결 설정이 없거나 손상됨, 저장소를 찾지 못함, 여러 project가 맞음 | 1 |
 | 이전 part 파일의 frontmatter에서 이어 쓸 위치를 읽을 수 없음 | 1 |
 | 같은 part 번호를 다른 수집이 먼저 만들었고 한 번 재시도도 실패함, 디스크 쓰기 실패 | 1 |
@@ -1046,7 +1044,7 @@ vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 �
 
 `sessions attach-facts --session <part 파일> --facts <JSON 파일> [--json]`
 
-세션 part 파일 하나 옆에 사실 첨부 `<part 이름에서 .md를 뺀 것>.facts.md`(`vault-session-facts/v1`)를 씁니다. vault-graph가 세션에서 뽑은 날짜 붙은 사실을 원 세션을 찾는 검색 키로 쓰려고 이 명령을 실행합니다. 사람이 직접 실행할 일은 보통 없습니다.
+세션 part 파일 하나 옆에 사실 첨부 `<part 이름에서 .md를 뺀 것>.facts.md`(`vault-session-facts/v1`)를 씁니다. vault-builder가 직접 실행하지는 않습니다. 사람이 실행하거나, 세션에서 사실을 뽑는 외부 도구가 부르는 명령입니다.
 
 - `--session` 값은 이 vault의 `raw/sessions/` 아래 `vault-session/v2` part 파일입니다. vault 루트 기준 상대 경로나 절대 경로를 받습니다.
 - `--facts` 값은 입력 JSON(`vault-session-facts-input/1`)입니다. 읽기만 하고, vault 밖 파일이어도 됩니다.
@@ -1054,23 +1052,15 @@ vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 �
 - 결과는 세 가지입니다. `written`은 첨부를 새로 쓴 경우이고 exit 0입니다. `exists`는 첨부가 이미 있는 경우이고, 검사 전에 멈추며 덮어쓰지 않고 exit 0입니다. `rejected`는 검사가 하나라도 실패한 경우이고, 이유 코드를 출력하고 파일을 쓰지 않으며 exit 1입니다.
 - 첨부는 세션 파일로 세지 않습니다. `sessions status`, `lint`, `metrics`, `sessions capture`는 첨부를 건너뜁니다. 한 번 쓴 첨부는 세션 파일처럼 고치거나 지우지 않습니다.
 
-형식과 이유 코드는 vault-graph 계약 `docs/contracts/vault-session-facts-v1.md`(vault-graph 저장소)에 있습니다.
-
-vault-graph 쪽 자동 실행 조건은 다음과 같습니다. 이 동작은 vault-graph가 정하며, 2026-11-18 vault-graph 코드로 확인했습니다.
-
-- `vg hook capture`가 세션 part 파일을 새로 쓰고 사실 추출이 켜져 있으면(`vg facts on`), vault-graph가 그 part를 대기열에 넣고 사실 추출 작업자를 백그라운드로 시작합니다. 작업자는 사실을 뽑아 이 명령으로 첨부를 씁니다.
-- 사실 추출이 꺼져 있거나 vault-graph가 없으면 첨부는 생기지 않습니다. hook이 vg 없이 `capture --direct`로 수집한 경우도 마찬가지입니다.
-- 직접 처리하려면 `vg facts worker`로 대기열을 비우고, `vg facts status`로 켜짐 여부, 대기열, 실패 기록을 봅니다.
-
 #### 훅으로 자동 수집하기
 
 `setup`이나 `install --with-hooks`로 hook을 설치하면 PreCompact와 SessionEnd 때 훅 실행기 `<설정 폴더>/vault-builder/vault_hooks.py capture`가 실행됩니다.
 
-1. 실행기가 vg를 찾습니다. 순서는 환경 변수 `VAULT_GRAPH_BIN`, `<설정 폴더>/vault-builder/vault-hooks.json`의 `vg` 값, `PATH`입니다.
-2. vg가 있으면 `vg hook capture`를 실행합니다. exit 0이면 실행기는 더 하지 않습니다.
-3. vg가 없거나, 0이 아닌 코드로 끝나거나, 시간을 넘기면 `capture --direct`로 넘어갑니다. 세션 폴더의 저장소에 연결된 역할 `project` vault가 정확히 하나이고 그 vault의 contract가 3 이상일 때만, 그 vault의 `tools/wiki/cli.py sessions capture --json`에 훅 JSON을 넘깁니다. 조건이 맞지 않으면 이유를 stderr에 한 줄 남기고 아무것도 쓰지 않습니다.
+1. 실행기가 외부 수집 명령을 찾습니다. 찾는 순서는 17절의 회상 명령과 같습니다.
+2. 외부 명령이 있으면 먼저 그 명령에 수집을 맡깁니다. exit 0이면 실행기는 더 하지 않습니다.
+3. 외부 명령이 없거나, 0이 아닌 코드로 끝나거나, 시간을 넘기면 `capture --direct`로 넘어갑니다. 세션 폴더의 저장소에 연결된 역할 `project` vault가 정확히 하나이고 그 vault의 contract가 3 이상일 때만, 그 vault의 `tools/wiki/cli.py sessions capture --json`에 훅 JSON을 넘깁니다. 조건이 맞지 않으면 이유를 stderr에 한 줄 남기고 아무것도 쓰지 않습니다.
 
-실행기는 Claude Code 세션을 막지 않도록 항상 exit 0으로 끝납니다. 예외는 vault-graph가 쓰는 `capture --direct --normalized <파일>` 형태에서 인자가 잘못되었거나 vault 도구가 `--normalized`를 모를 때이며, 이때는 exit 2로 끝납니다.
+실행기는 Claude Code 세션을 막지 않도록 항상 exit 0으로 끝납니다. 예외는 외부 도구가 쓰는 `capture --direct --normalized <파일>` 형태에서 인자가 잘못되었거나 vault 도구가 `--normalized`를 모를 때이며, 이때는 exit 2로 끝납니다.
 
 #### 세션 파일 검사와 인용
 
@@ -1164,9 +1154,9 @@ gate는 모든 단계를 vault 루트에서 실행하고 report 파일을 쓰지
 | 연결 상태 확인 (읽기 전용) | `vault-builder list --repo /path/to/my-app` |
 | 기본 쓰기 vault 정하기 | `vault-builder set-default-write --project my-app --vault app` |
 | vault 역할 바꾸기 | `vault-builder set-role --vault app --role project` |
-| vault의 `sharable` 값 정하기 (vault-graph가 읽음) | `vault-builder set-sharable --vault personal --value true` |
+| vault의 `sharable` 값 정하기 (외부 도구가 읽음) | `vault-builder set-sharable --vault personal --value true` |
 | vault 밖 파일 설치 | `vault-builder install /path/to/vault --name personal --with-hooks` |
-| 모든 vault와 hook, vg 점검 (읽기 전용) | `vault-builder doctor` |
+| 모든 vault와 hook 점검 (읽기 전용) | `vault-builder doctor` |
 | vault 하나 점검 (읽기 전용) | `vault-builder doctor /path/to/vault` |
 | vault 밖 파일 삭제 | `vault-builder uninstall /path/to/vault` |
 | 모든 vault의 vault 밖 파일, `vault-builder` 명령, builder checkout 삭제 | `vault-builder uninstall --all` |
