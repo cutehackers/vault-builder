@@ -723,7 +723,9 @@ python3 tools/wiki/mcp_server.py
 | hook 있음 (`setup`, 또는 `install --with-hooks`), `vg hook session-start`가 exit 0 | vg 출력을 그대로 넣습니다. vault-graph가 vault 페이지에서 고른 기억입니다. 빈 출력이면 아무것도 넣지 않습니다. |
 | hook 있음, vg가 없거나 0이 아닌 코드로 끝나거나 시간을 넘김 | 아무것도 넣지 않습니다. 이유는 hook의 stderr에 한 줄로 남깁니다. |
 
-hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6).
+hook이 실행하는 실행기는 `<설정 폴더>/vault-builder/vault_hooks.py`이고, 이 순서는 `vault_hooks.py session-start`가 정합니다(17.6). vg는 환경 변수 `VAULT_GRAPH_BIN`, `<설정 폴더>/vault-builder/vault-hooks.json`의 `vg` 값, `PATH` 순서로 찾고, `vg hook session-start`가 20초 안에 끝나지 않으면 시간을 넘긴 것으로 봅니다.
+
+세션 시작 기억을 직접 보려면 저장소 폴더에서 `echo '{}' | vg hook session-start`를 실행합니다. vg는 stdin JSON의 `cwd` 값으로 저장소를 고르고, 값이 없으면 현재 폴더를 씁니다. 이 명령은 vault-graph가 제공합니다.
 
 이 절의 `vault-builder ...` 명령은 설치 명령(1절)이 만든 `$HOME/.local/bin/vault-builder` 파일로 실행합니다. 이 파일은 builder checkout의 `tools/vault_migration/cli.py`를 실행하므로, builder checkout 폴더에서 `vault-builder` 대신 `python3 tools/vault_migration/cli.py`로 같은 명령을 실행할 수도 있습니다.
 
@@ -967,6 +969,8 @@ hook, vg, `vault-builder` 명령은 아래를 검사합니다.
 
 Claude Code는 대화 파일(transcript)을 기본 30일 뒤에 지웁니다. `sessions capture` 명령은 그 전에 대화 원문을 project vault의 `raw/sessions/` 폴더로 옮겨 둡니다. 보관한 원문은 검색 도구가 읽을 수 있고, wiki claim의 근거로 바로 인용할 수 있습니다.
 
+hook을 설치했으면 PreCompact와 SessionEnd 때 자동으로 수집합니다(아래 "훅으로 자동 수집하기"). 직접 수집하려면 agent에게 "이 세션 보관해줘"라고 말합니다. 그러면 `session-capture` skill이 `sessions capture --transcript`를 실행하고 결과를 알려 줍니다. 명령을 직접 실행하는 방법은 아래 `sessions capture`에 있습니다.
+
 보관 규칙은 다음과 같습니다.
 
 - 세션 원문은 저장소에 연결된 역할 `project` vault에만 들어갑니다. 역할이 `personal`이나 `team`인 vault에는 어떤 경우에도 쓰지 않습니다.
@@ -1051,6 +1055,12 @@ vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 �
 - 첨부는 세션 파일로 세지 않습니다. `sessions status`, `lint`, `metrics`, `sessions capture`는 첨부를 건너뜁니다. 한 번 쓴 첨부는 세션 파일처럼 고치거나 지우지 않습니다.
 
 형식과 이유 코드는 vault-graph 계약 `docs/contracts/vault-session-facts-v1.md`(vault-graph 저장소)에 있습니다.
+
+vault-graph 쪽 자동 실행 조건은 다음과 같습니다. 이 동작은 vault-graph가 정하며, 2026-11-18 vault-graph 코드로 확인했습니다.
+
+- `vg hook capture`가 세션 part 파일을 새로 쓰고 사실 추출이 켜져 있으면(`vg facts on`), vault-graph가 그 part를 대기열에 넣고 사실 추출 작업자를 백그라운드로 시작합니다. 작업자는 사실을 뽑아 이 명령으로 첨부를 씁니다.
+- 사실 추출이 꺼져 있거나 vault-graph가 없으면 첨부는 생기지 않습니다. hook이 vg 없이 `capture --direct`로 수집한 경우도 마찬가지입니다.
+- 직접 처리하려면 `vg facts worker`로 대기열을 비우고, `vg facts status`로 켜짐 여부, 대기열, 실패 기록을 봅니다.
 
 #### 훅으로 자동 수집하기
 
