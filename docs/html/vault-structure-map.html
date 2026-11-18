@@ -193,7 +193,7 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
         <tr><td>machine에 하나</td><td><code>&lt;설정 폴더&gt;/vault-builder/llm_wiki_router.py</code></td><td>MCP 라우터입니다. 상태를 두지 않고 호출마다 연결 설정을 다시 읽어 대상 vault의 <code>cli.py</code>를 실행합니다.</td></tr>
         <tr><td>machine에 하나</td><td><code>$HOME/.claude.json</code>의 <code>mcpServers.vault-wiki</code></td><td>라우터를 실행하는 MCP 서버 항목 하나입니다. 도구 이름은 <code>mcp__vault-wiki__&lt;도구&gt;</code>이고 도구는 24개입니다. <code>CLAUDE_CONFIG_DIR</code> 값이 있으면 <code>&lt;설정 폴더&gt;/.claude.json</code>입니다.</td></tr>
         <tr><td>machine에 하나</td><td><code>&lt;설정 폴더&gt;/vault-builder/vault_hooks.py</code></td><td>훅 실행기입니다. <code>&lt;설정 폴더&gt;/settings.json</code>의 SessionStart, PreCompact, SessionEnd 항목이 이 파일을 실행합니다.</td></tr>
-        <tr><td>machine에 하나</td><td><code>&lt;설정 폴더&gt;/vault-builder/vault-hooks.json</code></td><td>훅 실행기가 쓸 vg 절대 경로입니다. setup이 vg를 찾았을 때만 생깁니다.</td></tr>
+        <tr><td>machine에 하나</td><td><code>&lt;설정 폴더&gt;/vault-builder/vault-hooks.json</code></td><td>훅 실행기가 부를 외부 도구의 절대 경로입니다. setup이 그런 도구를 찾았을 때만 생깁니다. 없어도 vault-builder는 동작합니다.</td></tr>
         <tr><td>machine에 하나</td><td><code>$HOME/.local/bin/vault-builder</code>, <code>$HOME/.local/share/vault-builder</code></td><td>설치 명령이 만든 실행 파일과 builder checkout입니다.</td></tr>
         <tr><td>저장소마다</td><td><code>vault-map.json</code>의 <code>projects</code> 항목</td><td><code>link</code> 명령이 만듭니다. 저장소는 root 경로, <code>origin</code> remote URL, 폴더 이름 순서로 찾습니다.</td></tr>
         <tr><td>저장소마다</td><td>L1 메모 <code>&lt;설정 폴더&gt;/projects/&lt;key&gt;/memory/</code></td><td>Claude Code가 씁니다. vault-builder의 <code>memory-scan</code>은 읽기만 합니다.</td></tr>
@@ -215,7 +215,7 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
     }
   }
 }</pre>
-  <p class="lede">위는 형식 예시입니다. 실제 파일에는 절대 경로가 들어갑니다. <code>default_write_vault</code>와 <code>sharable</code>은 vault-graph가 읽고, MCP 라우터는 보지 않습니다.</p>
+  <p class="lede">위는 형식 예시입니다. 실제 파일에는 절대 경로가 들어갑니다. <code>default_write_vault</code>와 <code>sharable</code>은 외부 도구가 읽는 선택 필드이고, MCP 라우터는 보지 않습니다.</p>
 </section>
 
 <section>
@@ -223,19 +223,19 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
   <p class="lede">setup은 훅을 항상 설치합니다. <code>install</code>만 쓰면 <code>--with-hooks</code>를 줄 때만 훅이 생깁니다.</p>
   <div class="two">
     <div class="steps">
-      <h3>세션 시작 (SessionStart)</h3>
+      <h3>세션 시작 (SessionStart): 연결 지점</h3>
       <ol>
         <li><span>Claude Code가 <code>vault_hooks.py session-start</code>를 실행합니다.<br><span class="who">자동</span></span></li>
-        <li><span>실행기가 <code>vg hook session-start</code>를 실행합니다. vg는 <code>VAULT_GRAPH_BIN</code>, <code>vault-hooks.json</code>, <code>PATH</code> 순서로 찾습니다.</span></li>
-        <li><span>vg가 exit 0으로 끝나면 그 출력을 세션에 넣습니다. vg가 없거나 실패하거나 20초를 넘기면 아무것도 넣지 않습니다.</span></li>
+        <li><span>외부 회상 도구가 설치되어 있으면 실행기가 그 도구에 묻습니다. vault-builder 자체에는 회상 기능이 없습니다.</span></li>
+        <li><span>그 도구가 20초 안에 성공하면 출력을 세션에 넣습니다. 도구가 없거나 실패하면 아무것도 넣지 않고 세션은 평소처럼 시작합니다.</span></li>
       </ol>
     </div>
     <div class="steps">
       <h3>세션 수집 (PreCompact, SessionEnd)</h3>
       <ol>
         <li><span>Claude Code가 <code>vault_hooks.py capture</code>를 실행합니다. 제한 시간은 60초입니다.<br><span class="who">자동</span></span></li>
-        <li><span>실행기가 <code>vg hook capture</code>를 실행합니다. exit 0이면 여기서 끝납니다.</span></li>
-        <li><span>vg가 없거나 실패하면 <code>capture --direct</code>로 넘어갑니다. 세션 폴더의 저장소에 연결된 역할 <code>project</code> vault가 정확히 하나일 때만 그 vault의 <code>sessions capture</code>를 실행합니다.</span></li>
+        <li><span>외부 도구가 수집을 맡도록 설치되어 있으면 실행기가 먼저 그 도구를 부르고, 성공하면 여기서 끝납니다.</span></li>
+        <li><span>그런 도구가 없거나 실패하면 <code>capture --direct</code>로 수집합니다. 세션 폴더의 저장소에 연결된 역할 <code>project</code> vault가 정확히 하나일 때만 그 vault의 <code>sessions capture</code>를 실행합니다.</span></li>
         <li><span>수집은 <code>raw/sessions/&lt;agent&gt;/</code>에 새 part 파일만 더합니다. commit은 하지 않습니다.</span></li>
       </ol>
     </div>
@@ -251,7 +251,7 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
     <div class="steps">
       <h3>기억 제안 검토 (사람)</h3>
       <ol>
-        <li><span>agent가 추론한 기억은 <code>review propose --draft &lt;draft&gt; --summary &lt;요약&gt;</code>로 올라갑니다. wiki는 바뀌지 않습니다.<br><span class="who">vault-graph나 agent가 실행</span></span></li>
+        <li><span>agent가 추론한 기억은 <code>review propose --draft &lt;draft&gt; --summary &lt;요약&gt;</code>로 올라갑니다. wiki는 바뀌지 않습니다.<br><span class="who">agent나 외부 도구가 실행</span></span></li>
         <li><span><code>scratch/review/</code>에 pending 항목과 draft 사본이 생깁니다.</span></li>
         <li><span>사람이 <code>review list</code>로 봅니다.</span></li>
         <li><span>사람이 <code>review resolve &lt;항목&gt; --status accepted --resolution &lt;이유&gt;</code>를 실행하면 draft를 발행합니다. <code>rejected</code>나 <code>resolved</code>는 항목만 닫고 <code>wiki/log.md</code>에 기록합니다.</span></li>
@@ -270,7 +270,7 @@ pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; 
         <tr><td>저장소 연결</td><td><code>vault-map.json</code>을 손으로 고침, 폴더 이름으로만 찾음</td><td><code>link</code>, <code>unlink</code>, <code>list</code> 명령, root·remote·이름 순서로 찾음(1.0.0)</td></tr>
         <tr><td>세션 원문</td><td>없음</td><td>project vault의 <code>raw/sessions/</code>(2.0.0), 사실 첨부 <code>.facts.md</code>(5.1.0)</td></tr>
         <tr><td>설치</td><td><code>install</code>을 vault마다 실행</td><td>설치 명령 한 줄이 <code>setup</code>을 실행해 vault, 훅, 연결, MCP, doctor를 끝냄(3.0.0~4.1.0)</td></tr>
-        <tr><td>세션 시작 회상과 기억 정리</td><td><code>/project-memory</code> skill, <code>recall.sh</code>, <code>memory-cleanup</code> skill, <code>wiki/maps/projects/&lt;id&gt;.md</code> 요약</td><td>모두 없앰. vault-graph가 맡음(5.0.0)</td></tr>
+        <tr><td>세션 시작 회상과 기억 정리</td><td><code>/project-memory</code> skill, <code>recall.sh</code>, <code>memory-cleanup</code> skill, <code>wiki/maps/projects/&lt;id&gt;.md</code> 요약</td><td>모두 없앰(5.0.0). vault-builder는 더 하지 않음</td></tr>
       </tbody>
     </table>
   </div>

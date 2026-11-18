@@ -41,23 +41,8 @@ Options, upgrades of older vaults, and uninstall: [docs/usage.md](docs/usage.md)
 
 ## What runs automatically
 
-After install, Claude Code runs three steps for you. You do not need to do
-anything. Each step can also be run by hand.
-
-### When a session starts: recall
-
-Each time you start a Claude Code session, vault-builder asks vault-graph
-(`vg`) for memories that fit this repository and adds them to the start of the
-session. If vault-graph is not installed or fails, nothing is added and the
-session starts as usual.
-
-By hand, in the repository folder:
-
-```bash
-echo '{}' | vg hook session-start
-```
-
-Details: [docs/usage.md](docs/usage.md) §17.
+After install, Claude Code runs one step for you: session capture. You do not
+need to do anything, and you can also run it by hand.
 
 ### Before compacting and when a session ends: session capture
 
@@ -77,23 +62,22 @@ python3 tools/wiki/cli.py sessions capture --transcript "$HOME/.claude/projects/
 
 Details: [docs/usage.md](docs/usage.md) §17.7.
 
-### After a capture: fact attachments
+Install also adds a hook at session start. On its own it adds nothing to the
+session. It only passes along what an optional recall tool returns, when one is
+installed. Details: [docs/usage.md](docs/usage.md) §17.
 
-If vault-graph is installed and fact extraction is on (`vg facts on`),
-vault-graph reads each newly saved session file, picks out dated facts, and
-saves them next to it in a file of the same name ending in `.facts.md`. Before writing, vault-builder
-checks every fact against the session file. An attachment is never
-overwritten.
+## Commands you run yourself
 
-By hand, `vg facts worker` processes the waiting files and `vg facts status`
-shows the queue. To write an attachment from your own facts file, run this in
-the project vault folder:
+- Fact attachment: adds a checked list of dated facts next to one saved
+  session file, as a file of the same name ending in `.facts.md`. Every fact is
+  checked against the session file first, and an existing attachment is never
+  overwritten. Run it in the project vault folder:
 
-```bash
-python3 tools/wiki/cli.py sessions attach-facts --session <session file> --facts <facts.json>
-```
+  ```bash
+  python3 tools/wiki/cli.py sessions attach-facts --session <session file> --facts <facts.json>
+  ```
 
-Details: [docs/usage.md](docs/usage.md) §17.7.
+  Details: [docs/usage.md](docs/usage.md) §17.7.
 
 ## What needs you
 

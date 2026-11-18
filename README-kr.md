@@ -40,22 +40,8 @@ curl -fsSL https://raw.githubusercontent.com/cutehackers/vault-builder/main/scri
 
 ## 자동으로 실행되는 일
 
-설치가 끝나면 Claude Code가 아래 세 가지를 알아서 실행합니다. 따로 할 일은
-없습니다. 원하면 각 단계를 직접 실행할 수도 있습니다.
-
-### 세션을 시작할 때: 기억 불러오기
-
-Claude Code 세션을 시작할 때마다 vault-builder가 vault-graph(`vg`)에게 이
-저장소에 맞는 기억을 물어보고, 받은 내용을 세션 앞부분에 넣습니다. vault-graph가
-없거나 실패하면 아무것도 넣지 않고 세션은 평소처럼 시작합니다.
-
-직접 실행하려면 저장소 폴더에서 아래 명령을 실행합니다.
-
-```bash
-echo '{}' | vg hook session-start
-```
-
-자세한 내용: [docs/usage.md](docs/usage.md) 17절
+설치가 끝나면 Claude Code가 세션 보관 한 가지를 알아서 실행합니다. 따로 할 일은
+없고, 원하면 직접 실행할 수도 있습니다.
 
 ### 대화를 압축하기 전과 세션이 끝날 때: 세션 보관
 
@@ -74,22 +60,21 @@ python3 tools/wiki/cli.py sessions capture --transcript "$HOME/.claude/projects/
 
 자세한 내용: [docs/usage.md](docs/usage.md) 17.7절
 
-### 세션을 보관한 다음: 사실 첨부
+설치는 세션 시작 hook도 더합니다. 이 hook은 혼자서는 세션에 아무것도 넣지
+않습니다. 선택으로 설치한 회상 도구가 있을 때 그 도구가 돌려준 내용만 넣습니다.
+자세한 내용: [docs/usage.md](docs/usage.md) 17절
 
-vault-graph가 설치되어 있고 사실 추출이 켜져 있으면(`vg facts on`), vault-graph가
-새로 저장된 세션 파일을 읽고 날짜가 붙은 사실을 골라 같은 이름에 `.facts.md`가
-붙은 파일로 옆에 저장합니다. 쓰기 전에 vault-builder가 사실 하나하나를 세션
-파일과 대조합니다. 이미 있는 첨부는 덮어쓰지 않습니다.
+## 직접 실행하는 명령
 
-직접 하려면 `vg facts worker`로 기다리는 파일을 처리하고, `vg facts status`로
-대기열을 봅니다. 직접 만든 사실 파일로 첨부를 쓰려면 project vault 폴더에서 아래
-명령을 실행합니다.
+- 사실 첨부: 보관한 세션 파일 하나 옆에, 같은 이름에 `.facts.md`가 붙은 파일로
+  날짜가 붙은 사실 목록을 더합니다. 쓰기 전에 사실 하나하나를 세션 파일과
+  대조하고, 이미 있는 첨부는 덮어쓰지 않습니다. project vault 폴더에서 실행합니다.
 
-```bash
-python3 tools/wiki/cli.py sessions attach-facts --session <세션 파일> --facts <facts.json>
-```
+  ```bash
+  python3 tools/wiki/cli.py sessions attach-facts --session <세션 파일> --facts <facts.json>
+  ```
 
-자세한 내용: [docs/usage.md](docs/usage.md) 17.7절
+  자세한 내용: [docs/usage.md](docs/usage.md) 17.7절
 
 ## 사람이 할 일
 
