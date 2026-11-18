@@ -7,8 +7,8 @@ vault-builder also links your vaults to your code repositories and saves your
 Claude Code sessions.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vault-builder-flow-dark.svg">
-  <img src="docs/assets/vault-builder-flow-light.svg" width="900" alt="A code repository is linked through vault-map.json to its personal, team, and project vaults. At PreCompact or SessionEnd, the capture hook runs sessions capture, which writes a new file to the project vault's raw/sessions/. You commit it later.">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cutehackers/vault-builder/main/docs/assets/vault-builder-flow-dark.svg">
+  <img src="https://raw.githubusercontent.com/cutehackers/vault-builder/main/docs/assets/vault-builder-flow-light.svg" width="900" alt="A code repository is linked through vault-map.json to its personal, team, and project vaults. At PreCompact or SessionEnd, the capture hook runs sessions capture, which writes a new file to the project vault's raw/sessions/. You commit it later.">
 </picture>
 
 Solid accent border: runs automatically. Dashed border: you do it. `setup` also runs
