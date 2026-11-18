@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="456" viewBox="0 0 900 456" role="img" aria-label="vault-builder flow" font-family='-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Segoe UI", sans-serif'>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94A3B8"/></marker>
+<marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4F46E5"/></marker>
+<marker id="arrowHuman" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#334155"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="899" height="455" rx="16" fill="#F8FAFC" stroke="#E2E8F0"/>
+<text x="24" y="36" font-size="12" font-weight="700" fill="#64748B" text-anchor="start">1  저장소 연결</text>
+<text x="24" y="300" font-size="12" font-weight="700" fill="#64748B" text-anchor="start">2  세션 보관</text>
+<rect x="24" y="60" width="176" height="56" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+<text x="38" y="84" font-size="14" font-weight="600" fill="#0F172A" text-anchor="start">코드 저장소</text>
+<text x="38" y="103" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">내 git 프로젝트</text>
+<rect x="236" y="60" width="176" height="56" rx="10" fill="#FFFFFF" stroke="#334155" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="250" y="84" font-size="13.5" font-weight="600" fill="#0F172A" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault-builder link</text>
+<text x="250" y="103" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">사람 또는 setup이 실행</text>
+<rect x="448" y="60" width="176" height="56" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+<text x="462" y="84" font-size="13.5" font-weight="600" fill="#0F172A" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault-map.json</text>
+<text x="462" y="103" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">저장소가 쓰는 vault 목록</text>
+<path d="M200 88.0 H233" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrowHuman)"/>
+<path d="M412 88.0 H445" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrowHuman)"/>
+<rect x="692" y="52" width="184" height="48" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+<text x="706" y="72" font-size="14" font-weight="600" fill="#0F172A" text-anchor="start">personal vault</text>
+<text x="706" y="89" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">개인 note</text>
+<rect x="692" y="112" width="184" height="48" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+<text x="706" y="132" font-size="14" font-weight="600" fill="#0F172A" text-anchor="start">team vault</text>
+<text x="706" y="149" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">팀이 함께 쓰는 note</text>
+<rect x="692" y="172" width="184" height="100" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1"/>
+<text x="706" y="194" font-size="14" font-weight="600" fill="#0F172A" text-anchor="start">project vault</text>
+<text x="706" y="212" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">이 저장소 전용</text>
+<rect x="706" y="228" width="156" height="28" rx="6" fill="#F1F5F9" stroke="#CBD5E1"/>
+<text x="718" y="246.5" font-size="12.5" font-weight="500" fill="#0F172A" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>raw/sessions/</text>
+<path d="M624 88.0 C658 88.0 658 76.0 689 76.0" fill="none" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M624 88.0 C658 88.0 658 136.0 689 136.0" fill="none" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M624 88.0 C658 88.0 658 200 689 200" fill="none" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="24" y="318" width="176" height="56" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+<text x="38" y="342" font-size="14" font-weight="600" fill="#3730A3" text-anchor="start">Claude Code 세션</text>
+<text x="38" y="361" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">PreCompact · SessionEnd</text>
+<rect x="236" y="318" width="176" height="56" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+<text x="250" y="342" font-size="14" font-weight="600" fill="#3730A3" text-anchor="start">보관 hook</text>
+<text x="250" y="361" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>vault_hooks.py</text>
+<rect x="448" y="318" width="176" height="56" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+<text x="462" y="342" font-size="13.5" font-weight="600" fill="#3730A3" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>sessions capture</text>
+<text x="462" y="361" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">새 파일을 씀</text>
+<path d="M200 346.0 H233" fill="none" stroke="#4F46E5" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<path d="M412 346.0 H445" fill="none" stroke="#4F46E5" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<path d="M624 346.0 H646 Q656 346.0 656 336.0 V252 Q656 242 666 242 H703" fill="none" stroke="#4F46E5" stroke-width="1.6" marker-end="url(#arrowAccent)"/>
+<rect x="692" y="318" width="184" height="56" rx="10" fill="#FFFFFF" stroke="#334155" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="706" y="342" font-size="13.5" font-weight="600" fill="#0F172A" text-anchor="start" font-family='ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'>git commit</text>
+<text x="706" y="361" font-size="12.5" font-weight="400" fill="#64748B" text-anchor="start">사람이 commit</text>
+<path d="M784.0 272 V315" fill="none" stroke="#334155" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowHuman)"/>
+<text x="794.0" y="299.0" font-size="12" font-weight="400" fill="#64748B" text-anchor="start">나중에</text>
+<line x1="24" y1="394" x2="876" y2="394" stroke="#E2E8F0"/>
+<rect x="24" y="412" width="28" height="18" rx="5" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+<text x="62" y="425.5" font-size="13" font-weight="400" fill="#0F172A" text-anchor="start">자동으로 실행</text>
+<rect x="189" y="412" width="28" height="18" rx="5" fill="#FFFFFF" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="227" y="425.5" font-size="13" font-weight="400" fill="#0F172A" text-anchor="start">사람이 하는 일</text>
+<rect x="367" y="412" width="28" height="18" rx="5" fill="#FFFFFF" stroke="#CBD5E1"/>
+<text x="405" y="425.5" font-size="13" font-weight="400" fill="#0F172A" text-anchor="start">파일, 폴더, vault</text>
+</svg>

@@ -5,34 +5,12 @@ vault는 markdown wiki 페이지를 담은 git 폴더입니다. 원본 자료는
 agent가 그 자료로 페이지를 쓰고, 검사를 통과한 페이지만 `wiki/`에 들어갑니다.
 vault-builder는 vault를 코드 저장소에 연결하고 Claude Code 세션도 보관합니다.
 
-```mermaid
-flowchart LR
-    repo["코드 저장소"]
-    link["vault-builder link"]
-    map["vault-map.json"]
-    personal["personal vault"]
-    team["team vault"]
-    project["project vault"]
-    event["Claude Code 세션<br/>PreCompact 또는 SessionEnd"]
-    hook["hook: vault_hooks.py capture"]
-    capture["sessions capture"]
-    commit["git commit"]
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vault-builder-flow-ko-dark.svg">
+  <img src="docs/assets/vault-builder-flow-ko-light.svg" width="900" alt="코드 저장소는 vault-map.json을 통해 personal, team, project vault에 연결됩니다. PreCompact나 SessionEnd 때 보관 hook이 sessions capture를 실행해 project vault의 raw/sessions/에 새 파일을 쓰고, 사람이 나중에 commit합니다.">
+</picture>
 
-    repo --> link --> map
-    map --> personal
-    map --> team
-    map --> project
-    event --> hook --> capture
-    capture -->|"raw/sessions/에 새 파일"| project
-    project --> commit
-
-    classDef auto stroke-width:3px
-    classDef manual stroke-dasharray:6 4
-    class event,hook,capture auto
-    class link,commit manual
-```
-
-굵은 테두리는 자동으로 실행되는 단계이고, 점선 테두리는 사람이 하는 단계입니다.
+색 테두리는 자동으로 실행되는 단계이고, 점선 테두리는 사람이 하는 단계입니다.
 설치할 때 `setup`도 저장소마다 `link`를 한 번 실행합니다. 세션 파일은 project
 vault에만 들어가고, personal이나 team vault에는 들어가지 않습니다.
 
