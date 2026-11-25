@@ -27,7 +27,7 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ### Added
 
-- `sessions attach-facts`가 입력 `vault-session-facts-input/2`를 받아 `vault-session-facts/v2` 첨부를 쓴다. 사실마다 종류(decision, change, problem, preference, question), 개념 태그, 코드 앵커(저장소 기준 파일 경로, commit)를 더할 수 있고, 형식이 틀리면 `bad_input`, `bad_kind`, `bad_concept`, `bad_anchor`, `secret`로 거부한다. `/1` 입력과 v1 첨부는 그대로 쓰고 읽힌다. 계약은 `docs/contracts/vault-session-facts-v2.md`에 있다.
+- `sessions attach-facts`가 입력 `vault-session-facts-input/2`를 받아 `vault-session-facts/v2` 첨부를 쓴다. 사실마다 종류(decision, change, problem, preference, question), 개념 태그, 코드 앵커(파일 경로와 commit, 항목마다 저장소 식별자와 그 저장소 root 기준 경로)를 더할 수 있고, 형식이 틀리면 `bad_input`, `bad_kind`, `bad_concept`, `bad_anchor`, `secret`로 거부한다. `/1` 입력과 v1 첨부는 그대로 쓰고 읽힌다. 계약은 `docs/contracts/vault-session-facts-v2.md`에 있다.
 
 ### Changed
 

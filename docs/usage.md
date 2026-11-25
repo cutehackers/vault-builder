@@ -1048,7 +1048,7 @@ vault가 git 작업 트리가 아니면 `skipped`를 출력하고 exit 0으로 �
 
 - `--session` 값은 이 vault의 `raw/sessions/` 아래 `vault-session/v2` part 파일입니다. vault 루트 기준 상대 경로나 절대 경로를 받습니다.
 - `--facts` 값은 입력 JSON(`vault-session-facts-input/1` 또는 `/2`)입니다. 읽기만 하고, vault 밖 파일이어도 됩니다.
-- 입력이 `/2`이면 사실마다 종류(`kind`), 개념 태그(`concepts`), 코드 앵커(`anchors.files`, `anchors.commits`)를 더할 수 있고, 첨부는 `v2`로 씁니다. 형식과 검사 규칙은 `docs/contracts/vault-session-facts-v2.md`에 있습니다. `/1` 입력은 지금처럼 `v1` 첨부를 씁니다.
+- 입력이 `/2`이면 사실마다 종류(`kind`), 개념 태그(`concepts`), 코드 앵커(`anchors.files`, `anchors.commits`, 항목마다 저장소 식별자 포함)를 더할 수 있고, 첨부는 `v2`로 씁니다. 형식과 검사 규칙은 `docs/contracts/vault-session-facts-v2.md`에 있습니다. `/1` 입력은 지금처럼 `v1` 첨부를 씁니다.
 - 쓰기 전에 입력을 part 파일의 sha256, `session_id`, 교환 id와 대조하고, 문장 길이, 날짜, 비밀값 가림 규칙을 검사합니다.
 - 결과는 세 가지입니다. `written`은 첨부를 새로 쓴 경우이고 exit 0입니다. `exists`는 첨부가 이미 있는 경우이고, 검사 전에 멈추며 덮어쓰지 않고 exit 0입니다. `rejected`는 검사가 하나라도 실패한 경우이고, 이유 코드를 출력하고 파일을 쓰지 않으며 exit 1입니다.
 - 첨부는 세션 파일로 세지 않습니다. `sessions status`, `lint`, `metrics`, `sessions capture`는 첨부를 건너뜁니다. 한 번 쓴 첨부는 세션 파일처럼 고치거나 지우지 않습니다.

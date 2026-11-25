@@ -1437,7 +1437,8 @@ def _resolve(path: Path) -> Path:
 # Session fact attachment (vault-graph contracts vault-session-facts/v1 and v2).
 # The only write path for <part>.facts.md. It writes one new file next to the part and never overwrites.
 # Input schema /1 writes a v1 attachment. Input schema /2 writes a v2 attachment, whose facts may also carry
-# a kind, concept tags and code anchors (repository-relative files and commits).
+# a kind, concept tags and code anchors. Each file and commit anchor names its repository, and a file path is
+# relative to that repository's root. The attachment writes an anchor as <repo>:<path> or <repo>:<commit>.
 
 FACTS_SCHEMA = "vault-session-facts/v1"
 FACTS_INPUT_SCHEMA = "vault-session-facts-input/1"
@@ -1456,6 +1457,10 @@ _FACTS_INPUT_KEYS = ("schema", "session_id", "source_sha256", "extractor", "mode
 _FACT_KEYS = ("date", "text", "exchange_id")
 _FACT_V2_OPTIONAL_KEYS = ("kind", "concepts", "anchors")
 _FACT_ANCHOR_KEYS = ("files", "commits")
+# Item keys for anchors.files and anchors.commits, in attachment order: repository id, then the value.
+_FACT_ANCHOR_ITEM_KEYS = {"files": ("repo", "path"), "commits": ("repo", "commit")}
+FACT_REPO_MAX_CHARS = 128
+_REPO_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*")
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _DRIVE_RE = re.compile(r"[A-Za-z]:")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -1572,7 +1577,9 @@ def _fact_lines(fact: dict[str, Any], v2: bool) -> str:
     anchors = fact.get("anchors") or {}
     for key in _FACT_ANCHOR_KEYS:
         if anchors.get(key):
-            lines.append(f"  - {key}: {', '.join(anchors[key])}")
+            repo_key, value_key = _FACT_ANCHOR_ITEM_KEYS[key]
+            items = ", ".join(f"{item[repo_key]}:{item[value_key]}" for item in anchors[key])
+            lines.append(f"  - {key}: {items}")
     return "".join(line + "\n" for line in lines)
 
 
@@ -1687,8 +1694,21 @@ def _check_fact_v2_shape(number: int, fact: dict[str, Any]) -> None:
         if unknown:
             raise _FactsRejected("bad_input", f"Fact {number} anchors has unknown keys: {', '.join(unknown)}.")
         for key in _FACT_ANCHOR_KEYS:
-            if key in anchors and not _is_string_list(anchors[key]):
-                raise _FactsRejected("bad_input", f"Fact {number} anchors.{key} must be a list of strings.")
+            if key not in anchors:
+                continue
+            item_keys = _FACT_ANCHOR_ITEM_KEYS[key]
+            items = anchors[key]
+            if not isinstance(items, list) or not all(
+                isinstance(item, dict)
+                and set(item) == set(item_keys)
+                and all(isinstance(item[item_key], str) for item_key in item_keys)
+                for item in items
+            ):
+                raise _FactsRejected(
+                    "bad_input",
+                    f"Fact {number} anchors.{key} must be a list of objects with exactly the string keys "
+                    f"{' and '.join(item_keys)}.",
+                )
 
 
 def _is_string_list(value: object) -> bool:
@@ -1746,25 +1766,30 @@ def _check_fact_v2(number: int, fact: dict[str, Any]) -> None:
     if len(set(concepts)) != len(concepts):
         raise _FactsRejected("bad_concept", f"Fact {number} repeats a concept.")
     anchors = fact.get("anchors", {})
-    files = anchors.get("files", [])
-    commits = anchors.get("commits", [])
+    files = [(item["repo"], item["path"]) for item in anchors.get("files", [])]
+    commits = [(item["repo"], item["commit"]) for item in anchors.get("commits", [])]
     if len(files) > FACT_FILES_MAX or len(commits) > FACT_COMMITS_MAX:
         raise _FactsRejected(
             "bad_anchor", f"Fact {number} has more than {FACT_FILES_MAX} files or {FACT_COMMITS_MAX} commits."
         )
-    for path in files:
+    for repo, _ in (*files, *commits):
+        if len(repo) > FACT_REPO_MAX_CHARS or not _REPO_ID_RE.fullmatch(repo):
+            raise _FactsRejected("bad_anchor", f"Fact {number} repo {repo!r} is not a repository id.")
+    for _, path in files:
         if not _is_repo_relative_path(path):
             raise _FactsRejected("bad_anchor", f"Fact {number} file {path!r} is not a repository-relative POSIX path.")
-    for commit in commits:
+    for _, commit in commits:
         if not _COMMIT_RE.fullmatch(commit):
             raise _FactsRejected(
                 "bad_anchor", f"Fact {number} commit {commit!r} is not a full lowercase 40 or 64 character hex id."
             )
     if len(set(files)) != len(files) or len(set(commits)) != len(commits):
-        raise _FactsRejected("bad_anchor", f"Fact {number} repeats a file or commit.")
-    for value in (*concepts, *files):
+        raise _FactsRejected("bad_anchor", f"Fact {number} repeats a file or commit in the same repository.")
+    for value in (*concepts, *(repo for repo, _ in (*files, *commits)), *(path for _, path in files)):
         if redact(value)[1]:
-            raise _FactsRejected("secret", f"Fact {number} concept or file holds a value the vault redaction rules hide.")
+            raise _FactsRejected(
+                "secret", f"Fact {number} concept, repository or file holds a value the vault redaction rules hide."
+            )
 
 
 def _is_list_item(value: str, max_chars: int) -> bool:
