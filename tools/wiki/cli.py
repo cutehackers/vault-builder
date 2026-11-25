@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     sessions_attach_facts = sessions_subcommands.add_parser(
         "attach-facts",
         description=(
-            "Write the immutable fact attachment <part>.facts.md (vault-session-facts/v1) next to one "
+            "Write the immutable fact attachment <part>.facts.md (vault-session-facts/v1 or v2) next to one "
             "vault-session/v2 part file of this vault, after checking the facts JSON against the part. "
             "Never overwrites: an existing attachment gives exists. Exit 0 for written or exists, 1 for rejected."
         ),
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         "--session", required=True, help="Part file under raw/sessions/, relative to the vault root or absolute."
     )
     sessions_attach_facts.add_argument(
-        "--facts", required=True, help="Input JSON (vault-session-facts-input/1). Read only; may be outside the vault."
+        "--facts", required=True, help="Input JSON (vault-session-facts-input/1 or /2). Read only; may be outside the vault."
     )
     sessions_attach_facts.add_argument("--json", action="store_true")
 

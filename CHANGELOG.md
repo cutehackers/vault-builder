@@ -25,6 +25,10 @@ vault-builder의 릴리스별 변경을 기록한다. 형식은 [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+
+- `sessions attach-facts`가 입력 `vault-session-facts-input/2`를 받아 `vault-session-facts/v2` 첨부를 쓴다. 사실마다 종류(decision, change, problem, preference, question), 개념 태그, 코드 앵커(저장소 기준 파일 경로, commit)를 더할 수 있고, 형식이 틀리면 `bad_input`, `bad_kind`, `bad_concept`, `bad_anchor`, `secret`로 거부한다. `/1` 입력과 v1 첨부는 그대로 쓰고 읽힌다. 계약은 `docs/contracts/vault-session-facts-v2.md`에 있다.
+
 ### Changed
 
 - `README.md`와 `README-kr.md`를 짧게 다시 쓴다. vault-builder 소개, 설치, 설치 다음 할 일, 자동으로 실행되는 일(세션 보관과 직접 실행 방법), 직접 실행하는 명령(사실 첨부), 사람이 할 일만 두고, 자세한 내용은 `docs/usage.md`의 절로 연결한다. README와 두 html 페이지는 vault-builder 밖의 도구를 설명하지 않는다.
