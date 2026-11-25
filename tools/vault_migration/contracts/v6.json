@@ -120,7 +120,7 @@
       "mode": "0644",
       "path": "docs/usage.md",
       "policy": "replace-if-unmodified",
-      "sha256": "161ed9e6f9608e70bc7403ffa9542c6d008e4731fd8ff37a731268dab14c45f6"
+      "sha256": "ea02eba11b5cf1678f903e5e886d3ebdf6cbfb74f09a236d7d0c40194523d662"
     },
     "scripts/release_gate.sh": {
       "mode": "0755",
@@ -318,7 +318,7 @@
       "mode": "0644",
       "path": "tools/wiki/lib/session_capture.py",
       "policy": "replace-if-unmodified",
-      "sha256": "359a917f584c6bb9dcb9209f5b3214f90d71fee922ed28be3351d237b4cc5dc6"
+      "sha256": "451de7285d8d2aaf7cf78ade47feadbe0ff8f8c137287a1e76811097ef045ce9"
     },
     "tools/wiki/lib/source_registry.py": {
       "mode": "0644",

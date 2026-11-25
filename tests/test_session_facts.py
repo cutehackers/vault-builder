@@ -300,6 +300,15 @@ class AttachFactsTests(unittest.TestCase):
 
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
+REPO = "github.com/cutehackers/vault-builder"
+
+
+def _file(path: str, repo: str = REPO) -> dict:
+    return {"repo": repo, "path": path}
+
+
+def _commit(commit: str, repo: str = REPO) -> dict:
+    return {"repo": repo, "commit": commit}
 
 
 class AttachFactsV2Tests(AttachFactsTests):
@@ -318,7 +327,10 @@ class AttachFactsV2Tests(AttachFactsTests):
             "exchange_id": "x0001",
             "kind": "decision",
             "concepts": ["사실 계약", "session-facts"],
-            "anchors": {"files": ["tools/wiki/cli.py", "docs/usage.md"], "commits": [COMMIT]},
+            "anchors": {
+                "files": [_file("tools/wiki/cli.py"), _file("src/main.py", repo="vault-graph")],
+                "commits": [_commit(COMMIT)],
+            },
         }
         fact.update(overrides)
         return [fact]
@@ -351,8 +363,8 @@ class AttachFactsV2Tests(AttachFactsTests):
             "- 2023-05-20 사용자는 사실 계약 v2를 승인했다. (exchange x0001)\n"
             "  - kind: decision\n"
             "  - concepts: 사실 계약, session-facts\n"
-            "  - files: tools/wiki/cli.py, docs/usage.md\n"
-            f"  - commits: {COMMIT}\n"
+            f"  - files: {REPO}:tools/wiki/cli.py, vault-graph:src/main.py\n"
+            f"  - commits: {REPO}:{COMMIT}\n"
             "- 2023-05-21 The user thanked the assistant. (exchange x0002)\n"
             "- 2023-05-21 Only a kind. (exchange x0002)\n"
             "  - kind: preference\n",
@@ -375,7 +387,10 @@ class AttachFactsV2Tests(AttachFactsTests):
                 self.assertEqual("written", result.status, result.detail)
 
     def test_sha256_commit_and_limits_are_accepted(self):
-        anchors = {"files": [f"src/f{i}.py" for i in range(32)], "commits": ["a" * 64] + [f"{i:040x}" for i in range(15)]}
+        anchors = {
+            "files": [_file(f"src/f{i}.py") for i in range(31)] + [_file("src/f0.py", repo="a" * 128)],
+            "commits": [_commit("a" * 64)] + [_commit(f"{i:040x}") for i in range(14)] + [_commit(COMMIT, repo="other")],
+        }
         concepts = [f"c{i}" for i in range(7)] + ["가" * 64]
         code, result = self._attach(self._input(facts=self._v2_fact(anchors=anchors, concepts=concepts)))
         self.assertEqual(0, code, result)
@@ -386,10 +401,16 @@ class AttachFactsV2Tests(AttachFactsTests):
             "kind not string": self._v2_fact(kind=1),
             "concepts not list": self._v2_fact(concepts="a, b"),
             "concept not string": self._v2_fact(concepts=["a", 2]),
-            "anchors not object": self._v2_fact(anchors=["tools/wiki/cli.py"]),
+            "anchors not object": self._v2_fact(anchors=[_file("a.py")]),
             "unknown anchor key": self._v2_fact(anchors={"symbols": ["f"]}),
-            "files not list": self._v2_fact(anchors={"files": "a.py"}),
-            "commit not string": self._v2_fact(anchors={"commits": [1]}),
+            "files not list": self._v2_fact(anchors={"files": _file("a.py")}),
+            "file as bare string": self._v2_fact(anchors={"files": ["a.py"]}),
+            "file without repo": self._v2_fact(anchors={"files": [{"path": "a.py"}]}),
+            "file with extra key": self._v2_fact(anchors={"files": [{"repo": REPO, "path": "a.py", "line": "3"}]}),
+            "file with commit key": self._v2_fact(anchors={"files": [{"repo": REPO, "commit": COMMIT}]}),
+            "repo not string": self._v2_fact(anchors={"files": [{"repo": None, "path": "a.py"}]}),
+            "commit as bare string": self._v2_fact(anchors={"commits": [COMMIT]}),
+            "commit not string": self._v2_fact(anchors={"commits": [{"repo": REPO, "commit": 1}]}),
         }
         for name, facts in cases.items():
             with self.subTest(name=name):
@@ -417,24 +438,32 @@ class AttachFactsV2Tests(AttachFactsTests):
 
     def test_bad_anchor(self):
         cases = {
-            "absolute": {"files": ["/Users/me/repo/a.py"]},
-            "home": {"files": ["~/repo/a.py"]},
-            "drive": {"files": ["C:/repo/a.py"]},
-            "backslash": {"files": ["src\\a.py"]},
-            "dot": {"files": ["./a.py"]},
-            "dotdot": {"files": ["src/../a.py"]},
-            "empty segment": {"files": ["src//a.py"]},
-            "trailing slash": {"files": ["src/"]},
-            "comma": {"files": ["a,b.py"]},
-            "empty": {"files": [""]},
-            "too long": {"files": ["a" * 301]},
-            "too many files": {"files": [f"f{i}.py" for i in range(33)]},
-            "repeated file": {"files": ["a.py", "a.py"]},
-            "short commit": {"commits": ["0123456"]},
-            "upper commit": {"commits": [COMMIT.upper()]},
-            "not hex": {"commits": ["g" * 40]},
-            "too many commits": {"commits": [f"{i:040x}" for i in range(17)]},
-            "repeated commit": {"commits": [COMMIT, COMMIT]},
+            "absolute": {"files": [_file("/Users/me/repo/a.py")]},
+            "home": {"files": [_file("~/repo/a.py")]},
+            "drive": {"files": [_file("C:/repo/a.py")]},
+            "backslash": {"files": [_file("src\\a.py")]},
+            "dot": {"files": [_file("./a.py")]},
+            "dotdot": {"files": [_file("src/../a.py")]},
+            "empty segment": {"files": [_file("src//a.py")]},
+            "trailing slash": {"files": [_file("src/")]},
+            "comma": {"files": [_file("a,b.py")]},
+            "empty": {"files": [_file("")]},
+            "too long": {"files": [_file("a" * 301)]},
+            "too many files": {"files": [_file(f"f{i}.py") for i in range(33)]},
+            "repeated file": {"files": [_file("a.py"), _file("a.py")]},
+            "short commit": {"commits": [_commit("0123456")]},
+            "upper commit": {"commits": [_commit(COMMIT.upper())]},
+            "not hex": {"commits": [_commit("g" * 40)]},
+            "too many commits": {"commits": [_commit(f"{i:040x}") for i in range(17)]},
+            "repeated commit": {"commits": [_commit(COMMIT), _commit(COMMIT)]},
+            "empty repo": {"files": [_file("a.py", repo="")]},
+            "repo with colon": {"files": [_file("a.py", repo="host:repo")]},
+            "repo with space": {"files": [_file("a.py", repo="my repo")]},
+            "repo with comma": {"commits": [_commit(COMMIT, repo="a,b")]},
+            "repo leading slash": {"files": [_file("a.py", repo="/repo")]},
+            "repo trailing slash": {"files": [_file("a.py", repo="repo/")]},
+            "repo dotdot": {"files": [_file("a.py", repo="host/../repo")]},
+            "repo too long": {"files": [_file("a.py", repo="a" * 129)]},
         }
         for name, anchors in cases.items():
             with self.subTest(name=name):
@@ -443,7 +472,7 @@ class AttachFactsV2Tests(AttachFactsTests):
     def test_secret_in_concept_or_file(self):
         for fact in (
             self._v2_fact(concepts=["password=hunter2abc"]),
-            self._v2_fact(anchors={"files": ["ghp_abcdefghijklmnopqrstuvwxyz0123.txt"]}),
+            self._v2_fact(anchors={"files": [_file("ghp_abcdefghijklmnopqrstuvwxyz0123.txt")]}),
         ):
             with self.subTest(fact=fact[0]):
                 self._assert_rejected("secret", self._input(facts=fact))
@@ -457,7 +486,7 @@ class AttachFactsV2Tests(AttachFactsTests):
                 )
                 self._assert_rejected("bad_concept", self._input(facts=self._v2_fact(concepts=[f"a{separator}b"])))
                 self._assert_rejected(
-                    "bad_anchor", self._input(facts=self._v2_fact(anchors={"files": [f"a{separator}b.py"]}))
+                    "bad_anchor", self._input(facts=self._v2_fact(anchors={"files": [_file(f"a{separator}b.py")]}))
                 )
 
     def test_v1_text_rule_is_unchanged(self):
@@ -472,7 +501,7 @@ class AttachFactsV2Tests(AttachFactsTests):
     def test_reason_code_order(self):
         cases = (
             ("bad_kind", self._v2_fact(kind="rule", concepts=[""])),
-            ("bad_concept", self._v2_fact(concepts=[""], anchors={"files": ["/abs"]})),
+            ("bad_concept", self._v2_fact(concepts=[""], anchors={"files": [_file("/abs")]})),
             ("secret", self._v2_fact(text="password=hunter2abc 이다.", kind="rule")),
             ("bad_concept", self._v2_fact(concepts=[""]) + self._fact(exchange_id="x0003")),
         )
