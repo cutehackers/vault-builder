@@ -18,6 +18,7 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -1433,15 +1434,30 @@ def _resolve(path: Path) -> Path:
         return Path(path).expanduser().absolute()
 
 
-# Session fact attachment (vault-graph contract vault-session-facts/v1, spec D25-D27).
+# Session fact attachment (vault-graph contracts vault-session-facts/v1 and v2).
 # The only write path for <part>.facts.md. It writes one new file next to the part and never overwrites.
+# Input schema /1 writes a v1 attachment. Input schema /2 writes a v2 attachment, whose facts may also carry
+# a kind, concept tags and code anchors (repository-relative files and commits).
 
 FACTS_SCHEMA = "vault-session-facts/v1"
 FACTS_INPUT_SCHEMA = "vault-session-facts-input/1"
+FACTS_SCHEMA_V2 = "vault-session-facts/v2"
+FACTS_INPUT_SCHEMA_V2 = "vault-session-facts-input/2"
+_FACTS_SCHEMA_BY_INPUT = {FACTS_INPUT_SCHEMA: FACTS_SCHEMA, FACTS_INPUT_SCHEMA_V2: FACTS_SCHEMA_V2}
 FACTS_EXTRACTORS = ("claude", "llama-server")
 FACT_TEXT_MAX_CHARS = 400
+FACT_KINDS = ("decision", "change", "problem", "preference", "question")
+FACT_CONCEPTS_MAX = 8
+FACT_CONCEPT_MAX_CHARS = 64
+FACT_FILES_MAX = 32
+FACT_FILE_MAX_CHARS = 300
+FACT_COMMITS_MAX = 16
 _FACTS_INPUT_KEYS = ("schema", "session_id", "source_sha256", "extractor", "model", "facts")
 _FACT_KEYS = ("date", "text", "exchange_id")
+_FACT_V2_OPTIONAL_KEYS = ("kind", "concepts", "anchors")
+_FACT_ANCHOR_KEYS = ("files", "commits")
+_COMMIT_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+_DRIVE_RE = re.compile(r"[A-Za-z]:")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _FACT_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _EXCHANGE_LINE_RE = re.compile(r"^<!-- vg:exchange id=(?P<id>[^\s]+)(?: |-->)", re.MULTILINE)
@@ -1513,14 +1529,17 @@ def attach_session_facts(
         if not facts:
             raise _FactsRejected("no_facts", "facts is empty.")
         exchange_ids = _part_exchange_ids(body)
+        v2 = data["schema"] == FACTS_INPUT_SCHEMA_V2
         for number, fact in enumerate(facts, start=1):
-            _check_fact(number, fact, exchange_ids)
+            _check_fact(number, fact, exchange_ids, v2)
+            if v2:
+                _check_fact_v2(number, fact)
     except _FactsRejected as rejected:
         return AttachFactsResult("rejected", relative, rejected.reason, detail=rejected.detail)
 
     generated_at = (now or _utc_now()).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     attachment_frontmatter: dict[str, Any] = {
-        "schema": FACTS_SCHEMA,
+        "schema": _FACTS_SCHEMA_BY_INPUT[data["schema"]],
         "agent": frontmatter["agent"],
         "session_id": frontmatter["session_id"],
         "part": frontmatter["part"],
@@ -1531,11 +1550,30 @@ def attach_session_facts(
         "generated_at": generated_at,
         "fact_count": len(facts),
     }
-    lines = "".join(f"- {fact['date']} {fact['text']} (exchange {fact['exchange_id']})\n" for fact in facts)
+    lines = "".join(_fact_lines(fact, v2) for fact in facts)
     text = _facts_text(attachment_frontmatter, lines)
     if not write_new_file(attachment, text):
         return AttachFactsResult("exists", relative, facts=_existing_fact_count(attachment))
     return AttachFactsResult("written", relative, facts=len(facts))
+
+
+def _fact_lines(fact: dict[str, Any], v2: bool) -> str:
+    """One fact line. A v2 fact adds indented kind, concepts, files and commits lines, each only when present.
+
+    A v1 input keeps writing the v1 line alone, even when a fact carries keys v1 does not know.
+    """
+    lines = [f"- {fact['date']} {fact['text']} (exchange {fact['exchange_id']})"]
+    if not v2:
+        return lines[0] + "\n"
+    if fact.get("kind"):
+        lines.append(f"  - kind: {fact['kind']}")
+    if fact.get("concepts"):
+        lines.append(f"  - concepts: {', '.join(fact['concepts'])}")
+    anchors = fact.get("anchors") or {}
+    for key in _FACT_ANCHOR_KEYS:
+        if anchors.get(key):
+            lines.append(f"  - {key}: {', '.join(anchors[key])}")
+    return "".join(line + "\n" for line in lines)
 
 
 # Contract section 3 always writes these values in double quotes. They hold no quote or backslash.
@@ -1609,8 +1647,10 @@ def _read_facts_input(path: Path) -> dict[str, Any]:
     missing = [key for key in _FACTS_INPUT_KEYS if key not in data]
     if missing:
         raise _FactsRejected("bad_input", f"Missing keys: {', '.join(missing)}.")
-    if data["schema"] != FACTS_INPUT_SCHEMA:
-        raise _FactsRejected("bad_input", f"schema {data['schema']!r} is not {FACTS_INPUT_SCHEMA}.")
+    if data["schema"] not in _FACTS_SCHEMA_BY_INPUT:
+        raise _FactsRejected(
+            "bad_input", f"schema {data['schema']!r} is not {FACTS_INPUT_SCHEMA} or {FACTS_INPUT_SCHEMA_V2}."
+        )
     for key in ("session_id", "source_sha256", "extractor", "model"):
         if not isinstance(data[key], str) or not data[key]:
             raise _FactsRejected("bad_input", f"{key} must be a non-empty string.")
@@ -1625,7 +1665,34 @@ def _read_facts_input(path: Path) -> dict[str, Any]:
     for number, fact in enumerate(data["facts"], start=1):
         if not isinstance(fact, dict) or any(not isinstance(fact.get(key), str) for key in _FACT_KEYS):
             raise _FactsRejected("bad_input", f"Fact {number} must be an object with string date, text and exchange_id.")
+        if data["schema"] == FACTS_INPUT_SCHEMA_V2:
+            _check_fact_v2_shape(number, fact)
     return data
+
+
+def _check_fact_v2_shape(number: int, fact: dict[str, Any]) -> None:
+    """Input /2: only known keys, and each optional value has the right JSON type."""
+    unknown = sorted(set(fact) - set(_FACT_KEYS) - set(_FACT_V2_OPTIONAL_KEYS))
+    if unknown:
+        raise _FactsRejected("bad_input", f"Fact {number} has unknown keys: {', '.join(unknown)}.")
+    if "kind" in fact and not isinstance(fact["kind"], str):
+        raise _FactsRejected("bad_input", f"Fact {number} kind must be a string.")
+    if "concepts" in fact and not _is_string_list(fact["concepts"]):
+        raise _FactsRejected("bad_input", f"Fact {number} concepts must be a list of strings.")
+    if "anchors" in fact:
+        anchors = fact["anchors"]
+        if not isinstance(anchors, dict):
+            raise _FactsRejected("bad_input", f"Fact {number} anchors must be an object.")
+        unknown = sorted(set(anchors) - set(_FACT_ANCHOR_KEYS))
+        if unknown:
+            raise _FactsRejected("bad_input", f"Fact {number} anchors has unknown keys: {', '.join(unknown)}.")
+        for key in _FACT_ANCHOR_KEYS:
+            if key in anchors and not _is_string_list(anchors[key]):
+                raise _FactsRejected("bad_input", f"Fact {number} anchors.{key} must be a list of strings.")
+
+
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 def _part_exchange_ids(body: str) -> set[str]:
@@ -1636,13 +1703,19 @@ def _part_exchange_ids(body: str) -> set[str]:
     return ids
 
 
-def _check_fact(number: int, fact: dict[str, str], exchange_ids: set[str]) -> None:
-    """Contract section 4 order: unknown_exchange, bad_text, bad_date, secret."""
+def _check_fact(number: int, fact: dict[str, str], exchange_ids: set[str], v2: bool = False) -> None:
+    """Contract section 4 order: unknown_exchange, bad_text, bad_date, secret.
+
+    v2 also rejects text that str.splitlines breaks (\\x0b, \\x0c, \\x1c-\\x1e, \\x85, U+2028, U+2029), so a fact
+    cannot forge an indented kind, concepts, files or commits line. v1 keeps its old text rule.
+    """
     if fact["exchange_id"] not in exchange_ids:
         raise _FactsRejected("unknown_exchange", f"Fact {number} exchange_id {fact['exchange_id']!r} is not in the part.")
     text = fact["text"]
     if not text or text != text.strip() or "\n" in text or "\r" in text:
         raise _FactsRejected("bad_text", f"Fact {number} text is empty, has a line break or leading/trailing spaces.")
+    if v2 and len(text.splitlines()) != 1:
+        raise _FactsRejected("bad_text", f"Fact {number} text has a line separator.")
     if len(text) > FACT_TEXT_MAX_CHARS:
         raise _FactsRejected("bad_text", f"Fact {number} text has {len(text)} characters (max {FACT_TEXT_MAX_CHARS}).")
     value = fact["date"]
@@ -1654,3 +1727,61 @@ def _check_fact(number: int, fact: dict[str, str], exchange_ids: set[str]) -> No
         raise _FactsRejected("bad_date", f"Fact {number} date {value!r} is not a real YYYY-MM-DD date.") from None
     if redact(text)[1]:
         raise _FactsRejected("secret", f"Fact {number} text holds a value the vault redaction rules hide.")
+
+
+def _check_fact_v2(number: int, fact: dict[str, Any]) -> None:
+    """Contract v2 section 4 order after the v1 checks: bad_kind, bad_concept, bad_anchor, secret."""
+    if "kind" in fact and fact["kind"] not in FACT_KINDS:
+        raise _FactsRejected("bad_kind", f"Fact {number} kind {fact['kind']!r} is not one of {', '.join(FACT_KINDS)}.")
+    concepts = fact.get("concepts", [])
+    if len(concepts) > FACT_CONCEPTS_MAX:
+        raise _FactsRejected("bad_concept", f"Fact {number} has {len(concepts)} concepts (max {FACT_CONCEPTS_MAX}).")
+    for concept in concepts:
+        if not _is_list_item(concept, FACT_CONCEPT_MAX_CHARS):
+            raise _FactsRejected(
+                "bad_concept",
+                f"Fact {number} concept {concept!r} is empty, longer than {FACT_CONCEPT_MAX_CHARS} characters, "
+                "or has a comma, control character or leading/trailing spaces.",
+            )
+    if len(set(concepts)) != len(concepts):
+        raise _FactsRejected("bad_concept", f"Fact {number} repeats a concept.")
+    anchors = fact.get("anchors", {})
+    files = anchors.get("files", [])
+    commits = anchors.get("commits", [])
+    if len(files) > FACT_FILES_MAX or len(commits) > FACT_COMMITS_MAX:
+        raise _FactsRejected(
+            "bad_anchor", f"Fact {number} has more than {FACT_FILES_MAX} files or {FACT_COMMITS_MAX} commits."
+        )
+    for path in files:
+        if not _is_repo_relative_path(path):
+            raise _FactsRejected("bad_anchor", f"Fact {number} file {path!r} is not a repository-relative POSIX path.")
+    for commit in commits:
+        if not _COMMIT_RE.fullmatch(commit):
+            raise _FactsRejected(
+                "bad_anchor", f"Fact {number} commit {commit!r} is not a full lowercase 40 or 64 character hex id."
+            )
+    if len(set(files)) != len(files) or len(set(commits)) != len(commits):
+        raise _FactsRejected("bad_anchor", f"Fact {number} repeats a file or commit.")
+    for value in (*concepts, *files):
+        if redact(value)[1]:
+            raise _FactsRejected("secret", f"Fact {number} concept or file holds a value the vault redaction rules hide.")
+
+
+def _is_list_item(value: str, max_chars: int) -> bool:
+    """A value written in a ', '-separated attachment line: non-empty, trimmed, no comma, and no control or
+    line separator character (Unicode categories Cc, Zl, Zp, which include every character str.splitlines breaks on)."""
+    return (
+        0 < len(value) <= max_chars
+        and value == value.strip()
+        and "," not in value
+        and not any(unicodedata.category(char) in ("Cc", "Zl", "Zp") for char in value)
+    )
+
+
+def _is_repo_relative_path(path: str) -> bool:
+    """A path relative to a git repository root: a/b.py. Never /abs, ~/x, C:x, a\\b, ./a, a/../b or a//b."""
+    if not _is_list_item(path, FACT_FILE_MAX_CHARS) or "\\" in path:
+        return False
+    if path.startswith(("/", "~")) or _DRIVE_RE.match(path):
+        return False
+    return all(segment not in ("", ".", "..") for segment in path.split("/"))

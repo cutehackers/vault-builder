@@ -254,7 +254,7 @@ class AttachFactsTests(unittest.TestCase):
         self._assert_rejected("session_id_mismatch", self._input(session_id="other-session"))
 
     def test_bad_input_wrong_schema(self):
-        self._assert_rejected("bad_input", self._input(schema="vault-session-facts-input/2"))
+        self._assert_rejected("bad_input", self._input(schema="vault-session-facts-input/3"))
 
     def test_bad_input_missing_key(self):
         data = self._input()
@@ -297,6 +297,195 @@ class AttachFactsTests(unittest.TestCase):
         for text in ("배포 키는 password=hunter2abc 이다.", "토큰 ghp_abcdefghijklmnopqrstuvwxyz0123 사용"):
             with self.subTest(text=text):
                 self._assert_rejected("secret", self._input(facts=self._fact(text=text)))
+
+
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+class AttachFactsV2Tests(AttachFactsTests):
+    """Input vault-session-facts-input/2 writes vault-session-facts/v2. Every v1 test above also runs here."""
+
+    def _input(self, **overrides: object) -> dict:
+        data = super()._input(**overrides)
+        if "schema" not in overrides:
+            data["schema"] = "vault-session-facts-input/2"
+        return data
+
+    def _v2_fact(self, **overrides: object) -> list:
+        fact: dict = {
+            "date": "2023-05-20",
+            "text": "사용자는 사실 계약 v2를 승인했다.",
+            "exchange_id": "x0001",
+            "kind": "decision",
+            "concepts": ["사실 계약", "session-facts"],
+            "anchors": {"files": ["tools/wiki/cli.py", "docs/usage.md"], "commits": [COMMIT]},
+        }
+        fact.update(overrides)
+        return [fact]
+
+    def test_written_attachment_follows_contract_format(self):
+        from tools.wiki.lib.session_capture import attach_session_facts
+
+        facts = self._v2_fact() + [
+            {"date": "2023-05-21", "text": "The user thanked the assistant.", "exchange_id": "x0002"},
+            {"date": "2023-05-21", "text": "Only a kind.", "exchange_id": "x0002", "kind": "preference",
+             "concepts": [], "anchors": {"files": [], "commits": []}},
+        ]
+        result = attach_session_facts(self.root, Path(PART_REL), self._write_input(self._input(facts=facts)), now=NOW)
+
+        self.assertEqual(("written", FACTS_REL, None, 3), (result.status, result.path, result.reason, result.facts))
+        self.assertEqual(
+            "---\n"
+            "schema: vault-session-facts/v2\n"
+            "agent: claude-code\n"
+            f'session_id: "{SESSION_ID}"\n'
+            "part: 1\n"
+            f"source: {PART_REL}\n"
+            f'source_sha256: "{_sha(self.part)}"\n'
+            "extractor: claude\n"
+            "model: claude-sonnet-5-5\n"
+            'generated_at: "2026-11-16T03:00:00Z"\n'
+            "fact_count: 3\n"
+            "---\n"
+            "\n"
+            "- 2023-05-20 사용자는 사실 계약 v2를 승인했다. (exchange x0001)\n"
+            "  - kind: decision\n"
+            "  - concepts: 사실 계약, session-facts\n"
+            "  - files: tools/wiki/cli.py, docs/usage.md\n"
+            f"  - commits: {COMMIT}\n"
+            "- 2023-05-21 The user thanked the assistant. (exchange x0002)\n"
+            "- 2023-05-21 Only a kind. (exchange x0002)\n"
+            "  - kind: preference\n",
+            self.attachment.read_text(encoding="utf-8"),
+        )
+
+    def test_v1_input_still_writes_v1_attachment(self):
+        code, result = self._attach(self._input(schema="vault-session-facts-input/1"))
+        self.assertEqual(0, code, result)
+        self.assertIn("schema: vault-session-facts/v1\n", self.attachment.read_text(encoding="utf-8"))
+
+    def test_every_kind_is_accepted(self):
+        from tools.wiki.lib.session_capture import FACT_KINDS, attach_session_facts
+
+        self.assertEqual(("decision", "change", "problem", "preference", "question"), FACT_KINDS)
+        for kind in FACT_KINDS:
+            with self.subTest(kind=kind):
+                self.attachment.unlink(missing_ok=True)
+                result = attach_session_facts(self.root, Path(PART_REL), self._write_input(self._input(facts=self._v2_fact(kind=kind))))
+                self.assertEqual("written", result.status, result.detail)
+
+    def test_sha256_commit_and_limits_are_accepted(self):
+        anchors = {"files": [f"src/f{i}.py" for i in range(32)], "commits": ["a" * 64] + [f"{i:040x}" for i in range(15)]}
+        concepts = [f"c{i}" for i in range(7)] + ["가" * 64]
+        code, result = self._attach(self._input(facts=self._v2_fact(anchors=anchors, concepts=concepts)))
+        self.assertEqual(0, code, result)
+
+    def test_bad_input_for_v2_shapes(self):
+        cases = {
+            "unknown fact key": self._v2_fact(confidence="high"),
+            "kind not string": self._v2_fact(kind=1),
+            "concepts not list": self._v2_fact(concepts="a, b"),
+            "concept not string": self._v2_fact(concepts=["a", 2]),
+            "anchors not object": self._v2_fact(anchors=["tools/wiki/cli.py"]),
+            "unknown anchor key": self._v2_fact(anchors={"symbols": ["f"]}),
+            "files not list": self._v2_fact(anchors={"files": "a.py"}),
+            "commit not string": self._v2_fact(anchors={"commits": [1]}),
+        }
+        for name, facts in cases.items():
+            with self.subTest(name=name):
+                self._assert_rejected("bad_input", self._input(facts=facts))
+
+    def test_bad_kind(self):
+        for kind in ("", "Decision", "rule", "decision "):
+            with self.subTest(kind=kind):
+                self._assert_rejected("bad_kind", self._input(facts=self._v2_fact(kind=kind)))
+
+    def test_bad_concept(self):
+        cases = {
+            "empty": [""],
+            "comma": ["a,b"],
+            "spaces": [" a"],
+            "line break": ["a\nb"],
+            "tab": ["a\tb"],
+            "too long": ["가" * 65],
+            "too many": [f"c{i}" for i in range(9)],
+            "repeated": ["a", "a"],
+        }
+        for name, concepts in cases.items():
+            with self.subTest(name=name):
+                self._assert_rejected("bad_concept", self._input(facts=self._v2_fact(concepts=concepts)))
+
+    def test_bad_anchor(self):
+        cases = {
+            "absolute": {"files": ["/Users/me/repo/a.py"]},
+            "home": {"files": ["~/repo/a.py"]},
+            "drive": {"files": ["C:/repo/a.py"]},
+            "backslash": {"files": ["src\\a.py"]},
+            "dot": {"files": ["./a.py"]},
+            "dotdot": {"files": ["src/../a.py"]},
+            "empty segment": {"files": ["src//a.py"]},
+            "trailing slash": {"files": ["src/"]},
+            "comma": {"files": ["a,b.py"]},
+            "empty": {"files": [""]},
+            "too long": {"files": ["a" * 301]},
+            "too many files": {"files": [f"f{i}.py" for i in range(33)]},
+            "repeated file": {"files": ["a.py", "a.py"]},
+            "short commit": {"commits": ["0123456"]},
+            "upper commit": {"commits": [COMMIT.upper()]},
+            "not hex": {"commits": ["g" * 40]},
+            "too many commits": {"commits": [f"{i:040x}" for i in range(17)]},
+            "repeated commit": {"commits": [COMMIT, COMMIT]},
+        }
+        for name, anchors in cases.items():
+            with self.subTest(name=name):
+                self._assert_rejected("bad_anchor", self._input(facts=self._v2_fact(anchors=anchors)))
+
+    def test_secret_in_concept_or_file(self):
+        for fact in (
+            self._v2_fact(concepts=["password=hunter2abc"]),
+            self._v2_fact(anchors={"files": ["ghp_abcdefghijklmnopqrstuvwxyz0123.txt"]}),
+        ):
+            with self.subTest(fact=fact[0]):
+                self._assert_rejected("secret", self._input(facts=fact))
+
+    def test_line_separators_cannot_forge_sub_lines(self):
+        separators = ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ")
+        for separator in separators:
+            with self.subTest(separator=repr(separator)):
+                self._assert_rejected(
+                    "bad_text", self._input(facts=self._v2_fact(text=f"Ok.{separator}  - kind: problem"))
+                )
+                self._assert_rejected("bad_concept", self._input(facts=self._v2_fact(concepts=[f"a{separator}b"])))
+                self._assert_rejected(
+                    "bad_anchor", self._input(facts=self._v2_fact(anchors={"files": [f"a{separator}b.py"]}))
+                )
+
+    def test_v1_text_rule_is_unchanged(self):
+        code, result = self._attach(self._input(schema="vault-session-facts-input/1", facts=self._fact(text="a\x0bb")))
+        self.assertEqual(0, code, result)
+
+    def test_null_values_are_bad_input(self):
+        for fact in (self._v2_fact(kind=None), self._v2_fact(concepts=None), self._v2_fact(anchors={"files": None})):
+            with self.subTest(fact=fact[0]):
+                self._assert_rejected("bad_input", self._input(facts=fact))
+
+    def test_reason_code_order(self):
+        cases = (
+            ("bad_kind", self._v2_fact(kind="rule", concepts=[""])),
+            ("bad_concept", self._v2_fact(concepts=[""], anchors={"files": ["/abs"]})),
+            ("secret", self._v2_fact(text="password=hunter2abc 이다.", kind="rule")),
+            ("bad_concept", self._v2_fact(concepts=[""]) + self._fact(exchange_id="x0003")),
+        )
+        for reason, facts in cases:
+            with self.subTest(reason=reason):
+                self._assert_rejected(reason, self._input(facts=facts))
+
+    def test_v1_input_ignores_v2_keys_like_before(self):
+        code, result = self._attach(self._input(schema="vault-session-facts-input/1", facts=self._v2_fact(kind="nope")))
+        self.assertEqual(0, code, result)
+        text = self.attachment.read_text(encoding="utf-8")
+        self.assertIn("schema: vault-session-facts/v1\n", text)
+        self.assertNotIn("kind", text)
 
 
 class FactsNotSessionFilesTests(unittest.TestCase):
